@@ -1,0 +1,82 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 m-0">Devices</h2>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=add')">Add Device</button>
+    <a class="btn btn-outline-secondary" href="/export-csv">Export</a>
+    <form
+      hx-post="/htmx/devices/actions/import_csv"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-encoding="multipart/form-data"
+      hx-include="#devices-filter-form"
+      class="d-flex gap-2 align-items-center m-0"
+    >
+      <input class="form-control form-control-sm" type="file" name="csv_file" accept=".csv" required />
+      <button class="btn btn-outline-secondary btn-sm" type="submit">Import</button>
+    </form>
+  </div>
+</div>
+
+<form
+  id="devices-filter-form"
+  class="card mb-3"
+  hx-get="/htmx/devices/partials/table"
+  hx-target="#devices-table-container"
+  hx-swap="innerHTML"
+  hx-indicator="#global-loading"
+>
+  <div class="card-body py-2">
+    <div class="row g-2">
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">ID</label>
+        <input class="form-control form-control-sm" name="device_filter_id" value="{{ filters.device_filter_id }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Source</label>
+        <input class="form-control form-control-sm" name="device_filter_source" value="{{ filters.device_filter_source }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Host</label>
+        <input class="form-control form-control-sm" name="device_filter_host" value="{{ filters.device_filter_host }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-1">
+        <label class="form-label small mb-1">Port</label>
+        <input class="form-control form-control-sm" name="device_filter_port" value="{{ filters.device_filter_port }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-1">
+        <label class="form-label small mb-1">Unit</label>
+        <input class="form-control form-control-sm" name="device_filter_unit" value="{{ filters.device_filter_unit }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">SNMP Community</label>
+        <input class="form-control form-control-sm" name="device_filter_snmp" value="{{ filters.device_filter_snmp }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-1">
+        <label class="form-label small mb-1">Poll</label>
+        <input class="form-control form-control-sm" name="device_filter_poll" value="{{ filters.device_filter_poll }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-1">
+        <label class="form-label small mb-1">Name</label>
+        <input class="form-control form-control-sm" name="device_filter_name" value="{{ filters.device_filter_name }}" />
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-2">
+      <button class="btn btn-sm btn-primary" type="submit">Apply Filters</button>
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        type="button"
+        @click="$el.form.reset(); htmx.ajax('GET','/htmx/devices/partials/table',{target:'#devices-table-container',swap:'innerHTML',indicator:'#global-loading'})"
+      >Clear</button>
+    </div>
+  </div>
+</form>
+
+<div
+  id="devices-table-container"
+  hx-get="/htmx/devices/partials/table"
+  hx-trigger="load, devices-refresh from:body"
+  hx-include="#devices-filter-form"
+  hx-swap="innerHTML"
+  hx-indicator="#global-loading"
+>{{ devices_table_html | safe }}</div>

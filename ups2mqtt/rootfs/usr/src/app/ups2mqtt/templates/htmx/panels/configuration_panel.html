@@ -1,0 +1,95 @@
+<div id="configuration-panel" class="d-flex flex-column gap-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2 class="h5 m-0">Configuration</h2>
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      hx-get="/htmx/devices/partials/panel/configuration"
+      hx-target="#admin-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+    >Refresh</button>
+  </div>
+
+  <div class="card">
+    <div class="card-body d-flex flex-column gap-3">
+      <h3 class="h6 m-0">Application Timezone</h3>
+      <p class="text-muted small mb-0">
+        This timezone is used for UI timestamp formatting (logs and metrics displays).
+        Raw stored timestamps and API payload contracts remain unchanged.
+      </p>
+      <form
+        class="d-flex flex-wrap gap-2 align-items-end"
+        hx-post="/htmx/devices/actions/configuration"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <div>
+          <label class="form-label small mb-1">Timezone</label>
+          <select class="form-select form-select-sm" name="timezone" style="min-width: 320px; max-width: 100%;">
+            {% for tz in timezone_options %}
+            <option value="{{ tz }}" {% if tz == timezone_value %}selected{% endif %}>{{ tz }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <input type="hidden" name="action" value="set_timezone"/>
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      </form>
+
+      <hr class="my-1"/>
+
+      <h3 class="h6 m-0">Theme</h3>
+      <p class="text-muted small mb-0">
+        Controls the new admin UI appearance.
+      </p>
+      <form
+        class="d-flex flex-wrap gap-2 align-items-end"
+        hx-post="/htmx/devices/actions/configuration"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <input type="hidden" name="action" value="set_theme"/>
+        <div>
+          <label class="form-label small mb-1">Theme</label>
+          <select
+            class="form-select form-select-sm"
+            name="theme"
+            style="width:auto"
+            onchange="window.ups2mqttApplyThemeChoice && window.ups2mqttApplyThemeChoice(this.value)"
+          >
+            {% for theme in theme_options %}
+            <option value="{{ theme }}" {% if theme_value == theme %}selected{% endif %}>{{ theme }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      </form>
+
+      <hr class="my-1"/>
+
+      <h3 class="h6 m-0">Application Debug Level</h3>
+      <p class="text-muted small mb-0">
+        Controls runtime logging verbosity for the running service instance.
+      </p>
+      <form
+        class="d-flex flex-wrap gap-2 align-items-end"
+        hx-post="/htmx/devices/actions/configuration"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <input type="hidden" name="action" value="set_log_level"/>
+        <div>
+          <label class="form-label small mb-1">Set Runtime Log Level</label>
+          <select class="form-select form-select-sm" style="width:auto" name="runtime_log_level">
+            {% for level in runtime_log_levels %}
+            <option value="{{ level }}" {% if runtime_log_level == level %}selected{% endif %}>{{ level }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+      </form>
+    </div>
+  </div>
+</div>

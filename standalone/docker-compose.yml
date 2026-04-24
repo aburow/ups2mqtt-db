@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 github.com/aburow
+# SPDX-License-Identifier: GPL-3.0-only
+---
+
+services:
+  ups-unified:
+    build:
+      context: ..
+      dockerfile: standalone/Dockerfile
+    container_name: ups-unified
+    restart: unless-stopped
+    ports:
+      - "8099:8099"
+    environment:
+      UPS_UNIFIED_MQTT_HOST: ${UPS_UNIFIED_MQTT_HOST:-}
+      UPS_UNIFIED_MQTT_PORT: ${UPS_UNIFIED_MQTT_PORT:-}
+      UPS_UNIFIED_MQTT_USERNAME: ${UPS_UNIFIED_MQTT_USERNAME:-}
+      UPS_UNIFIED_MQTT_PASSWORD: ${UPS_UNIFIED_MQTT_PASSWORD:-}
+      UPS_UNIFIED_HA_URL: ${UPS_UNIFIED_HA_URL:-}
+      UPS_UNIFIED_HA_TOKEN: ${UPS_UNIFIED_HA_TOKEN:-}
+      UPS_UNIFIED_LOG_LEVEL: ${UPS_UNIFIED_LOG_LEVEL:-INFO}
+      UPS_AUDIT_SYSLOG_ENABLED: ${UPS_AUDIT_SYSLOG_ENABLED:-false}
+      UPS_AUDIT_SYSLOG_HOST: ${UPS_AUDIT_SYSLOG_HOST:-127.0.0.1}
+      UPS_AUDIT_SYSLOG_PORT: ${UPS_AUDIT_SYSLOG_PORT:-514}
+      DISABLE_PROFILE_PROTECTION: ${DISABLE_PROFILE_PROTECTION:-}
+    volumes:
+      - ./options.json:/usr/src/app/options.json:ro
+      - ./data:/data
+      - ../../apc-modbus-ha:/apps/apc-modbus-ha:ro
+      - ../../ups-snmp-ha:/apps/ups-snmp-ha:ro
+      - ../../cyberpower-modbus-ha:/apps/cyberpower-modbus-ha:ro

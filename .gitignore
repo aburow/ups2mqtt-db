@@ -1,0 +1,15 @@
+# Runtime/env
+.env
+standalone/.env
+
+# Standalone runtime state
+standalone/data/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.tools/

@@ -1,0 +1,97 @@
+<tr id="device-row-{{ device.id }}">
+  <td>
+    <button class="btn btn-sm btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=edit&id={{ device.id }}')">{{ device.id }}</button>
+  </td>
+  <td>
+    {% if device.profile_uid and profile_name_by_uid.get(device.profile_uid) %}
+      {{ profile_name_by_uid.get(device.profile_uid) }}
+    {% elif device.profile_uid %}
+      <code>{{ device.profile_uid }}</code>
+    {% else %}
+      <span class="text-muted">Legacy Local</span>
+    {% endif %}
+  </td>
+  <td><span class="badge text-bg-light">{{ (device.profile_mode or "local")|upper }}</span></td>
+  <td>{{ device.source }}</td>
+  <td>
+    {% set url = device.host if device.host.startswith('http') else 'http://' ~ device.host %}
+    <a href="{{ url }}" target="_blank" rel="noopener noreferrer">
+      {{ device.host }}
+    </a>
+  </td>
+  <td>{{ device.port }}</td>
+  <td>{{ device.unit_id }}</td>
+  <td>{{ device.snmp_community }}</td>
+  <td>{{ device.poll_interval or "" }}</td>
+  <td>{{ device.name or "" }}</td>
+  <td>
+    <button
+      class="btn btn-sm {{ 'btn-success' if device.debug_logging else 'btn-outline-secondary' }}"
+      hx-post="/htmx/devices/actions/toggle"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-include="#devices-filter-form"
+      hx-vals='{"id":"{{ device.id }}","field":"debug_logging"}'
+      hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='On'?'Off':'On'); this.classList.add('disabled')"
+      hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
+      hx-on:htmx:afterRequest="this.classList.remove('disabled')"
+    >{{ "On" if device.debug_logging else "Off" }}</button>
+  </td>
+  <td>
+    <button
+      class="btn btn-sm {{ 'btn-success' if device.keep_connection_open else 'btn-outline-secondary' }}"
+      hx-post="/htmx/devices/actions/toggle"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-include="#devices-filter-form"
+      hx-vals='{"id":"{{ device.id }}","field":"keep_connection_open"}'
+      hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='On'?'Off':'On'); this.classList.add('disabled')"
+      hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
+      hx-on:htmx:afterRequest="this.classList.remove('disabled')"
+    >{{ "On" if device.keep_connection_open else "Off" }}</button>
+  </td>
+  <td>
+    <button
+      class="btn btn-sm {{ 'btn-success' if device.discovery_enabled else 'btn-outline-secondary' }}"
+      hx-post="/htmx/devices/actions/toggle"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-include="#devices-filter-form"
+      hx-vals='{"id":"{{ device.id }}","field":"discovery_enabled"}'
+      hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='On'?'Off':'On'); this.classList.add('disabled')"
+      hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
+      hx-on:htmx:afterRequest="this.classList.remove('disabled')"
+    >{{ "On" if device.discovery_enabled else "Off" }}</button>
+  </td>
+  <td>
+    <button
+      class="btn btn-sm {{ 'btn-success' if device.polling_enabled else 'btn-outline-secondary' }}"
+      hx-post="/htmx/devices/actions/toggle"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-include="#devices-filter-form"
+      hx-vals='{"id":"{{ device.id }}","field":"polling_enabled"}'
+      hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='On'?'Off':'On'); this.classList.add('disabled')"
+      hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
+      hx-on:htmx:afterRequest="this.classList.remove('disabled')"
+    >{{ "On" if device.polling_enabled else "Off" }}</button>
+  </td>
+  <td>
+    <div class="d-flex gap-2">
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        hx-post="/htmx/devices/actions/reinitialize"
+        hx-target="#devices-table-container"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+        hx-include="#devices-filter-form"
+        hx-vals='{"id":"{{ device.id }}"}'
+      >Reinitialize</button>
+      <button class="btn btn-sm btn-danger" @click="requestDelete('{{ device.id }}')">Delete</button>
+    </div>
+  </td>
+</tr>

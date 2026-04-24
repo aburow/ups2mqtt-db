@@ -1,0 +1,34 @@
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>PROFILE</th>
+            <th>Mode</th>
+            <th>DRIVER</th>
+            <th>Host</th>
+            <th>Port</th>
+            <th>Unit</th>
+            <th>SNMP Community</th>
+            <th>Poll</th>
+            <th>Name</th>
+            <th>Logging</th>
+            <th>Keep Conn</th>
+            <th>Discovery</th>
+            <th>Polling</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for device in devices %}
+            {% include "htmx/device_row.html" %}
+          {% else %}
+            <tr><td colspan="15" class="text-muted p-3">No devices configured.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

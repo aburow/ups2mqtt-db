@@ -1,0 +1,3692 @@
+{
+  "framework_metadata": {
+    "framework_contract_version": "2.0.0",
+    "framework_version": "0.1.0",
+    "generated_at": "1970-01-01T00:00:00Z",
+    "profile_contract_version": "2.0.0",
+    "source_hash": "6b6892cd119295c8532838da6e4a3c7f54355a33587ba84f3d1e506d741404fe"
+  },
+  "generated_from": {
+    "apc_modbus_ha": "/home/dev/projects/apc-modbus-ha/custom_components/apc_modbus",
+    "cyberpower_modbus_ha": "/home/dev/projects/cyberpower-modbus-ha/custom_components/cyberpower_modbus",
+    "ups_snmp_ha": "/home/dev/projects/ups-snmp-ha/custom_components/ups_snmp_ha"
+  },
+  "metric_contracts": {
+    "battery_capacity": {
+      "canonical_unit": "%",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "%"
+      },
+      "value_kind": "float"
+    },
+    "battery_charge": {
+      "canonical_unit": "%",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "%"
+      },
+      "value_kind": "float"
+    },
+    "battery_low": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "bool"
+    },
+    "device_real_power": {
+      "canonical_unit": "W",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "W"
+      },
+      "value_kind": "float"
+    },
+    "input_voltage": {
+      "canonical_unit": "V",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "V"
+      },
+      "value_kind": "float"
+    },
+    "input_voltage_l1": {
+      "canonical_unit": "V",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "V"
+      },
+      "value_kind": "float"
+    },
+    "load_on_source": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "bool"
+    },
+    "model": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "str"
+    },
+    "output_load": {
+      "canonical_unit": "%",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "%"
+      },
+      "value_kind": "float"
+    },
+    "output_load_percent": {
+      "canonical_unit": "%",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "%"
+      },
+      "value_kind": "float"
+    },
+    "phase_l1_voltage": {
+      "canonical_unit": "V",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "V"
+      },
+      "value_kind": "float"
+    },
+    "replace_battery": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "bool"
+    },
+    "runtime_remaining": {
+      "canonical_unit": "s",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "s"
+      },
+      "value_kind": "float"
+    },
+    "serial_number": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "str"
+    },
+    "sw_version": {
+      "canonical_unit": "",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": ""
+      },
+      "value_kind": "str"
+    },
+    "utility_voltage": {
+      "canonical_unit": "V",
+      "default_normalization": {
+        "multiplier": 1.0,
+        "offset": 0.0,
+        "unit": "V"
+      },
+      "value_kind": "float"
+    }
+  },
+  "profiles": {
+    "apc_modbus_rack_pdu": {
+      "protocol": "modbus",
+      "registers": [
+        {
+          "address": 158,
+          "count": 1,
+          "key": "num_phases",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 159,
+          "count": 1,
+          "key": "num_metered_phases",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 160,
+          "count": 1,
+          "key": "num_banks",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 161,
+          "count": 1,
+          "key": "num_outlets",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 162,
+          "count": 1,
+          "key": "num_metered_outlets",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 207,
+          "count": 1,
+          "key": "device_real_power",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 208,
+          "count": 1,
+          "key": "device_apparent_power",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 209,
+          "count": 1,
+          "key": "device_power_factor",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 210,
+          "count": 2,
+          "key": "device_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 212,
+          "count": 1,
+          "key": "device_load_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 667,
+          "count": 1,
+          "key": "phase_L1_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 668,
+          "count": 1,
+          "key": "phase_L1_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 669,
+          "count": 1,
+          "key": "phase_L1_real_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 670,
+          "count": 1,
+          "key": "phase_L1_apparent_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 671,
+          "count": 1,
+          "key": "phase_L1_power_factor",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 672,
+          "count": 1,
+          "key": "phase_L1_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 689,
+          "count": 1,
+          "key": "phase_L2_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 690,
+          "count": 1,
+          "key": "phase_L2_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 691,
+          "count": 1,
+          "key": "phase_L2_real_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 692,
+          "count": 1,
+          "key": "phase_L2_apparent_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 693,
+          "count": 1,
+          "key": "phase_L2_power_factor",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 694,
+          "count": 1,
+          "key": "phase_L2_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 711,
+          "count": 1,
+          "key": "phase_L3_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 712,
+          "count": 1,
+          "key": "phase_L3_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 713,
+          "count": 1,
+          "key": "phase_L3_real_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 714,
+          "count": 1,
+          "key": "phase_L3_apparent_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 715,
+          "count": 1,
+          "key": "phase_L3_power_factor",
+          "scale": 100,
+          "type": "int16"
+        },
+        {
+          "address": 716,
+          "count": 1,
+          "key": "phase_L3_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1786,
+          "count": 1,
+          "key": "outlet_1_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1810,
+          "count": 1,
+          "key": "outlet_1_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1794,
+          "count": 2,
+          "key": "outlet_1_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1818,
+          "count": 1,
+          "key": "outlet_1_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1787,
+          "count": 1,
+          "key": "outlet_2_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1811,
+          "count": 1,
+          "key": "outlet_2_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1796,
+          "count": 2,
+          "key": "outlet_2_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1819,
+          "count": 1,
+          "key": "outlet_2_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1788,
+          "count": 1,
+          "key": "outlet_3_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1812,
+          "count": 1,
+          "key": "outlet_3_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1798,
+          "count": 2,
+          "key": "outlet_3_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1820,
+          "count": 1,
+          "key": "outlet_3_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1789,
+          "count": 1,
+          "key": "outlet_4_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1813,
+          "count": 1,
+          "key": "outlet_4_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1800,
+          "count": 2,
+          "key": "outlet_4_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1821,
+          "count": 1,
+          "key": "outlet_4_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1790,
+          "count": 1,
+          "key": "outlet_5_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1814,
+          "count": 1,
+          "key": "outlet_5_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1802,
+          "count": 2,
+          "key": "outlet_5_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1822,
+          "count": 1,
+          "key": "outlet_5_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1791,
+          "count": 1,
+          "key": "outlet_6_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1815,
+          "count": 1,
+          "key": "outlet_6_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1804,
+          "count": 2,
+          "key": "outlet_6_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1823,
+          "count": 1,
+          "key": "outlet_6_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1792,
+          "count": 1,
+          "key": "outlet_7_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1816,
+          "count": 1,
+          "key": "outlet_7_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1806,
+          "count": 2,
+          "key": "outlet_7_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1824,
+          "count": 1,
+          "key": "outlet_7_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1793,
+          "count": 1,
+          "key": "outlet_8_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1817,
+          "count": 1,
+          "key": "outlet_8_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1808,
+          "count": 2,
+          "key": "outlet_8_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1825,
+          "count": 1,
+          "key": "outlet_8_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1794,
+          "count": 1,
+          "key": "outlet_9_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1834,
+          "count": 1,
+          "key": "outlet_9_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1818,
+          "count": 2,
+          "key": "outlet_9_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1842,
+          "count": 1,
+          "key": "outlet_9_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1795,
+          "count": 1,
+          "key": "outlet_10_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1835,
+          "count": 1,
+          "key": "outlet_10_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1820,
+          "count": 2,
+          "key": "outlet_10_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1843,
+          "count": 1,
+          "key": "outlet_10_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1796,
+          "count": 1,
+          "key": "outlet_11_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1836,
+          "count": 1,
+          "key": "outlet_11_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1822,
+          "count": 2,
+          "key": "outlet_11_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1844,
+          "count": 1,
+          "key": "outlet_11_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1797,
+          "count": 1,
+          "key": "outlet_12_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1837,
+          "count": 1,
+          "key": "outlet_12_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1824,
+          "count": 2,
+          "key": "outlet_12_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1845,
+          "count": 1,
+          "key": "outlet_12_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1798,
+          "count": 1,
+          "key": "outlet_13_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1838,
+          "count": 1,
+          "key": "outlet_13_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1826,
+          "count": 2,
+          "key": "outlet_13_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1846,
+          "count": 1,
+          "key": "outlet_13_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1799,
+          "count": 1,
+          "key": "outlet_14_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1839,
+          "count": 1,
+          "key": "outlet_14_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1828,
+          "count": 2,
+          "key": "outlet_14_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1847,
+          "count": 1,
+          "key": "outlet_14_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1800,
+          "count": 1,
+          "key": "outlet_15_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1840,
+          "count": 1,
+          "key": "outlet_15_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1830,
+          "count": 2,
+          "key": "outlet_15_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1848,
+          "count": 1,
+          "key": "outlet_15_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1801,
+          "count": 1,
+          "key": "outlet_16_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1841,
+          "count": 1,
+          "key": "outlet_16_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1832,
+          "count": 2,
+          "key": "outlet_16_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1849,
+          "count": 1,
+          "key": "outlet_16_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1802,
+          "count": 1,
+          "key": "outlet_17_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1858,
+          "count": 1,
+          "key": "outlet_17_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1842,
+          "count": 2,
+          "key": "outlet_17_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1866,
+          "count": 1,
+          "key": "outlet_17_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1803,
+          "count": 1,
+          "key": "outlet_18_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1859,
+          "count": 1,
+          "key": "outlet_18_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1844,
+          "count": 2,
+          "key": "outlet_18_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1867,
+          "count": 1,
+          "key": "outlet_18_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1804,
+          "count": 1,
+          "key": "outlet_19_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1860,
+          "count": 1,
+          "key": "outlet_19_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1846,
+          "count": 2,
+          "key": "outlet_19_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1868,
+          "count": 1,
+          "key": "outlet_19_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1805,
+          "count": 1,
+          "key": "outlet_20_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1861,
+          "count": 1,
+          "key": "outlet_20_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1848,
+          "count": 2,
+          "key": "outlet_20_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1869,
+          "count": 1,
+          "key": "outlet_20_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1806,
+          "count": 1,
+          "key": "outlet_21_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1862,
+          "count": 1,
+          "key": "outlet_21_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1850,
+          "count": 2,
+          "key": "outlet_21_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1870,
+          "count": 1,
+          "key": "outlet_21_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1807,
+          "count": 1,
+          "key": "outlet_22_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1863,
+          "count": 1,
+          "key": "outlet_22_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1852,
+          "count": 2,
+          "key": "outlet_22_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1871,
+          "count": 1,
+          "key": "outlet_22_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1808,
+          "count": 1,
+          "key": "outlet_23_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1864,
+          "count": 1,
+          "key": "outlet_23_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1854,
+          "count": 2,
+          "key": "outlet_23_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1872,
+          "count": 1,
+          "key": "outlet_23_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1809,
+          "count": 1,
+          "key": "outlet_24_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1865,
+          "count": 1,
+          "key": "outlet_24_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1856,
+          "count": 2,
+          "key": "outlet_24_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1873,
+          "count": 1,
+          "key": "outlet_24_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1810,
+          "count": 1,
+          "key": "outlet_25_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1882,
+          "count": 1,
+          "key": "outlet_25_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1866,
+          "count": 2,
+          "key": "outlet_25_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1890,
+          "count": 1,
+          "key": "outlet_25_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1811,
+          "count": 1,
+          "key": "outlet_26_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1883,
+          "count": 1,
+          "key": "outlet_26_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1868,
+          "count": 2,
+          "key": "outlet_26_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1891,
+          "count": 1,
+          "key": "outlet_26_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1812,
+          "count": 1,
+          "key": "outlet_27_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1884,
+          "count": 1,
+          "key": "outlet_27_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1870,
+          "count": 2,
+          "key": "outlet_27_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1892,
+          "count": 1,
+          "key": "outlet_27_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1813,
+          "count": 1,
+          "key": "outlet_28_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1885,
+          "count": 1,
+          "key": "outlet_28_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1872,
+          "count": 2,
+          "key": "outlet_28_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1893,
+          "count": 1,
+          "key": "outlet_28_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1814,
+          "count": 1,
+          "key": "outlet_29_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1886,
+          "count": 1,
+          "key": "outlet_29_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1874,
+          "count": 2,
+          "key": "outlet_29_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1894,
+          "count": 1,
+          "key": "outlet_29_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1815,
+          "count": 1,
+          "key": "outlet_30_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1887,
+          "count": 1,
+          "key": "outlet_30_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1876,
+          "count": 2,
+          "key": "outlet_30_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1895,
+          "count": 1,
+          "key": "outlet_30_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1816,
+          "count": 1,
+          "key": "outlet_31_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1888,
+          "count": 1,
+          "key": "outlet_31_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1878,
+          "count": 2,
+          "key": "outlet_31_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1896,
+          "count": 1,
+          "key": "outlet_31_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1817,
+          "count": 1,
+          "key": "outlet_32_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1889,
+          "count": 1,
+          "key": "outlet_32_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1880,
+          "count": 2,
+          "key": "outlet_32_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1897,
+          "count": 1,
+          "key": "outlet_32_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1818,
+          "count": 1,
+          "key": "outlet_33_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1906,
+          "count": 1,
+          "key": "outlet_33_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1890,
+          "count": 2,
+          "key": "outlet_33_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1914,
+          "count": 1,
+          "key": "outlet_33_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1819,
+          "count": 1,
+          "key": "outlet_34_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1907,
+          "count": 1,
+          "key": "outlet_34_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1892,
+          "count": 2,
+          "key": "outlet_34_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1915,
+          "count": 1,
+          "key": "outlet_34_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1820,
+          "count": 1,
+          "key": "outlet_35_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1908,
+          "count": 1,
+          "key": "outlet_35_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1894,
+          "count": 2,
+          "key": "outlet_35_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1916,
+          "count": 1,
+          "key": "outlet_35_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1821,
+          "count": 1,
+          "key": "outlet_36_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1909,
+          "count": 1,
+          "key": "outlet_36_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1896,
+          "count": 2,
+          "key": "outlet_36_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1917,
+          "count": 1,
+          "key": "outlet_36_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1822,
+          "count": 1,
+          "key": "outlet_37_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1910,
+          "count": 1,
+          "key": "outlet_37_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1898,
+          "count": 2,
+          "key": "outlet_37_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1918,
+          "count": 1,
+          "key": "outlet_37_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1823,
+          "count": 1,
+          "key": "outlet_38_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1911,
+          "count": 1,
+          "key": "outlet_38_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1900,
+          "count": 2,
+          "key": "outlet_38_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1919,
+          "count": 1,
+          "key": "outlet_38_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1824,
+          "count": 1,
+          "key": "outlet_39_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1912,
+          "count": 1,
+          "key": "outlet_39_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1902,
+          "count": 2,
+          "key": "outlet_39_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1920,
+          "count": 1,
+          "key": "outlet_39_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1825,
+          "count": 1,
+          "key": "outlet_40_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1913,
+          "count": 1,
+          "key": "outlet_40_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1904,
+          "count": 2,
+          "key": "outlet_40_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1921,
+          "count": 1,
+          "key": "outlet_40_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1826,
+          "count": 1,
+          "key": "outlet_41_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1930,
+          "count": 1,
+          "key": "outlet_41_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1914,
+          "count": 2,
+          "key": "outlet_41_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1938,
+          "count": 1,
+          "key": "outlet_41_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1827,
+          "count": 1,
+          "key": "outlet_42_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1931,
+          "count": 1,
+          "key": "outlet_42_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1916,
+          "count": 2,
+          "key": "outlet_42_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1939,
+          "count": 1,
+          "key": "outlet_42_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1828,
+          "count": 1,
+          "key": "outlet_43_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1932,
+          "count": 1,
+          "key": "outlet_43_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1918,
+          "count": 2,
+          "key": "outlet_43_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1940,
+          "count": 1,
+          "key": "outlet_43_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1829,
+          "count": 1,
+          "key": "outlet_44_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1933,
+          "count": 1,
+          "key": "outlet_44_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1920,
+          "count": 2,
+          "key": "outlet_44_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1941,
+          "count": 1,
+          "key": "outlet_44_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1830,
+          "count": 1,
+          "key": "outlet_45_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1934,
+          "count": 1,
+          "key": "outlet_45_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1922,
+          "count": 2,
+          "key": "outlet_45_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1942,
+          "count": 1,
+          "key": "outlet_45_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1831,
+          "count": 1,
+          "key": "outlet_46_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1935,
+          "count": 1,
+          "key": "outlet_46_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1924,
+          "count": 2,
+          "key": "outlet_46_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1943,
+          "count": 1,
+          "key": "outlet_46_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1832,
+          "count": 1,
+          "key": "outlet_47_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1936,
+          "count": 1,
+          "key": "outlet_47_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1926,
+          "count": 2,
+          "key": "outlet_47_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1944,
+          "count": 1,
+          "key": "outlet_47_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1833,
+          "count": 1,
+          "key": "outlet_48_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1937,
+          "count": 1,
+          "key": "outlet_48_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1928,
+          "count": 2,
+          "key": "outlet_48_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1945,
+          "count": 1,
+          "key": "outlet_48_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1834,
+          "count": 1,
+          "key": "outlet_49_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1954,
+          "count": 1,
+          "key": "outlet_49_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1938,
+          "count": 2,
+          "key": "outlet_49_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1962,
+          "count": 1,
+          "key": "outlet_49_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1835,
+          "count": 1,
+          "key": "outlet_50_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1955,
+          "count": 1,
+          "key": "outlet_50_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1940,
+          "count": 2,
+          "key": "outlet_50_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1963,
+          "count": 1,
+          "key": "outlet_50_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1836,
+          "count": 1,
+          "key": "outlet_51_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1956,
+          "count": 1,
+          "key": "outlet_51_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1942,
+          "count": 2,
+          "key": "outlet_51_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1964,
+          "count": 1,
+          "key": "outlet_51_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1837,
+          "count": 1,
+          "key": "outlet_52_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1957,
+          "count": 1,
+          "key": "outlet_52_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1944,
+          "count": 2,
+          "key": "outlet_52_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1965,
+          "count": 1,
+          "key": "outlet_52_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1838,
+          "count": 1,
+          "key": "outlet_53_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1958,
+          "count": 1,
+          "key": "outlet_53_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1946,
+          "count": 2,
+          "key": "outlet_53_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1966,
+          "count": 1,
+          "key": "outlet_53_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1839,
+          "count": 1,
+          "key": "outlet_54_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1959,
+          "count": 1,
+          "key": "outlet_54_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1948,
+          "count": 2,
+          "key": "outlet_54_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1967,
+          "count": 1,
+          "key": "outlet_54_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1840,
+          "count": 1,
+          "key": "outlet_55_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1960,
+          "count": 1,
+          "key": "outlet_55_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1950,
+          "count": 2,
+          "key": "outlet_55_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1968,
+          "count": 1,
+          "key": "outlet_55_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1841,
+          "count": 1,
+          "key": "outlet_56_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1961,
+          "count": 1,
+          "key": "outlet_56_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1952,
+          "count": 2,
+          "key": "outlet_56_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1969,
+          "count": 1,
+          "key": "outlet_56_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1842,
+          "count": 1,
+          "key": "outlet_57_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1978,
+          "count": 1,
+          "key": "outlet_57_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1962,
+          "count": 2,
+          "key": "outlet_57_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1986,
+          "count": 1,
+          "key": "outlet_57_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1843,
+          "count": 1,
+          "key": "outlet_58_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1979,
+          "count": 1,
+          "key": "outlet_58_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1964,
+          "count": 2,
+          "key": "outlet_58_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1987,
+          "count": 1,
+          "key": "outlet_58_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1844,
+          "count": 1,
+          "key": "outlet_59_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1980,
+          "count": 1,
+          "key": "outlet_59_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1966,
+          "count": 2,
+          "key": "outlet_59_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1988,
+          "count": 1,
+          "key": "outlet_59_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1845,
+          "count": 1,
+          "key": "outlet_60_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1981,
+          "count": 1,
+          "key": "outlet_60_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1968,
+          "count": 2,
+          "key": "outlet_60_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1989,
+          "count": 1,
+          "key": "outlet_60_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1846,
+          "count": 1,
+          "key": "outlet_61_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1982,
+          "count": 1,
+          "key": "outlet_61_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1970,
+          "count": 2,
+          "key": "outlet_61_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1990,
+          "count": 1,
+          "key": "outlet_61_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1847,
+          "count": 1,
+          "key": "outlet_62_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1983,
+          "count": 1,
+          "key": "outlet_62_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1972,
+          "count": 2,
+          "key": "outlet_62_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1991,
+          "count": 1,
+          "key": "outlet_62_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1848,
+          "count": 1,
+          "key": "outlet_63_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1984,
+          "count": 1,
+          "key": "outlet_63_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1974,
+          "count": 2,
+          "key": "outlet_63_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1992,
+          "count": 1,
+          "key": "outlet_63_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1849,
+          "count": 1,
+          "key": "outlet_64_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 1985,
+          "count": 1,
+          "key": "outlet_64_power",
+          "scale": 1,
+          "type": "int16"
+        },
+        {
+          "address": 1976,
+          "count": 2,
+          "key": "outlet_64_energy",
+          "scale": 10,
+          "type": "uint32"
+        },
+        {
+          "address": 1993,
+          "count": 1,
+          "key": "outlet_64_alarm_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 780,
+          "count": 1,
+          "key": "bank_1_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 786,
+          "count": 1,
+          "key": "bank_1_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 781,
+          "count": 1,
+          "key": "bank_2_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 787,
+          "count": 1,
+          "key": "bank_2_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 782,
+          "count": 1,
+          "key": "bank_3_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 788,
+          "count": 1,
+          "key": "bank_3_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 783,
+          "count": 1,
+          "key": "bank_4_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 789,
+          "count": 1,
+          "key": "bank_4_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 784,
+          "count": 1,
+          "key": "bank_5_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 790,
+          "count": 1,
+          "key": "bank_5_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 785,
+          "count": 1,
+          "key": "bank_6_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 791,
+          "count": 1,
+          "key": "bank_6_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 792,
+          "count": 1,
+          "key": "bank_7_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 798,
+          "count": 1,
+          "key": "bank_7_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 793,
+          "count": 1,
+          "key": "bank_8_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 799,
+          "count": 1,
+          "key": "bank_8_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 794,
+          "count": 1,
+          "key": "bank_9_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 800,
+          "count": 1,
+          "key": "bank_9_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 795,
+          "count": 1,
+          "key": "bank_10_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 801,
+          "count": 1,
+          "key": "bank_10_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 796,
+          "count": 1,
+          "key": "bank_11_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 802,
+          "count": 1,
+          "key": "bank_11_state",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 797,
+          "count": 1,
+          "key": "bank_12_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 803,
+          "count": 1,
+          "key": "bank_12_state",
+          "scale": 1,
+          "type": "uint16"
+        }
+      ]
+    },
+    "apc_modbus_smart": {
+      "protocol": "modbus",
+      "registers": [
+        {
+          "address": 0,
+          "count": 1,
+          "key": "status_word_0",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 1,
+          "count": 1,
+          "key": "status_word_1",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 2,
+          "count": 1,
+          "key": "status_word_2",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 3,
+          "count": 1,
+          "key": "status_word_3",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 4,
+          "count": 1,
+          "key": "line_quality",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 5,
+          "count": 1,
+          "key": "battery_state_of_charge",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 6,
+          "count": 1,
+          "key": "runtime_remaining",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 7,
+          "count": 1,
+          "key": "battery_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8,
+          "count": 1,
+          "key": "ups_internal_temperature",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 9,
+          "count": 1,
+          "key": "load_amps",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 10,
+          "count": 1,
+          "key": "bad_battery_packs",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 11,
+          "count": 1,
+          "key": "total_battery_packs",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 12,
+          "count": 1,
+          "key": "load_percent",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 13,
+          "count": 1,
+          "key": "nominal_output_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 14,
+          "count": 1,
+          "key": "actual_output_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 15,
+          "count": 1,
+          "key": "max_input_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 16,
+          "count": 1,
+          "key": "min_input_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 17,
+          "count": 1,
+          "key": "input_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 18,
+          "count": 1,
+          "key": "input_frequency",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 19,
+          "count": 1,
+          "key": "measure_ups_temp_probe1",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 20,
+          "count": 1,
+          "key": "measure_ups_humidity_probe1",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 21,
+          "count": 1,
+          "key": "measure_ups_temp_probe2",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 22,
+          "count": 1,
+          "key": "measure_ups_humidity_probe2",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 23,
+          "count": 1,
+          "key": "measure_ups_contact_position",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 26,
+          "count": 1,
+          "key": "minimum_return_battery_capacity",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 27,
+          "count": 1,
+          "key": "lower_transfer_point",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 28,
+          "count": 1,
+          "key": "upper_transfer_point",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 29,
+          "count": 1,
+          "key": "nominal_output_voltage_setting",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 30,
+          "count": 1,
+          "key": "shutdown_delay",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 31,
+          "count": 1,
+          "key": "low_battery_duration",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 32,
+          "count": 1,
+          "key": "turn_on_delay",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 33,
+          "count": 1,
+          "key": "sensitivity",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 42,
+          "count": 1,
+          "key": "status_word_4",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 43,
+          "count": 1,
+          "key": "status_word_5",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 44,
+          "count": 1,
+          "key": "nominal_battery_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 45,
+          "count": 1,
+          "key": "actual_battery_voltage",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 46,
+          "count": 1,
+          "key": "utility_input_voltage_phase_a",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 77,
+          "count": 1,
+          "key": "battery_current",
+          "scale": 1,
+          "type": "int16"
+        }
+      ]
+    },
+    "apc_modbus_smt": {
+      "protocol": "modbus",
+      "registers": [
+        {
+          "address": 0,
+          "count": 2,
+          "key": "ups_status_bf",
+          "scale": 1,
+          "type": "uint32"
+        },
+        {
+          "address": 19,
+          "count": 1,
+          "key": "general_error_bf",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 20,
+          "count": 2,
+          "key": "power_system_error_bf",
+          "scale": 1,
+          "type": "uint32"
+        },
+        {
+          "address": 22,
+          "count": 1,
+          "key": "battery_system_error_bf",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 128,
+          "count": 2,
+          "key": "runtime_remaining",
+          "scale": 1,
+          "type": "uint32"
+        },
+        {
+          "address": 130,
+          "count": 1,
+          "key": "battery_state_of_charge",
+          "scale": 512,
+          "type": "uint16"
+        },
+        {
+          "address": 131,
+          "count": 1,
+          "key": "battery_voltage",
+          "scale": 32,
+          "type": "int16"
+        },
+        {
+          "address": 132,
+          "count": 1,
+          "key": "battery_voltage_negative",
+          "scale": 32,
+          "type": "int16"
+        },
+        {
+          "address": 133,
+          "count": 1,
+          "key": "battery_replacement_date_days",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 135,
+          "count": 1,
+          "key": "battery_temperature",
+          "scale": 128,
+          "type": "int16"
+        },
+        {
+          "address": 136,
+          "count": 1,
+          "key": "output_load_percent",
+          "scale": 256,
+          "type": "uint16"
+        },
+        {
+          "address": 137,
+          "count": 1,
+          "key": "output_load_percent_l2",
+          "scale": 256,
+          "type": "uint16"
+        },
+        {
+          "address": 138,
+          "count": 1,
+          "key": "output_apparent_power_percent",
+          "scale": 256,
+          "type": "uint16"
+        },
+        {
+          "address": 139,
+          "count": 1,
+          "key": "output_apparent_power_percent_l2",
+          "scale": 256,
+          "type": "uint16"
+        },
+        {
+          "address": 140,
+          "count": 1,
+          "key": "output_current",
+          "scale": 32,
+          "type": "uint16"
+        },
+        {
+          "address": 141,
+          "count": 1,
+          "key": "output_current_l2",
+          "scale": 32,
+          "type": "uint16"
+        },
+        {
+          "address": 142,
+          "count": 1,
+          "key": "output_voltage",
+          "scale": 64,
+          "type": "uint16"
+        },
+        {
+          "address": 143,
+          "count": 1,
+          "key": "output_voltage_l2",
+          "scale": 64,
+          "type": "uint16"
+        },
+        {
+          "address": 144,
+          "count": 1,
+          "key": "output_frequency",
+          "scale": 128,
+          "type": "uint16"
+        },
+        {
+          "address": 145,
+          "count": 2,
+          "key": "output_energy",
+          "scale": 1,
+          "type": "uint32"
+        },
+        {
+          "address": 147,
+          "count": 1,
+          "key": "bypass_input_status_bf",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 148,
+          "count": 1,
+          "key": "bypass_voltage",
+          "scale": 64,
+          "type": "uint16"
+        },
+        {
+          "address": 149,
+          "count": 1,
+          "key": "bypass_frequency",
+          "scale": 128,
+          "type": "uint16"
+        },
+        {
+          "address": 150,
+          "count": 1,
+          "key": "input_status_bf",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 151,
+          "count": 1,
+          "key": "input_voltage",
+          "scale": 64,
+          "type": "uint16"
+        },
+        {
+          "address": 152,
+          "count": 1,
+          "key": "input_voltage_l2",
+          "scale": 64,
+          "type": "uint16"
+        },
+        {
+          "address": 153,
+          "count": 1,
+          "key": "input_voltage_l3",
+          "scale": 64,
+          "type": "uint16"
+        }
+      ]
+    },
+    "cyberpower_modbus_single_phase": {
+      "protocol": "modbus",
+      "registers": [
+        {
+          "address": 8192,
+          "count": 1,
+          "key": "hardware_fault",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8200,
+          "count": 1,
+          "key": "utility_frequency_out_of_range",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8201,
+          "count": 1,
+          "key": "inverter_off",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8206,
+          "count": 1,
+          "key": "battery_not_present",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8209,
+          "count": 1,
+          "key": "battery_discharging",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8210,
+          "count": 1,
+          "key": "battery_charging",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8212,
+          "count": 1,
+          "key": "battery_fully_charged",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8224,
+          "count": 1,
+          "key": "buzzer_muted",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8225,
+          "count": 1,
+          "key": "runtime_low",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8226,
+          "count": 1,
+          "key": "no_output",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 8860,
+          "count": 1,
+          "key": "over_temperature",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 12288,
+          "count": 1,
+          "key": "utility_voltage",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 12289,
+          "count": 1,
+          "key": "utility_frequency",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 12320,
+          "count": 1,
+          "key": "output_voltage",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 12327,
+          "count": 1,
+          "key": "output_load_percent",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 12418,
+          "count": 1,
+          "key": "battery_capacity",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 12419,
+          "count": 2,
+          "key": "runtime_remaining",
+          "scale": 10,
+          "type": "uint32",
+          "word_order": "little"
+        },
+        {
+          "address": 12435,
+          "count": 1,
+          "key": "battery_threshold",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 12436,
+          "count": 1,
+          "key": "runtime_threshold",
+          "scale": 1,
+          "type": "uint16"
+        }
+      ]
+    },
+    "cyberpower_modbus_three_phase": {
+      "protocol": "modbus",
+      "registers": [
+        {
+          "address": 1,
+          "count": 1,
+          "key": "bypass_voltage_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 2,
+          "count": 1,
+          "key": "bypass_voltage_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 3,
+          "count": 1,
+          "key": "bypass_voltage_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 4,
+          "count": 1,
+          "key": "bypass_current_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 5,
+          "count": 1,
+          "key": "bypass_current_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 6,
+          "count": 1,
+          "key": "bypass_current_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 7,
+          "count": 1,
+          "key": "bypass_frequency_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 8,
+          "count": 1,
+          "key": "bypass_frequency_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 9,
+          "count": 1,
+          "key": "bypass_frequency_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 10,
+          "count": 1,
+          "key": "bypass_pf_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 11,
+          "count": 1,
+          "key": "bypass_pf_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 12,
+          "count": 1,
+          "key": "bypass_pf_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 13,
+          "count": 1,
+          "key": "input_voltage_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 14,
+          "count": 1,
+          "key": "input_voltage_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 15,
+          "count": 1,
+          "key": "input_voltage_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 16,
+          "count": 1,
+          "key": "input_current_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 17,
+          "count": 1,
+          "key": "input_current_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 18,
+          "count": 1,
+          "key": "input_current_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 19,
+          "count": 1,
+          "key": "input_frequency_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 20,
+          "count": 1,
+          "key": "input_frequency_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 21,
+          "count": 1,
+          "key": "input_frequency_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 22,
+          "count": 1,
+          "key": "input_pf_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 23,
+          "count": 1,
+          "key": "input_pf_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 24,
+          "count": 1,
+          "key": "input_pf_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 25,
+          "count": 1,
+          "key": "output_voltage_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 26,
+          "count": 1,
+          "key": "output_voltage_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 27,
+          "count": 1,
+          "key": "output_voltage_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 28,
+          "count": 1,
+          "key": "output_current_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 29,
+          "count": 1,
+          "key": "output_current_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 30,
+          "count": 1,
+          "key": "output_current_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 31,
+          "count": 1,
+          "key": "output_frequency_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 32,
+          "count": 1,
+          "key": "output_frequency_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 33,
+          "count": 1,
+          "key": "output_frequency_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 34,
+          "count": 1,
+          "key": "output_pf_phase_a",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 35,
+          "count": 1,
+          "key": "output_pf_phase_b",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 36,
+          "count": 1,
+          "key": "output_pf_phase_c",
+          "scale": 100,
+          "type": "uint16"
+        },
+        {
+          "address": 37,
+          "count": 1,
+          "key": "output_apparent_power_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 38,
+          "count": 1,
+          "key": "output_apparent_power_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 39,
+          "count": 1,
+          "key": "output_apparent_power_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 40,
+          "count": 1,
+          "key": "output_active_power_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 41,
+          "count": 1,
+          "key": "output_active_power_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 42,
+          "count": 1,
+          "key": "output_active_power_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 43,
+          "count": 1,
+          "key": "output_reactive_power_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 44,
+          "count": 1,
+          "key": "output_reactive_power_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 45,
+          "count": 1,
+          "key": "output_reactive_power_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 46,
+          "count": 1,
+          "key": "load_percent_phase_a",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 47,
+          "count": 1,
+          "key": "load_percent_phase_b",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 48,
+          "count": 1,
+          "key": "load_percent_phase_c",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 49,
+          "count": 1,
+          "key": "environment_temperature",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 50,
+          "count": 1,
+          "key": "battery_voltage",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 52,
+          "count": 1,
+          "key": "battery_current",
+          "scale": 10,
+          "type": "int16"
+        },
+        {
+          "address": 54,
+          "count": 1,
+          "key": "battery_temperature",
+          "scale": 10,
+          "type": "uint16"
+        },
+        {
+          "address": 55,
+          "count": 1,
+          "key": "battery_runtime_remaining",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 56,
+          "count": 1,
+          "key": "battery_capacity",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 81,
+          "count": 1,
+          "key": "load_on_source",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 82,
+          "count": 1,
+          "key": "battery_status",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 83,
+          "count": 1,
+          "key": "battery_connected",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 85,
+          "count": 1,
+          "key": "epo_active",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 86,
+          "count": 1,
+          "key": "inverter_capacity_low",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 88,
+          "count": 1,
+          "key": "input_fail",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 89,
+          "count": 1,
+          "key": "bypass_sequence_fail",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 90,
+          "count": 1,
+          "key": "bypass_voltage_fail",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 91,
+          "count": 1,
+          "key": "bypass_fail",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 92,
+          "count": 1,
+          "key": "bypass_overload",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 93,
+          "count": 1,
+          "key": "bypass_overload_timeout",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 94,
+          "count": 1,
+          "key": "bypass_untrack",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 96,
+          "count": 1,
+          "key": "output_shorted",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 97,
+          "count": 1,
+          "key": "battery_eod",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 99,
+          "count": 1,
+          "key": "battery_test_result",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 101,
+          "count": 1,
+          "key": "battery_maintain_result",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 106,
+          "count": 1,
+          "key": "manual_bypass",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 107,
+          "count": 1,
+          "key": "battery_volt_low",
+          "scale": 1,
+          "type": "uint16"
+        },
+        {
+          "address": 112,
+          "count": 1,
+          "key": "lost_redundant",
+          "scale": 1,
+          "type": "uint16"
+        }
+      ]
+    },
+    "nut_network_upsd": {
+      "normalization": {
+        "battery_charge": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "%"
+        },
+        "battery_low": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        },
+        "input_voltage": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "V"
+        },
+        "load_on_source": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        },
+        "model": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        },
+        "output_load": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "%"
+        },
+        "replace_battery": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        },
+        "runtime_remaining": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "s"
+        },
+        "serial_number": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        },
+        "sw_version": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": ""
+        }
+      },
+      "nut": {
+        "status_map": {
+          "LB": {
+            "key": "battery_low",
+            "value": true
+          },
+          "OB": {
+            "key": "load_on_source",
+            "value": false
+          },
+          "OL": {
+            "key": "load_on_source",
+            "value": true
+          },
+          "RB": {
+            "key": "replace_battery",
+            "value": true
+          }
+        },
+        "variables": {
+          "battery.charge": {
+            "key": "battery_charge",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "battery.runtime": {
+            "key": "runtime_remaining",
+            "poll_group": "fast",
+            "type": "int"
+          },
+          "input.voltage": {
+            "key": "input_voltage",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "ups.firmware": {
+            "key": "sw_version",
+            "poll_group": "slow",
+            "type": "str"
+          },
+          "ups.load": {
+            "key": "output_load",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "ups.model": {
+            "key": "model",
+            "poll_group": "slow",
+            "type": "str"
+          },
+          "ups.serial": {
+            "key": "serial_number",
+            "poll_group": "slow",
+            "type": "str"
+          }
+        }
+      },
+      "poll_groups": {
+        "fast": {
+          "interval_s": 10
+        },
+        "slow": {
+          "interval_s": 60
+        }
+      },
+      "profile_id": "nut_network_upsd",
+      "protocol": "nut",
+      "source": "nut"
+    },
+    "ups_snmp_apc_mib": {
+      "oids": {
+        "battery_charge": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.2.2.1.0"
+        },
+        "battery_status": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.2.1.1.0"
+        },
+        "battery_temperature": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.2.2.2.0"
+        },
+        "firmware": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.1.2.1.0"
+        },
+        "input_frequency": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.3.2.4.0"
+        },
+        "input_voltage": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.3.2.1.0"
+        },
+        "model": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.1.1.1.0"
+        },
+        "name": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.1.1.2.0"
+        },
+        "output_frequency": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.4.2.2.0"
+        },
+        "output_load": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.4.2.3.0"
+        },
+        "output_source_raw": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.4.1.1.0"
+        },
+        "output_voltage": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.4.2.1.0"
+        },
+        "runtime_remaining": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.2.2.3.0",
+          "timeticks_minutes": true
+        },
+        "serial_number": {
+          "oid": "1.3.6.1.4.1.318.1.1.1.1.2.3.0"
+        }
+      },
+      "protocol": "snmp"
+    },
+    "ups_snmp_ups_mib": {
+      "oids": {
+        "alarms_present": {
+          "oid": "1.3.6.1.2.1.33.1.6.1.0"
+        },
+        "battery_charge": {
+          "oid": "1.3.6.1.2.1.33.1.2.4.0"
+        },
+        "battery_status": {
+          "oid": "1.3.6.1.2.1.33.1.2.1.0"
+        },
+        "battery_temperature": {
+          "oid": "1.3.6.1.2.1.33.1.2.7.0"
+        },
+        "battery_voltage": {
+          "oid": "1.3.6.1.2.1.33.1.2.5.0",
+          "scale": 0.1
+        },
+        "bypass_frequency": {
+          "oid": "1.3.6.1.2.1.33.1.5.1.0",
+          "scale": 0.1
+        },
+        "bypass_line_count": {
+          "oid": "1.3.6.1.2.1.33.1.5.2.0"
+        },
+        "firmware": {
+          "oid": "1.3.6.1.2.1.33.1.1.3.0"
+        },
+        "input_current": {
+          "oid": "1.3.6.1.2.1.33.1.3.3.1.4.1",
+          "scale": 0.1
+        },
+        "input_frequency": {
+          "oid": "1.3.6.1.2.1.33.1.3.3.1.2.1",
+          "scale": 0.1
+        },
+        "input_line_count": {
+          "oid": "1.3.6.1.2.1.33.1.3.2.0"
+        },
+        "input_power": {
+          "oid": "1.3.6.1.2.1.33.1.3.3.1.5.1"
+        },
+        "input_voltage": {
+          "oid": "1.3.6.1.2.1.33.1.3.3.1.3.1"
+        },
+        "manufacturer": {
+          "oid": "1.3.6.1.2.1.33.1.1.1.0"
+        },
+        "model": {
+          "oid": "1.3.6.1.2.1.33.1.1.2.0"
+        },
+        "name": {
+          "oid": "1.3.6.1.2.1.33.1.1.5.0"
+        },
+        "output_frequency": {
+          "oid": "1.3.6.1.2.1.33.1.4.2.0",
+          "scale": 0.1
+        },
+        "output_line_count": {
+          "oid": "1.3.6.1.2.1.33.1.4.3.0"
+        },
+        "output_load": {
+          "oids": [
+            "1.3.6.1.2.1.33.1.4.4.1.5.1",
+            "1.3.6.1.2.1.33.1.4.4.1.5.0"
+          ]
+        },
+        "output_source_raw": {
+          "oid": "1.3.6.1.2.1.33.1.4.1.0"
+        },
+        "runtime_remaining": {
+          "oid": "1.3.6.1.2.1.33.1.2.3.0"
+        },
+        "seconds_on_battery": {
+          "oid": "1.3.6.1.2.1.33.1.2.2.0"
+        }
+      },
+      "protocol": "snmp"
+    }
+  }
+}

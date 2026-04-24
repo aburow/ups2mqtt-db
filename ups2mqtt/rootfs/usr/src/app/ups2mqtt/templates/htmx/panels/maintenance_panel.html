@@ -1,0 +1,49 @@
+<div id="maintenance-panel" class="d-flex flex-column gap-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2 class="h5 m-0">Maintenance</h2>
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      hx-get="/htmx/devices/partials/panel/maintenance"
+      hx-target="#admin-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+    >Refresh</button>
+  </div>
+
+  <div class="card">
+    <div class="card-body d-flex flex-column gap-3">
+      <h3 class="h6 mb-0">System Info</h3>
+      <div class="d-flex flex-wrap gap-3 small text-muted">
+        <span>Source: <strong>{{ maintenance.source }}</strong></span>
+        <span>Profiles: <strong>{{ maintenance.profile_count }}</strong></span>
+        <span>Apps dir: <code>{{ maintenance.apps_dir }}</code></span>
+        <span>Max concurrent polls: <strong>{{ maintenance.max_concurrent_polls }}</strong></span>
+        <span>Runtime log level: <strong>{{ maintenance.runtime_log_level }}</strong></span>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2">
+        <form
+          class="m-0"
+          hx-post="/htmx/devices/actions/maintenance"
+          hx-target="#admin-panel"
+          hx-swap="innerHTML"
+          hx-indicator="#global-loading"
+        >
+          <input type="hidden" name="action" value="republish_discovery"/>
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Republish MQTT Discovery</button>
+        </form>
+        <form
+          class="m-0"
+          hx-post="/htmx/devices/actions/maintenance"
+          hx-target="#admin-panel"
+          hx-swap="innerHTML"
+          hx-indicator="#global-loading"
+        >
+          <input type="hidden" name="action" value="cleanup_db"/>
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Cleanup SQLite State</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</div>

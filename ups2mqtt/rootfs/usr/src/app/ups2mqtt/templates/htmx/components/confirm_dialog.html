@@ -1,0 +1,18 @@
+<div
+  x-show="confirmDialog.open"
+  x-cloak
+  class="position-fixed top-0 start-0 w-100 h-100"
+  style="background: rgba(0,0,0,0.45); z-index: 1092;"
+  @click.self="closeConfirm()"
+>
+  <div class="container h-100 d-flex align-items-center justify-content-center">
+    <div class="bg-body text-body border rounded shadow p-3" style="width: min(540px, 95vw);">
+      <h3 class="h5 mb-2" x-text="confirmDialog.title"></h3>
+      <p class="mb-3 text-body-secondary" x-text="confirmDialog.message"></p>
+      <div class="d-flex justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-secondary" @click="closeConfirm()">Cancel</button>
+        <button type="button" class="btn btn-danger" @click="submitConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>

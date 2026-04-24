@@ -1,0 +1,95 @@
+<div id="metrics-panel" class="d-flex flex-column gap-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2 class="h5 m-0">Metrics</h2>
+    <div class="d-flex gap-2 align-items-center">
+      <small class="text-muted">
+        Updated {{ timezone_label }}: {{ generated_at_utc }} | <a href="/metrics.json" target="_blank" rel="noopener">/metrics.json</a>
+      </small>
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        hx-get="/htmx/devices/partials/panel/metrics"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >Refresh</button>
+      <form
+        class="m-0"
+        hx-post="/htmx/devices/actions/metrics/clear"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <input type="hidden" name="scope" value="all"/>
+        <button class="btn btn-sm btn-outline-danger" type="submit">Clear Metrics</button>
+      </form>
+    </div>
+  </div>
+  <div>
+    <small class="text-muted">Cleared counters may begin increasing again immediately while polling is active.</small>
+  </div>
+
+  <div class="row g-2">
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Devices</div><div class="h5 m-0">{{ totals.devices }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Polls Started</div><div class="h5 m-0">{{ totals.polls_started }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Succeeded</div><div class="h5 m-0 text-success">{{ totals.polls_succeeded }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Failed / Timeout</div><div class="h5 m-0 text-danger">{{ total_failed_timeout }}</div></div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-body py-2">
+      <div class="small text-muted mb-1"><strong>Backpressure</strong></div>
+      <div class="small">
+        Polls in-flight: <strong>{{ backpressure.polls_in_flight }}</strong>
+        <span class="mx-2">|</span>
+        Semaphore available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ max_concurrent_polls }}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Device</th><th>Status</th><th>Started</th><th>Success</th><th>Failed</th><th>Timeout</th>
+              <th>Min ms</th><th>Avg ms</th><th>Max ms</th><th>Last ms</th><th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>{{ row.name_with_uid or row.name }}</td>
+              <td>{{ row.status }}</td>
+              <td>{{ row.started }}</td>
+              <td>{{ row.success }}</td>
+              <td>{{ row.failed }}</td>
+              <td>{{ row.timeout }}</td>
+              <td>{{ row.min_ms }}</td>
+              <td>{{ row.avg_ms }}</td>
+              <td>{{ row.max_ms }}</td>
+              <td>{{ row.last_ms }}</td>
+              <td>{{ row["values"] }}</td>
+              <td>{{ row.last_error }}</td>
+              <td>{{ row.updated_utc }}</td>
+              <td>
+                <button
+                  class="btn btn-sm btn-outline-danger"
+                  hx-post="/htmx/devices/actions/metrics/clear"
+                  hx-vals='{"scope":"device","device_uid":"{{ row.device_uid }}"}'
+                  hx-target="#admin-panel"
+                  hx-swap="innerHTML"
+                  hx-indicator="#global-loading"
+                  hx-confirm="Clear metrics for {{ row.name_with_uid or row.device_uid }}?"
+                >Clear</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="14" class="text-muted p-3">No metrics yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

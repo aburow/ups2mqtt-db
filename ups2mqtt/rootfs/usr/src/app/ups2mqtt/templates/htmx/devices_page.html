@@ -1,0 +1,271 @@
+<!doctype html>
+<html data-bs-theme="light">
+<head>
+  <meta charset="utf-8"/>
+  <title>ups2mqtt Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    [x-cloak] { display: none !important; }
+    .admin-shell { min-height: 100vh; }
+    .admin-sidebar {
+      width: 260px;
+      background: var(--bs-tertiary-bg);
+      border-right: 1px solid var(--bs-border-color);
+    }
+    .admin-sidebar .nav-link {
+      color: var(--bs-body-color);
+      border-radius: 0.375rem;
+    }
+    .admin-sidebar .nav-link:hover {
+      background: var(--bs-secondary-bg);
+      color: var(--bs-body-color);
+    }
+    .admin-sidebar .nav-link.active {
+      background: var(--bs-primary);
+      color: var(--bs-white);
+    }
+    .admin-content { flex: 1; min-width: 0; }
+    @media (max-width: 991.98px) {
+      .admin-shell { flex-direction: column; }
+      .admin-sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--bs-border-color); }
+    }
+    .device-modal-shell {
+      width: min(1120px, 96vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      background: var(--bs-body-bg);
+      border: 1px solid var(--bs-border-color);
+    }
+  </style>
+</head>
+<body
+  class="bg-body"
+  x-data="deviceUi()"
+  @close-device-modal.window="closeModal()"
+  @ui-toast.window="pushToast($event.detail)"
+>
+  <div class="d-flex admin-shell">
+    <aside class="admin-sidebar p-3">
+      <div class="mb-3">
+        <h1 class="h5 m-0">ups2mqtt</h1>
+      </div>
+
+      <nav class="nav flex-column gap-1">
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'devices' }"
+          @click="loadPanel('devices')"
+        >Devices</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'metrics' }"
+          @click="loadPanel('metrics')"
+        >Metrics</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'logs' }"
+          @click="loadPanel('logs')"
+        >Logs</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'maintenance' }"
+          @click="loadPanel('maintenance')"
+        >Maintenance</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'configuration' }"
+          @click="loadPanel('configuration')"
+        >Configuration</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'profiles' }"
+          @click="loadPanel('profiles')"
+        >Profiles</button>
+      </nav>
+    </aside>
+
+    <main class="admin-content p-3 p-md-4">
+      <div id="admin-panel" hx-indicator="#global-loading">{{ initial_panel_html | safe }}</div>
+    </main>
+  </div>
+
+  {% include "htmx/components/toasts.html" %}
+  {% include "htmx/components/confirm_dialog.html" %}
+
+  <div
+    id="global-loading"
+    class="htmx-indicator position-fixed top-0 end-0 m-3 bg-dark text-white rounded px-3 py-2 shadow"
+    style="z-index: 1090; pointer-events: none;"
+  >
+    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+    Working...
+  </div>
+
+  <div x-show="modalOpen" x-cloak class="position-fixed top-0 start-0 w-100 h-100" style="background: rgba(0,0,0,0.5); z-index: 1080;" @click.self="closeModal()">
+    <div class="container h-100 d-flex align-items-center justify-content-center py-3">
+      <div class="device-modal-shell rounded shadow p-3">
+        <div id="device-modal-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function deviceUi() {
+      return {
+        modalOpen: false,
+        activePanel: 'devices',
+        toasts: [],
+        confirmDialog: {
+          open: false,
+          title: '',
+          message: '',
+          url: '',
+          target: '#devices-table-container',
+          values: {}
+        },
+        loadPanel(panel) {
+          this.activePanel = panel;
+          htmx.ajax('GET', `/htmx/devices/partials/panel/${panel}`, {
+            target: '#admin-panel',
+            swap: 'innerHTML',
+            indicator: '#global-loading'
+          });
+        },
+        openModal(url) {
+          this.modalOpen = true;
+          htmx.ajax('GET', url, {
+            target: '#device-modal-content',
+            swap: 'innerHTML',
+            indicator: '#global-loading'
+          });
+        },
+        closeModal() {
+          this.modalOpen = false;
+          const modalContent = document.getElementById('device-modal-content');
+          if (modalContent) {
+            modalContent.innerHTML = '';
+          }
+        },
+        requestDelete(id) {
+          this.openConfirm({
+            title: 'Delete Device',
+            message: 'Delete ' + id + '?',
+            url: '/htmx/devices/actions/delete',
+            target: '#devices-table-container',
+            values: { id: id }
+          });
+        },
+        openConfirm(opts) {
+          this.confirmDialog = {
+            open: true,
+            title: opts.title || 'Confirm Action',
+            message: opts.message || 'Are you sure?',
+            url: opts.url || '',
+            target: opts.target || '#devices-table-container',
+            values: opts.values || {}
+          };
+        },
+        closeConfirm() {
+          this.confirmDialog.open = false;
+        },
+        submitConfirm() {
+          const cfg = this.confirmDialog;
+          this.closeConfirm();
+          const mergedValues = { ...(cfg.values || {}) };
+          const filterForm = document.getElementById('devices-filter-form');
+          if (filterForm) {
+            const formData = new FormData(filterForm);
+            for (const [key, value] of formData.entries()) {
+              if (!(key in mergedValues)) {
+                mergedValues[key] = value;
+              }
+            }
+          }
+          htmx.ajax('POST', cfg.url, {
+            target: cfg.target,
+            swap: 'innerHTML',
+            values: mergedValues,
+            indicator: '#global-loading'
+          });
+        },
+        pushToast(detail) {
+          const payload = detail || {};
+          const toast = {
+            id: Date.now() + Math.random(),
+            level: payload.level || 'info',
+            message: payload.message || 'Done'
+          };
+          this.toasts.push(toast);
+          window.setTimeout(() => {
+            this.toasts = this.toasts.filter(t => t.id !== toast.id);
+          }, 3500);
+        },
+        removeToast(id) {
+          this.toasts = this.toasts.filter(t => t.id !== id);
+        }
+      }
+    }
+
+    (() => {
+      const root = document.documentElement;
+      const media = window.matchMedia('(prefers-color-scheme: dark)');
+      const validChoices = new Set(['light', 'dark', 'system']);
+      let currentChoice = validChoices.has('{{ initial_theme_choice | default("system") }}')
+        ? '{{ initial_theme_choice | default("system") }}'
+        : 'system';
+
+      const resolveChoice = (choice) => {
+        if (choice === 'system') {
+          return media.matches ? 'dark' : 'light';
+        }
+        return choice;
+      };
+
+      window.ups2mqttApplyThemeChoice = (choice) => {
+        currentChoice = validChoices.has(choice) ? choice : 'system';
+        root.setAttribute('data-bs-theme', resolveChoice(currentChoice));
+        root.setAttribute('data-theme-choice', currentChoice);
+      };
+
+      window.ups2mqttApplyThemeChoice(currentChoice);
+      media.addEventListener('change', () => {
+        if (currentChoice === 'system') {
+          window.ups2mqttApplyThemeChoice('system');
+        }
+      });
+    })();
+
+    document.body.addEventListener('htmx:responseError', (evt) => {
+      const status = evt.detail?.xhr?.status;
+      window.dispatchEvent(
+        new CustomEvent('ui-toast', {
+          detail: {
+            level: 'danger',
+            message: `Request failed${status ? ` (${status})` : ''}`
+          }
+        })
+      );
+    });
+
+    document.body.addEventListener('htmx:sendError', () => {
+      window.dispatchEvent(
+        new CustomEvent('ui-toast', {
+          detail: { level: 'danger', message: 'Network error while contacting server' }
+        })
+      );
+    });
+
+    document.body.addEventListener('htmx:afterSwap', () => {
+      if (window.Alpine) {
+        window.Alpine.initTree(document.body);
+      }
+    });
+  </script>
+</body>
+</html>
