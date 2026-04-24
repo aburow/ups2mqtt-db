@@ -3008,7 +3008,9 @@ def start_web_server(
 
             query = urlencode(params)
             self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", "/" + (f"?{query}" if query else ""))
+            self.send_header(
+                "Location", "/htmx/devices" + (f"?{query}" if query else "")
+            )
             self.end_headers()
 
         def _render_tab_shell(self) -> str:
@@ -4101,6 +4103,14 @@ def start_web_server(
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             if self._handle_htmx_get(parsed):
+                return
+            if parsed.path == "/":
+                location = "/htmx/devices"
+                if parsed.query:
+                    location += f"?{parsed.query}"
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", location)
+                self.end_headers()
                 return
             if parsed.path == "/favicon.ico" or parsed.path == "/favicon.png":
                 if not FAVICON_PATH.exists():

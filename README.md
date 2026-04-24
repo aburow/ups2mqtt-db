@@ -27,7 +27,7 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 5. Verify:
    - `make dev-ps`
    - `make dev-logs`
-   - UI: `http://localhost:8099`
+   - UI: `http://localhost:8099/htmx/devices` (startup page)
 
 ## Common commands
 - Start/build: `make dev-up`
