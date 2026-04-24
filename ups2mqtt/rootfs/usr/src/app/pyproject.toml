@@ -7,7 +7,7 @@ version = "0.1.0rc4"
 description = "ups2mqtt bridge runtime"
 requires-python = ">=3.13"
 dependencies = [
-  "aiohttp==3.10.1",
+  "aiohttp==3.13.4",
   "Jinja2==3.1.6",
   "paho-mqtt==2.1.0",
   "pymodbus==3.8.6",
@@ -19,7 +19,7 @@ dependencies = [
 lint = [
   "grain-lint==0.2.0",
   "pre-commit>=4.5.0,<5",
-  "pytest>=8,<9",
+  "pytest>=9,<10",
   "ruff==0.15.4",
   "semgrep==1.156.0",
   "sqlfluff==3.4.2",

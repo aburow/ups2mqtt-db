@@ -36,6 +36,22 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Tail logs: `make dev-logs`
 - Stop stack: `make dev-down`
 
+## Development
+- Project dependencies are managed with `uv` in `ups2mqtt/rootfs/usr/src/app/`.
+- Update lockfile after dependency changes:
+  - `cd ups2mqtt/rootfs/usr/src/app`
+  - `uv lock`
+
+## Linting
+Run from `ups2mqtt/rootfs/usr/src/app`:
+- `uv run --group lint ruff check .`
+- `uv run --group lint grain check --all`
+- `HOME=/tmp uv run --group lint semgrep --config auto --error ups2mqtt`
+- `uv run --group lint sqlfluff lint .`
+
+YAML lint from repository root:
+- `./ups2mqtt/rootfs/usr/src/app/.venv/bin/yamllint -s --no-warnings standalone/docker-compose.yml ups2mqtt/rootfs/usr/src/app/ups2mqtt`
+
 ## Troubleshooting
 - If `make dev-up` fails with missing variables, confirm `.env` exists in the repository root.
 - If the service is up but not publishing data, verify MQTT host/port/credentials in `.env` and check `make dev-logs`.
