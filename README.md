@@ -54,4 +54,6 @@ YAML lint from repository root:
 
 ## Troubleshooting
 - If `make dev-up` fails with missing variables, confirm `.env` exists in the repository root.
+- Prefer `make` targets over raw `docker compose` commands in this repo. The `make` workflow passes `--env-file .env`; running Compose directly can inject empty `UPS_UNIFIED_*` values.
 - If the service is up but not publishing data, verify MQTT host/port/credentials in `.env` and check `make dev-logs`.
+- If startup fails during DB init with `Unsupported table for migration: profiles`, rebuild and restart with `make dev-up` so the latest migration logic is applied to `standalone/data/ups2mqtt.db`.

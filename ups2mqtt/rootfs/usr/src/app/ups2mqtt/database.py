@@ -38,6 +38,13 @@ _DEVICE_COLUMN_MIGRATIONS: dict[str, str] = {
         "ALTER TABLE devices ADD COLUMN local_sensor_preferences TEXT"
     ),
 }
+_PROFILE_COLUMN_MIGRATIONS: dict[str, str] = {
+    "comments": "ALTER TABLE profiles ADD COLUMN comments TEXT",
+    "is_protected": (
+        "ALTER TABLE profiles ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0"
+    ),
+    "sensor_preferences": "ALTER TABLE profiles ADD COLUMN sensor_preferences TEXT",
+}
 
 
 class Database:
@@ -315,14 +322,20 @@ class Database:
         cursor: sqlite3.Cursor, table: str, column: str, definition: str
     ) -> None:
         """Add a column to an existing table if it does not exist."""
-        if table != "devices":
+        if table == "devices":
+            migration_sql = _DEVICE_COLUMN_MIGRATIONS.get(column)
+        elif table == "profiles":
+            migration_sql = _PROFILE_COLUMN_MIGRATIONS.get(column)
+        else:
             raise ValueError(f"Unsupported table for migration: {table}")
-        migration_sql = _DEVICE_COLUMN_MIGRATIONS.get(column)
         if migration_sql is None:
             raise ValueError(f"Unsupported column for migration: {column}")
         if definition not in migration_sql:
             raise ValueError(f"Unexpected definition for {column}: {definition}")
-        existing = cursor.execute("PRAGMA table_info(devices)").fetchall()
+        if table == "devices":
+            existing = cursor.execute("PRAGMA table_info(devices)").fetchall()
+        else:
+            existing = cursor.execute("PRAGMA table_info(profiles)").fetchall()
         names = {str(row[1]) for row in existing}
         if column in names:
             return
