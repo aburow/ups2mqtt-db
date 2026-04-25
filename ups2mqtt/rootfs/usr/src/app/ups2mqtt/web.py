@@ -202,9 +202,12 @@ def _format_utc_timestamp(raw: str, timezone_name: str) -> str:
 
 
 def _normalize_sensor_preferences(
-    raw: dict[str, Any] | None, *, allowed_keys: set[str]
-) -> dict[str, dict[str, bool]]:
-    normalized: dict[str, dict[str, bool]] = {}
+    raw: dict[str, Any] | None,
+    *,
+    allowed_keys: set[str],
+    allowed_poll_groups: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    normalized: dict[str, dict[str, Any]] = {}
     if not isinstance(raw, dict):
         return normalized
     for key, values in raw.items():
@@ -214,9 +217,15 @@ def _normalize_sensor_preferences(
             or not isinstance(values, dict)
         ):
             continue
-        normalized[key] = {
+        record: dict[str, Any] = {
             "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
         }
+        poll_group = str(values.get("poll_group", "")).strip()
+        if poll_group and (
+            allowed_poll_groups is None or poll_group in allowed_poll_groups
+        ):
+            record["poll_group"] = poll_group
+        normalized[key] = record
     return normalized
 
 
@@ -224,14 +233,81 @@ def _build_sensor_preferences_from_selected(
     *,
     selected_sensors: list[str] | None,
     available_keys: list[str],
-) -> dict[str, dict[str, bool]]:
+    default_poll_groups: dict[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
     selected_set = {str(item) for item in (selected_sensors or []) if str(item)}
+    poll_group_defaults = default_poll_groups or {}
     return {
         key: {
             "mqtt_enabled": key in selected_set,
+            **(
+                {"poll_group": str(poll_group_defaults[key]).strip()}
+                if str(poll_group_defaults.get(key, "")).strip()
+                else {}
+            ),
         }
         for key in available_keys
     }
+
+
+def _sensor_poll_group_defaults_from_profile(
+    profile: dict[str, Any],
+) -> dict[str, str]:
+    defaults: dict[str, str] = {}
+
+    def _record_key(raw_key: Any, raw_group: Any) -> None:
+        key = str(raw_key).strip()
+        if not key or _is_bitfield_sensor_key(key):
+            return
+        group = str(raw_group or "slow").strip() or "slow"
+        defaults[key] = group
+
+    for item in profile.get("registers", []):
+        if isinstance(item, dict):
+            _record_key(item.get("key"), item.get("poll_group", "slow"))
+    for block in profile.get("register_blocks", []):
+        if not isinstance(block, dict):
+            continue
+        group = str(block.get("poll_group", "slow")).strip() or "slow"
+        metrics = block.get("metrics", [])
+        if isinstance(metrics, list):
+            for metric in metrics:
+                _record_key(metric, group)
+    oids = profile.get("oids", {})
+    if isinstance(oids, dict):
+        for key, spec in oids.items():
+            if isinstance(spec, dict):
+                _record_key(key, spec.get("poll_group", "slow"))
+
+    for transport in ("modbus", "snmp"):
+        transport_spec = profile.get(transport, {})
+        if not isinstance(transport_spec, dict):
+            continue
+        for item in transport_spec.get("registers", []):
+            if isinstance(item, dict):
+                _record_key(item.get("key"), item.get("poll_group", "slow"))
+        for block in transport_spec.get("register_blocks", []):
+            if not isinstance(block, dict):
+                continue
+            group = str(block.get("poll_group", "slow")).strip() or "slow"
+            metrics = block.get("metrics", [])
+            if isinstance(metrics, list):
+                for metric in metrics:
+                    _record_key(metric, group)
+        transport_oids = transport_spec.get("oids", {})
+        if isinstance(transport_oids, dict):
+            for key, spec in transport_oids.items():
+                if isinstance(spec, dict):
+                    _record_key(key, spec.get("poll_group", "slow"))
+        for block in transport_spec.get("snmp_blocks", []):
+            if not isinstance(block, dict):
+                continue
+            group = str(block.get("poll_group", "slow")).strip() or "slow"
+            metrics = block.get("metrics", [])
+            if isinstance(metrics, list):
+                for metric in metrics:
+                    _record_key(metric, group)
+    return defaults
 
 
 def _catalog_sensor_rows_for_driver(
@@ -322,6 +398,11 @@ def _clone_device(
             {
                 str(key): {
                     "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                    **(
+                        {"poll_group": str(values.get("poll_group", "")).strip()}
+                        if str(values.get("poll_group", "")).strip()
+                        else {}
+                    ),
                 }
                 for key, values in device.local_sensor_preferences.items()
                 if isinstance(key, str) and isinstance(values, dict)
@@ -550,6 +631,10 @@ def start_web_server(
     set_timezone: Callable[[str], None] | None = None,
     get_theme: Callable[[], str] | None = None,
     set_theme: Callable[[str], None] | None = None,
+    get_metadata_refresh_interval_seconds: Callable[[], int] | None = None,
+    set_metadata_refresh_interval_seconds: Callable[[int], None] | None = None,
+    get_idle_reconnect_seconds: Callable[[], float] | None = None,
+    set_idle_reconnect_seconds: Callable[[float], None] | None = None,
     get_capability_profiles: Callable[[], dict[str, dict[str, object]]] | None = None,
 ) -> HTTPServer:
     session_store = SessionStore()
@@ -563,6 +648,12 @@ def start_web_server(
     timezone_setter = set_timezone or (lambda value: None)
     theme_getter = get_theme or (lambda: DEFAULT_THEME)
     theme_setter = set_theme or (lambda value: None)
+    metadata_refresh_getter = get_metadata_refresh_interval_seconds or (lambda: 3600)
+    metadata_refresh_setter = (
+        set_metadata_refresh_interval_seconds or (lambda value: None)
+    )
+    idle_reconnect_getter = get_idle_reconnect_seconds or (lambda: 300.0)
+    idle_reconnect_setter = set_idle_reconnect_seconds or (lambda value: None)
     capability_profiles_getter = get_capability_profiles or (lambda: {})
     profile_device_info_keys = {
         # Canonical device-info/identity-like fields used by existing contract adapters.
@@ -769,7 +860,7 @@ def start_web_server(
         driver_key: str,
         config_payload: dict[str, object] | None = None,
         selected_sensors: list[str] | None = None,
-        sensor_preferences: dict[str, dict[str, bool]] | None = None,
+        sensor_preferences: dict[str, dict[str, Any]] | None = None,
         comments: str = "",
         error_message: str = "",
         is_protected_profile: bool = False,
@@ -813,9 +904,19 @@ def start_web_server(
                     else "No profile-eligible drivers are available"
                 ),
                 "sensor_count": 0,
+                "sensor_poll_group_choices": [],
             }
 
         defaults = _profile_default_payload(selected_driver, contract_profile)
+        poll_group_choices = sorted(
+            str(name)
+            for name in dict(defaults.get("poll_groups", {}))
+            if str(name).strip()
+        )
+        allowed_poll_groups = set(poll_group_choices)
+        sensor_poll_group_defaults = _sensor_poll_group_defaults_from_profile(
+            contract_profile
+        )
         merged_payload = dict(defaults)
         if isinstance(config_payload, dict):
             incoming_groups = config_payload.get("poll_groups", {})
@@ -875,6 +976,7 @@ def start_web_server(
                 "copy_source_name": copy_source_name,
                 "error_message": str(err),
                 "sensor_count": 0,
+                "sensor_poll_group_choices": poll_group_choices,
             }
         default_enabled = _profile_default_enabled_map(
             selected_driver,
@@ -884,16 +986,19 @@ def start_web_server(
         merged_preferences = _normalize_sensor_preferences(
             sensor_preferences,
             allowed_keys=set(available_sensor_keys),
+            allowed_poll_groups=allowed_poll_groups,
         )
         if not merged_preferences:
             merged_preferences = _build_sensor_preferences_from_selected(
                 selected_sensors=merged_selected,
                 available_keys=available_sensor_keys,
+                default_poll_groups=sensor_poll_group_defaults,
             )
         for key in available_sensor_keys:
             if key not in merged_preferences:
                 merged_preferences[key] = {
                     "mqtt_enabled": key in selected_set,
+                    "poll_group": str(sensor_poll_group_defaults.get(key, "slow")),
                 }
         # Get catalog rows
         apps_dir = str(get_capability_status().get("apps_dir", "/data/apps"))
@@ -937,6 +1042,12 @@ def start_web_server(
                     "aliases": "",
                     "reference": "",
                     "from_catalog": False,
+                    "poll_group": str(
+                        prefs.get(
+                            "poll_group",
+                            sensor_poll_group_defaults.get(key, "slow"),
+                        )
+                    ),
                 }
             )
 
@@ -963,6 +1074,12 @@ def start_web_server(
                 "aliases": str(sensor_meta.get("aliases", "")),
                 "reference": str(sensor_meta.get("reference", "")),
                 "from_catalog": True,
+                "poll_group": str(
+                    prefs.get(
+                        "poll_group",
+                        sensor_poll_group_defaults.get(key, "slow"),
+                    )
+                ),
             }
             if category not in catalog_groups:
                 catalog_groups[category] = []
@@ -1020,6 +1137,7 @@ def start_web_server(
             "driver_contract_missing": False,
             "can_save_profile": not is_protected_profile,
             "profile_is_protected": is_protected_profile,
+            "sensor_poll_group_choices": poll_group_choices,
         }
 
     def _render_htmx_profiles_form(
@@ -1029,7 +1147,7 @@ def start_web_server(
         driver_key: str = "",
         config_payload: dict[str, object] | None = None,
         selected_sensors: list[str] | None = None,
-        sensor_preferences: dict[str, dict[str, bool]] | None = None,
+        sensor_preferences: dict[str, dict[str, Any]] | None = None,
         comments: str = "",
         error_message: str = "",
         is_protected_profile: bool = False,
@@ -1193,6 +1311,8 @@ def start_web_server(
             timezone_options=timezone_options,
             theme_value=theme_name,
             theme_options=THEME_OPTIONS,
+            metadata_refresh_interval_seconds=max(1, int(metadata_refresh_getter())),
+            idle_reconnect_seconds=max(1.0, float(idle_reconnect_getter())),
             runtime_log_level=logging.getLevelName(
                 logging.getLogger().getEffectiveLevel()
             ),
@@ -1436,6 +1556,11 @@ def start_web_server(
                 {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
                     }
                     for key, values in device.local_sensor_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1513,7 +1638,7 @@ def start_web_server(
 
         base_payload: dict[str, object] = {}
         base_selected: list[str] = []
-        base_preferences: dict[str, dict[str, bool]] = {}
+        base_preferences: dict[str, dict[str, Any]] = {}
         if selected_profile is not None:
             if isinstance(selected_profile.config_payload, dict):
                 base_payload = {
@@ -1525,6 +1650,11 @@ def start_web_server(
                 base_preferences = {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
                     }
                     for key, values in selected_profile.sensor_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1546,6 +1676,11 @@ def start_web_server(
                 base_preferences = {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
                     }
                     for key, values in stored_local_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1568,6 +1703,7 @@ def start_web_server(
                     key.startswith("sensor__")
                     or key.startswith("sensor_key__")
                     or key.startswith("sensor_mqtt__")
+                    or key.startswith("sensor_poll_group__")
                 )
                 for key in post_data
             )
@@ -1578,10 +1714,20 @@ def start_web_server(
 
         poll_group_rows: list[tuple[str, int]] = []
         key_precedence_rows: list[tuple[str, str]] = []
+        sensor_poll_group_choices: list[str] = []
         sensor_rows: list[dict[str, object]] = []
         profile_catalog_error = ""
         if contract_profile is not None:
             defaults_payload = _profile_default_payload(driver_key, contract_profile)
+            sensor_poll_group_choices = sorted(
+                str(name)
+                for name in dict(defaults_payload.get("poll_groups", {}))
+                if str(name).strip()
+            )
+            allowed_poll_groups = set(sensor_poll_group_choices)
+            sensor_poll_group_defaults = _sensor_poll_group_defaults_from_profile(
+                contract_profile
+            )
             merged_payload = {
                 "poll_groups": dict(defaults_payload.get("poll_groups", {})),
                 "key_precedence": dict(defaults_payload.get("key_precedence", {})),
@@ -1634,16 +1780,21 @@ def start_web_server(
                     base_preferences = _build_sensor_preferences_from_selected(
                         selected_sensors=base_selected,
                         available_keys=available_sensor_keys,
+                        default_poll_groups=sensor_poll_group_defaults,
                     )
                 allowed_set = set(available_sensor_keys)
                 base_preferences = _normalize_sensor_preferences(
                     base_preferences,
                     allowed_keys=allowed_set,
+                    allowed_poll_groups=allowed_poll_groups,
                 )
                 for key in available_sensor_keys:
                     if key not in base_preferences:
                         base_preferences[key] = {
                             "mqtt_enabled": key in selected_set,
+                            "poll_group": str(
+                                sensor_poll_group_defaults.get(key, "slow")
+                            ),
                         }
 
                 apps_dir = str(get_capability_status().get("apps_dir", "/data/apps"))
@@ -1667,6 +1818,9 @@ def start_web_server(
                         if key not in base_preferences:
                             base_preferences[key] = {
                                 "mqtt_enabled": False,
+                                "poll_group": str(
+                                    sensor_poll_group_defaults.get(key, "slow")
+                                ),
                             }
                     by_key = {
                         str(item.get("key", "")).strip(): item for item in catalog_rows
@@ -1688,6 +1842,12 @@ def start_web_server(
                                 "aliases": str(item.get("aliases", "")),
                                 "reference": str(item.get("reference", "")),
                                 "from_catalog": key in by_key,
+                                "poll_group": str(
+                                    base_preferences.get(key, {}).get(
+                                        "poll_group",
+                                        sensor_poll_group_defaults.get(key, "slow"),
+                                    )
+                                ),
                             }
                         )
                 else:
@@ -1706,6 +1866,12 @@ def start_web_server(
                                 "aliases": "",
                                 "reference": "",
                                 "from_catalog": False,
+                                "poll_group": str(
+                                    prefs.get(
+                                        "poll_group",
+                                        sensor_poll_group_defaults.get(key, "slow"),
+                                    )
+                                ),
                             }
                         )
             except ValueError as err:
@@ -1735,6 +1901,7 @@ def start_web_server(
             "key_precedence_rows": key_precedence_rows,
             "sensor_rows": sensor_rows,
             "sensor_rows_are_dual_toggle": driver_key in CATALOG_DRIVER_KEYS,
+            "sensor_poll_group_choices": sensor_poll_group_choices,
             "unified_sensor_rows": unified_rows,
             "catalog_sensor_groups": catalog_sensor_groups,
             "has_catalog_sensors": bool(catalog_sensor_groups),
@@ -1769,7 +1936,7 @@ def start_web_server(
         source = (data.get("source", [""])[0]).strip()
         local_profile_payload: dict[str, object] | None = None
         local_selected_sensors: list[str] | None = None
-        local_sensor_preferences: dict[str, dict[str, bool]] | None = None
+        local_sensor_preferences: dict[str, dict[str, Any]] | None = None
 
         if profile is not None:
             source = profile.driver_key
@@ -1840,6 +2007,10 @@ def start_web_server(
                         contract_profile,
                     )
                 )
+                poll_group_defaults = _sensor_poll_group_defaults_from_profile(
+                    contract_profile
+                )
+                allowed_poll_groups = set(dict(defaults.get("poll_groups", {})))
                 invalid_sensors = sorted(
                     key for key in posted_selected if key not in available_sensor_keys
                 )
@@ -1863,6 +2034,7 @@ def start_web_server(
                         key.startswith("sensor__")
                         or key.startswith("sensor_key__")
                         or key.startswith("sensor_mqtt__")
+                        or key.startswith("sensor_poll_group__")
                     )
                     for key in data
                 )
@@ -1871,12 +2043,14 @@ def start_web_server(
                     local_sensor_preferences = _normalize_sensor_preferences(
                         posted_preferences,
                         allowed_keys=available_sensor_keys,
+                        allowed_poll_groups=allowed_poll_groups,
                     )
                     if not local_sensor_preferences:
                         local_sensor_preferences = (
                             _build_sensor_preferences_from_selected(
                                 selected_sensors=local_selected_sensors,
                                 available_keys=sorted(available_sensor_keys),
+                                default_poll_groups=poll_group_defaults,
                             )
                         )
                 else:
@@ -1892,12 +2066,14 @@ def start_web_server(
                             else None
                         ),
                         allowed_keys=available_sensor_keys,
+                        allowed_poll_groups=allowed_poll_groups,
                     )
                     if not local_sensor_preferences:
                         local_sensor_preferences = (
                             _build_sensor_preferences_from_selected(
                                 selected_sensors=local_selected_sensors,
                                 available_keys=sorted(available_sensor_keys),
+                                default_poll_groups=poll_group_defaults,
                             )
                         )
             else:
@@ -1955,7 +2131,7 @@ def start_web_server(
 
     def _profile_editor_overrides_from_values(
         values: dict[str, str],
-    ) -> tuple[dict[str, object], list[str], dict[str, dict[str, bool]]]:
+    ) -> tuple[dict[str, object], list[str], dict[str, dict[str, Any]]]:
         payload: dict[str, object] = {
             "poll_groups": {},
             "key_precedence": {},
@@ -1963,6 +2139,7 @@ def start_web_server(
         selected_sensors: list[str] = []
         sensor_keys: set[str] = set()
         mqtt_enabled: set[str] = set()
+        poll_group_overrides: dict[str, str] = {}
         for key, value in values.items():
             if key.startswith("cfg_poll_group__"):
                 group = key.removeprefix("cfg_poll_group__").strip()
@@ -1985,11 +2162,25 @@ def start_web_server(
                 sensor_key = key.removeprefix("sensor_mqtt__").strip()
                 if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     mqtt_enabled.add(sensor_key)
-        sensor_preferences: dict[str, dict[str, bool]] = {}
+            elif key.startswith("sensor_poll_group__"):
+                sensor_key = key.removeprefix("sensor_poll_group__").strip()
+                poll_group = value.strip()
+                if (
+                    sensor_key
+                    and poll_group
+                    and not _is_bitfield_sensor_key(sensor_key)
+                ):
+                    poll_group_overrides[sensor_key] = poll_group
+        sensor_preferences: dict[str, dict[str, Any]] = {}
         if sensor_keys:
             for key in sorted(sensor_keys):
                 sensor_preferences[key] = {
                     "mqtt_enabled": key in mqtt_enabled,
+                    **(
+                        {"poll_group": poll_group_overrides[key]}
+                        if key in poll_group_overrides
+                        else {}
+                    ),
                 }
             selected_sensors = [
                 key for key in sorted(sensor_keys) if key in mqtt_enabled
@@ -2086,6 +2277,8 @@ def start_web_server(
             driver_key,
             contract_profile,
         )
+        poll_group_defaults = _sensor_poll_group_defaults_from_profile(contract_profile)
+        allowed_poll_groups = set(dict(defaults.get("poll_groups", {})))
         sensor_set = set(sensor_keys)
         invalid_sensors = sorted(
             {key for key in posted_selected if key not in sensor_set}
@@ -2104,12 +2297,15 @@ def start_web_server(
             )
         selected_sensors = sorted(set(posted_selected))
         normalized_preferences = _normalize_sensor_preferences(
-            posted_preferences, allowed_keys=sensor_set
+            posted_preferences,
+            allowed_keys=sensor_set,
+            allowed_poll_groups=allowed_poll_groups,
         )
         if not normalized_preferences:
             normalized_preferences = _build_sensor_preferences_from_selected(
                 selected_sensors=selected_sensors,
                 available_keys=sensor_keys,
+                default_poll_groups=poll_group_defaults,
             )
 
         return ProfileConfig(
@@ -2895,6 +3091,39 @@ def start_web_server(
                     )
                     theme_setter(selected_theme)
                     toast_message = f"Application theme set to {selected_theme}"
+                elif action == "set_poll_timers":
+                    metadata_raw = (
+                        data.get("metadata_refresh_interval_seconds", [""])[0].strip()
+                    )
+                    idle_raw = (data.get("idle_reconnect_seconds", [""])[0]).strip()
+                    try:
+                        metadata_seconds = max(1, int(metadata_raw))
+                    except ValueError:
+                        metadata_seconds = -1
+                    try:
+                        idle_seconds = max(1.0, float(idle_raw))
+                    except ValueError:
+                        idle_seconds = -1.0
+                    if metadata_seconds <= 0:
+                        toast_level = "danger"
+                        toast_message = (
+                            "Metadata refresh interval must be a positive integer"
+                        )
+                        status_code = HTTPStatus.BAD_REQUEST
+                    elif idle_seconds <= 0:
+                        toast_level = "danger"
+                        toast_message = (
+                            "Idle reconnect interval must be a positive number"
+                        )
+                        status_code = HTTPStatus.BAD_REQUEST
+                    else:
+                        metadata_refresh_setter(metadata_seconds)
+                        idle_reconnect_setter(idle_seconds)
+                        toast_message = (
+                            "Polling timers updated: "
+                            f"metadata refresh={metadata_seconds}s, "
+                            f"idle reconnect={idle_seconds:.1f}s"
+                        )
                 else:
                     selected = _normalize_timezone(
                         (data.get("timezone", [""])[0]).strip()

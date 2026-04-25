@@ -561,7 +561,7 @@ class Database:
                         ]
                 except (TypeError, ValueError, json.JSONDecodeError):
                     local_selected_sensors = None
-            local_sensor_preferences: dict[str, dict[str, bool]] | None = None
+            local_sensor_preferences: dict[str, dict[str, bool | str]] | None = None
             if row["local_sensor_preferences"]:
                 try:
                     parsed_preferences = json.loads(
@@ -572,9 +572,13 @@ class Database:
                         for key, raw in parsed_preferences.items():
                             if not isinstance(key, str) or not isinstance(raw, dict):
                                 continue
-                            local_sensor_preferences[key] = {
+                            pref: dict[str, bool | str] = {
                                 "mqtt_enabled": bool(raw.get("mqtt_enabled", True)),
                             }
+                            poll_group = str(raw.get("poll_group", "")).strip()
+                            if poll_group:
+                                pref["poll_group"] = poll_group
+                            local_sensor_preferences[key] = pref
                 except (TypeError, ValueError, json.JSONDecodeError):
                     local_sensor_preferences = None
             devices.append(
@@ -715,7 +719,7 @@ class Database:
             selected_sensors = json.loads(str(row["selected_sensors"]) or "[]")
             if not isinstance(selected_sensors, list):
                 selected_sensors = []
-            sensor_preferences: dict[str, dict[str, bool]] | None = None
+            sensor_preferences: dict[str, dict[str, bool | str]] | None = None
             if row["sensor_preferences"]:
                 loaded_preferences = json.loads(str(row["sensor_preferences"]) or "{}")
                 if isinstance(loaded_preferences, dict):
@@ -723,9 +727,13 @@ class Database:
                     for key, raw in loaded_preferences.items():
                         if not isinstance(key, str) or not isinstance(raw, dict):
                             continue
-                        sensor_preferences[key] = {
+                        pref: dict[str, bool | str] = {
                             "mqtt_enabled": bool(raw.get("mqtt_enabled", True)),
                         }
+                        poll_group = str(raw.get("poll_group", "")).strip()
+                        if poll_group:
+                            pref["poll_group"] = poll_group
+                        sensor_preferences[key] = pref
             items.append(
                 ProfileConfig(
                     profile_uid=str(row["profile_uid"]),

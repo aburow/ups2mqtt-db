@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
-SensorPreferenceMap = dict[str, dict[str, bool]]
+SensorPreferenceMap = dict[str, dict[str, bool | str]]
 
 
 @dataclass(slots=True)

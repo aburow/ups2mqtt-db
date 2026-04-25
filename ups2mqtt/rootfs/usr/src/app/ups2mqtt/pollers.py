@@ -22,6 +22,7 @@ _HYBRID_COLLISION_LOGGED: set[str] = set()
 
 METADATA_REFRESH_INTERVAL_SECONDS = 3600
 IDLE_RECONNECT_SECONDS = 300.0
+_POLL_TIMING_LOCK = threading.Lock()
 
 SMARTUPS_OID_MODEL = "1.3.6.1.4.1.318.1.1.1.1.1.1.0"
 SMARTUPS_OID_LOCATION = "1.3.6.1.4.1.318.1.1.1.1.1.2.0"
@@ -71,6 +72,32 @@ _APC_SNMP_CACHE_LOCK = threading.Lock()
 _APC_SNMP_CACHE: dict[str, _ApcSnmpCache] = {}
 _CYBERPOWER_SNMP_CACHE_LOCK = threading.Lock()
 _CYBERPOWER_SNMP_CACHE: dict[str, _CyberPowerSnmpCache] = {}
+
+
+def get_metadata_refresh_interval_seconds() -> int:
+    with _POLL_TIMING_LOCK:
+        return int(METADATA_REFRESH_INTERVAL_SECONDS)
+
+
+def set_metadata_refresh_interval_seconds(seconds: int) -> None:
+    if int(seconds) <= 0:
+        raise ValueError("metadata refresh interval must be > 0 seconds")
+    global METADATA_REFRESH_INTERVAL_SECONDS
+    with _POLL_TIMING_LOCK:
+        METADATA_REFRESH_INTERVAL_SECONDS = int(seconds)
+
+
+def get_idle_reconnect_seconds() -> float:
+    with _POLL_TIMING_LOCK:
+        return float(IDLE_RECONNECT_SECONDS)
+
+
+def set_idle_reconnect_seconds(seconds: float) -> None:
+    if float(seconds) <= 0:
+        raise ValueError("idle reconnect interval must be > 0 seconds")
+    global IDLE_RECONNECT_SECONDS
+    with _POLL_TIMING_LOCK:
+        IDLE_RECONNECT_SECONDS = float(seconds)
 
 
 def _decode_registers(

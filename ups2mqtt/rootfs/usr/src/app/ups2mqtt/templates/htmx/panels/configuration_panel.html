@@ -68,6 +68,46 @@
 
       <hr class="my-1"/>
 
+      <h3 class="h6 m-0">Polling Runtime Timers</h3>
+      <p class="text-muted small mb-0">
+        Metadata refresh controls how often SNMP identity cache is refreshed.
+        Idle reconnect controls when an idle Modbus socket is proactively reopened.
+      </p>
+      <form
+        class="d-flex flex-wrap gap-2 align-items-end"
+        hx-post="/htmx/devices/actions/configuration"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <input type="hidden" name="action" value="set_poll_timers"/>
+        <div>
+          <label class="form-label small mb-1">Metadata refresh seconds</label>
+          <input
+            class="form-control form-control-sm"
+            type="number"
+            min="1"
+            step="1"
+            name="metadata_refresh_interval_seconds"
+            value="{{ metadata_refresh_interval_seconds }}"
+          />
+        </div>
+        <div>
+          <label class="form-label small mb-1">Idle reconnect seconds</label>
+          <input
+            class="form-control form-control-sm"
+            type="number"
+            min="1"
+            step="1"
+            name="idle_reconnect_seconds"
+            value="{{ '%.0f'|format(idle_reconnect_seconds) }}"
+          />
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      </form>
+
+      <hr class="my-1"/>
+
       <h3 class="h6 m-0">Application Debug Level</h3>
       <p class="text-muted small mb-0">
         Controls runtime logging verbosity for the running service instance.

@@ -5,7 +5,16 @@
     <div class="small text-muted mb-2">Cross-driver unified sensor definitions from contract.</div>
     {% if sensor_rows_are_dual_toggle %}
     <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
+      <table class="table table-sm align-middle mb-0 sensor-selection-table">
+        <colgroup>
+          <col class="col-key"/>
+          <col class="col-label"/>
+          <col class="col-meta-a"/>
+          <col class="col-meta-b"/>
+          <col class="col-mqtt"/>
+          <col class="col-poll"/>
+          <col class="col-extra"/>
+        </colgroup>
         <thead>
           <tr>
             <th>Key</th>
@@ -14,6 +23,7 @@
             <th>Unit</th>
             <th>Register/OID</th>
             <th>MQTT</th>
+            <th>Poll Group</th>
           </tr>
         </thead>
         <tbody>
@@ -36,9 +46,26 @@
                 {% if selection_controls_disabled %}disabled{% endif %}
               />
             </td>
+            <td>
+              <div class="d-flex flex-wrap gap-2">
+                {% for group_name in sensor_poll_group_choices %}
+                <label class="form-check form-check-inline small mb-0">
+                  <input
+                    class="form-check-input"
+                    type="radio"
+                    name="sensor_poll_group__{{ sensor.key }}"
+                    value="{{ group_name }}"
+                    {% if sensor.poll_group == group_name %}checked{% endif %}
+                    {% if selection_controls_disabled %}disabled{% endif %}
+                  />
+                  <span class="form-check-label">{{ group_name }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="small text-muted">{{ empty_unified_message }}</td></tr>
+          <tr><td colspan="7" class="small text-muted">{{ empty_unified_message }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -75,7 +102,16 @@
       <div class="small fw-semibold text-info mb-1">{{ category_name }}</div>
       {% if sensor_rows_are_dual_toggle %}
       <div class="table-responsive">
-        <table class="table table-sm align-middle mb-0">
+        <table class="table table-sm align-middle mb-0 sensor-selection-table">
+          <colgroup>
+            <col class="col-key"/>
+            <col class="col-label"/>
+            <col class="col-meta-a"/>
+            <col class="col-meta-b"/>
+            <col class="col-mqtt"/>
+            <col class="col-poll"/>
+            <col class="col-extra"/>
+          </colgroup>
           <thead>
             <tr>
               <th>Key</th>
@@ -83,6 +119,7 @@
               <th>Unit</th>
               <th>Register/OID</th>
               <th>MQTT</th>
+              <th>Poll Group</th>
               <th>Aliases</th>
             </tr>
           </thead>
@@ -104,6 +141,23 @@
                   {% if sensor.mqtt_enabled %}checked{% endif %}
                   {% if selection_controls_disabled %}disabled{% endif %}
                 />
+              </td>
+              <td>
+                <div class="d-flex flex-wrap gap-2">
+                  {% for group_name in sensor_poll_group_choices %}
+                  <label class="form-check form-check-inline small mb-0">
+                    <input
+                      class="form-check-input"
+                      type="radio"
+                      name="sensor_poll_group__{{ sensor.key }}"
+                      value="{{ group_name }}"
+                      {% if sensor.poll_group == group_name %}checked{% endif %}
+                      {% if selection_controls_disabled %}disabled{% endif %}
+                    />
+                    <span class="form-check-label">{{ group_name }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
               </td>
               <td><small class="text-muted">{{ sensor.aliases or "" }}</small></td>
             </tr>

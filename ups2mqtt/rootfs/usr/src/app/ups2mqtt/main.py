@@ -29,7 +29,13 @@ from .log_buffer import BufferedLogHandler, LogBuffer
 from .metrics import MetricsStore
 from .model import DeviceConfig, ProfileConfig
 from .mqtt import MqttPublisher
-from .pollers import poll_device
+from .pollers import (
+    get_idle_reconnect_seconds,
+    get_metadata_refresh_interval_seconds,
+    poll_device,
+    set_idle_reconnect_seconds,
+    set_metadata_refresh_interval_seconds,
+)
 from .store import DeviceStore
 from .transforms import apply_catalog_transforms
 from .web import start_web_server
@@ -820,13 +826,20 @@ def _resolve_runtime_profile(
             apps_dir,
             runtime_source,
         )
-    sensor_preferences: dict[str, dict[str, bool]] = {}
+    sensor_preferences: dict[str, dict[str, Any]] = {}
     if binding is not None:
         if isinstance(binding.sensor_preferences, dict):
             sensor_preferences = {
-                str(key): {
-                    "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                }
+                str(key): (
+                    {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                )
                 for key, values in binding.sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
             }
@@ -843,9 +856,16 @@ def _resolve_runtime_profile(
             device.local_sensor_preferences, dict
         ):
             sensor_preferences = {
-                str(key): {
-                    "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                }
+                str(key): (
+                    {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                )
                 for key, values in device.local_sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
             }
@@ -874,9 +894,16 @@ def _resolve_runtime_profile(
             )
         if isinstance(device.local_sensor_preferences, dict):
             sensor_preferences = {
-                str(key): {
-                    "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                }
+                str(key): (
+                    {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                )
                 for key, values in device.local_sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
             }
@@ -886,6 +913,17 @@ def _resolve_runtime_profile(
             "Profile resolution for %s: no explicit selection, using all %d available keys",
             device.id,
             len(available_keys),
+        )
+
+    sensor_poll_overrides = _apply_sensor_poll_group_overrides(
+        effective_profile=effective_profile,
+        sensor_preferences=sensor_preferences,
+    )
+    if sensor_poll_overrides > 0:
+        LOG.debug(
+            "Profile resolution for %s: applied %d poll_group sensor overrides",
+            device.id,
+            sensor_poll_overrides,
         )
 
     # Apply sensor preferences (mqtt_enabled filtering)
@@ -909,19 +947,8 @@ def _resolve_runtime_profile(
                 device.id,
                 mqtt_disabled_count,
             )
+    mqtt_disabled_count = selected_before_prefs - len(selected_keys)
     if sensor_preferences:
-        selected_set = set(selected_keys)
-        selected_keys = [
-            key
-            for key in available_keys
-            if bool(
-                sensor_preferences.get(key, {}).get(
-                    "mqtt_enabled",
-                    key in selected_set,
-                )
-            )
-        ]
-        mqtt_disabled_count = selected_before_prefs - len(selected_keys)
         LOG.debug(
             "Profile resolution for %s: after mqtt_enabled filter: selected_keys=%d (was %d), filtered_out=%d",
             device.id,
@@ -929,12 +956,6 @@ def _resolve_runtime_profile(
             selected_before_prefs,
             mqtt_disabled_count,
         )
-        if mqtt_disabled_count > 0:
-            LOG.debug(
-                "Profile resolution for %s: %d sensors excluded due to mqtt_enabled=false",
-                device.id,
-                mqtt_disabled_count,
-            )
 
     LOG.info(
         "Profile resolution for %s: resolved %d discovery keys (contract=%d, catalog=%d, mqtt_disabled=%d)",
@@ -942,7 +963,7 @@ def _resolve_runtime_profile(
         len(selected_keys),
         contract_count,
         catalog_count,
-        selected_before_prefs - len(selected_keys) if sensor_preferences else 0,
+        mqtt_disabled_count if sensor_preferences else 0,
     )
     LOG.debug(
         "Profile resolution for %s: discovery keys: %s",
@@ -999,6 +1020,111 @@ def _apply_profile_payload_overrides(
                     profile_precedence[str(metric_key)] = source_text
 
 
+def _apply_sensor_poll_group_overrides(
+    *,
+    effective_profile: dict[str, Any],
+    sensor_preferences: dict[str, dict[str, Any]],
+) -> int:
+    poll_groups = effective_profile.get("poll_groups", {})
+    if not isinstance(poll_groups, dict):
+        return 0
+    interval_by_group: dict[str, int] = {}
+    for name, spec in poll_groups.items():
+        if not isinstance(name, str) or not isinstance(spec, dict):
+            continue
+        try:
+            interval_by_group[name] = max(1, int(spec.get("interval_s", 60)))
+        except (TypeError, ValueError):
+            continue
+    if not interval_by_group:
+        return 0
+
+    overrides: dict[str, str] = {}
+    for key, values in sensor_preferences.items():
+        if not isinstance(key, str) or not isinstance(values, dict):
+            continue
+        if not bool(values.get("mqtt_enabled", True)):
+            continue
+        group = str(values.get("poll_group", "")).strip()
+        if group in interval_by_group:
+            overrides[key] = group
+    if not overrides:
+        return 0
+
+    updated = 0
+
+    def _apply_to_registers(registers: Any) -> None:
+        nonlocal updated
+        if not isinstance(registers, list):
+            return
+        for item in registers:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key", "")).strip()
+            group = overrides.get(key)
+            if not group:
+                continue
+            if str(item.get("poll_group", "slow")) != group:
+                item["poll_group"] = group
+                updated += 1
+
+    def _apply_to_oids(oids: Any) -> None:
+        nonlocal updated
+        if not isinstance(oids, dict):
+            return
+        for key, spec in oids.items():
+            if not isinstance(spec, dict):
+                continue
+            group = overrides.get(str(key))
+            if not group:
+                continue
+            if str(spec.get("poll_group", "slow")) != group:
+                spec["poll_group"] = group
+                updated += 1
+
+    def _apply_to_blocks(blocks: Any) -> None:
+        nonlocal updated
+        if not isinstance(blocks, list):
+            return
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            metrics = block.get("metrics", [])
+            if not isinstance(metrics, list):
+                continue
+            block_groups = {
+                overrides.get(str(metric).strip(), "")
+                for metric in metrics
+                if str(metric).strip()
+            }
+            block_groups = {group for group in block_groups if group}
+            if not block_groups:
+                continue
+            if len(block_groups) == 1:
+                chosen = next(iter(block_groups))
+            else:
+                chosen = min(
+                    block_groups,
+                    key=lambda name: interval_by_group.get(name, 60),
+                )
+            if str(block.get("poll_group", "slow")) != chosen:
+                block["poll_group"] = chosen
+                updated += 1
+
+    _apply_to_registers(effective_profile.get("registers", []))
+    _apply_to_blocks(effective_profile.get("register_blocks", []))
+    _apply_to_oids(effective_profile.get("oids", {}))
+    for transport in ("modbus", "snmp"):
+        section = effective_profile.get(transport, {})
+        if not isinstance(section, dict):
+            continue
+        _apply_to_registers(section.get("registers", []))
+        _apply_to_blocks(section.get("register_blocks", []))
+        _apply_to_oids(section.get("oids", {}))
+        _apply_to_blocks(section.get("snmp_blocks", []))
+    return updated
+
+
 async def async_main() -> None:
     # Default to INFO for better observability, can be overridden by environment
     log_level_name = os.environ.get("UPS_UNIFIED_LOG_LEVEL", "INFO").upper()
@@ -1011,13 +1137,31 @@ async def async_main() -> None:
     config = load_config()
     os.environ.setdefault("UPS_UNIFIED_APPS_DIR", config.apps_dir)
     runtime_settings = load_runtime_settings()
-    runtime_settings_state: dict[str, str] = {
+    runtime_settings_state: dict[str, Any] = {
         "timezone": str(runtime_settings.get("timezone", "UTC")).strip() or "UTC",
         "theme": (
             str(runtime_settings.get("theme", "system")).strip().lower()
             if str(runtime_settings.get("theme", "system")).strip().lower()
             in {"light", "dark", "system"}
             else "system"
+        ),
+        "metadata_refresh_interval_seconds": max(
+            1,
+            int(
+                runtime_settings.get(
+                    "metadata_refresh_interval_seconds",
+                    get_metadata_refresh_interval_seconds(),
+                )
+            ),
+        ),
+        "idle_reconnect_seconds": max(
+            1.0,
+            float(
+                runtime_settings.get(
+                    "idle_reconnect_seconds",
+                    get_idle_reconnect_seconds(),
+                )
+            ),
         ),
     }
     runtime_settings_lock = threading.Lock()
@@ -1044,6 +1188,34 @@ async def async_main() -> None:
                 name if name in {"light", "dark", "system"} else "system"
             )
             _persist_runtime_settings()
+
+    def _get_metadata_refresh_interval_seconds() -> int:
+        with runtime_settings_lock:
+            return int(runtime_settings_state["metadata_refresh_interval_seconds"])
+
+    def _set_metadata_refresh_interval_seconds(seconds: int) -> None:
+        seconds_int = max(1, int(seconds))
+        set_metadata_refresh_interval_seconds(seconds_int)
+        with runtime_settings_lock:
+            runtime_settings_state["metadata_refresh_interval_seconds"] = seconds_int
+            _persist_runtime_settings()
+
+    def _get_idle_reconnect_seconds() -> float:
+        with runtime_settings_lock:
+            return float(runtime_settings_state["idle_reconnect_seconds"])
+
+    def _set_idle_reconnect_seconds(seconds: float) -> None:
+        seconds_value = max(1.0, float(seconds))
+        set_idle_reconnect_seconds(seconds_value)
+        with runtime_settings_lock:
+            runtime_settings_state["idle_reconnect_seconds"] = seconds_value
+            _persist_runtime_settings()
+
+    # Apply persisted runtime timer settings at startup.
+    _set_metadata_refresh_interval_seconds(
+        int(runtime_settings_state["metadata_refresh_interval_seconds"])
+    )
+    _set_idle_reconnect_seconds(float(runtime_settings_state["idle_reconnect_seconds"]))
 
     log_buffer = LogBuffer()
     buffered_handler = BufferedLogHandler(log_buffer)
@@ -1193,6 +1365,10 @@ async def async_main() -> None:
             set_timezone=_set_timezone,
             get_theme=_get_theme,
             set_theme=_set_theme,
+            get_metadata_refresh_interval_seconds=_get_metadata_refresh_interval_seconds,
+            set_metadata_refresh_interval_seconds=_set_metadata_refresh_interval_seconds,
+            get_idle_reconnect_seconds=_get_idle_reconnect_seconds,
+            set_idle_reconnect_seconds=_set_idle_reconnect_seconds,
         )
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}

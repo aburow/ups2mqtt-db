@@ -42,6 +42,23 @@
       background: var(--bs-body-bg);
       border: 1px solid var(--bs-border-color);
     }
+    .sensor-selection-table {
+      table-layout: fixed;
+      width: 100%;
+    }
+    .sensor-selection-table col.col-key { width: 16%; }
+    .sensor-selection-table col.col-label { width: 20%; }
+    .sensor-selection-table col.col-meta-a { width: 10%; }
+    .sensor-selection-table col.col-meta-b { width: 20%; }
+    .sensor-selection-table col.col-mqtt { width: 7%; }
+    .sensor-selection-table col.col-poll { width: 17%; }
+    .sensor-selection-table col.col-extra { width: 10%; }
+    .sensor-selection-table th,
+    .sensor-selection-table td {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      vertical-align: middle;
+    }
   </style>
 </head>
 <body

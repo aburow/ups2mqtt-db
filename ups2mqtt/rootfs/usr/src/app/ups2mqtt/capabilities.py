@@ -12,6 +12,7 @@ from typing import Any
 
 from .capability_repository import get_capability_repository
 from .drivers.runtime_metadata import validate_driver_metadata_ownership
+from .icon_resolver import resolve_enabled_defaults
 
 RUNTIME_PROFILE_EXCEPTIONS = (
     OSError,
@@ -322,7 +323,88 @@ def _collect_metric_keys(profile: dict[str, Any]) -> set[str]:
             if isinstance(spec, dict) and isinstance(spec.get("key"), str)
         }
         return var_keys | status_keys
+    if protocol == "multi_source":
+        keys: set[str] = set()
+        active_sources = profile.get("active_sources", {})
+        if isinstance(active_sources, dict):
+            modbus = active_sources.get("modbus", {})
+            if isinstance(modbus, dict):
+                for item in modbus.get("registers", []):
+                    if isinstance(item, dict) and "key" in item:
+                        keys.add(str(item["key"]))
+            snmp = active_sources.get("snmp", {})
+            if isinstance(snmp, dict):
+                oids = snmp.get("oids", {})
+                if isinstance(oids, dict):
+                    keys.update(str(key) for key in oids.keys())
+        return keys
     return set()
+
+
+def _validate_default_enabled_units(
+    *,
+    profiles: dict[str, dict[str, Any]],
+    repo: Any,
+    apps_dir: str,
+) -> list[str]:
+    """Validate that default-enabled numeric sensors declare units.
+
+    Rule:
+    - For default-enabled keys in categories `core` or `measurement`, unit must be set.
+    - Status/metadata/diagnostic fields may remain unitless.
+    """
+    status_suffixes = (
+        "_status",
+        "_source",
+        "_state",
+        "_result",
+        "_fail",
+        "_fault",
+        "_present",
+        "_active",
+        "_muted",
+        "_off",
+        "_on",
+        "_eod",
+        "_untrack",
+        "_timeout",
+        "_shorted",
+        "_connected",
+        "_low",
+        "_bf",
+    )
+
+    errors: list[str] = []
+    for driver_key, profile in profiles.items():
+        metric_keys = sorted(_collect_metric_keys(profile))
+        if not metric_keys:
+            continue
+        defaults = resolve_enabled_defaults(
+            driver_key,
+            metric_keys,
+            apps_dir=apps_dir,
+            authoritative=False,
+        )
+        rows = repo.load_catalog_sensor_rows(driver_key)
+        row_by_key = {str(row.get("key", "")): row for row in rows}
+        for key in metric_keys:
+            if not bool(defaults.get(key, True)):
+                continue
+            row = row_by_key.get(key)
+            if row is None:
+                continue
+            if str(row.get("unit", "")).strip():
+                continue
+            category = str(row.get("category", "")).strip().lower()
+            if category not in {"core", "measurement"}:
+                continue
+            key_lower = key.lower()
+            if key_lower.endswith(status_suffixes):
+                continue
+            errors.append(
+                f"{driver_key}.{key}: default-enabled {category} sensor missing unit"
+            )
+    return errors
 
 
 def _validate_profile(profile: dict[str, Any]) -> list[str]:
@@ -909,6 +991,7 @@ def load_capabilities(
     repo.seed_baseline_if_needed()
     profiles, runtime_errors = repo.load_runtime_profiles()
     metric_contracts = repo.load_metric_contracts()
+    apps_dir = os.environ.get("UPS_UNIFIED_APPS_DIR", "/data/apps")
 
     if not profiles:
         raise ValueError("No profiles found in capability database")
@@ -919,8 +1002,16 @@ def load_capabilities(
     }
     if metric_contracts:
         payload["metric_contracts"] = metric_contracts
-    if runtime_errors:
-        payload["validation_errors"] = runtime_errors
+    validation_errors = list(runtime_errors)
+    validation_errors.extend(
+        _validate_default_enabled_units(
+            profiles=profiles,
+            repo=repo,
+            apps_dir=apps_dir,
+        )
+    )
+    if validation_errors:
+        payload["validation_errors"] = validation_errors
     return payload
 
 
