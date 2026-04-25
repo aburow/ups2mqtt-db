@@ -9,17 +9,23 @@ from time import monotonic
 from typing import Any
 
 from .catalog import get_catalog_derived_metrics
+from .capability_repository import get_capability_repository
 
 LOG = logging.getLogger("ups2mqtt")
 
 _MISSING_SOURCE_LOG_INTERVAL_S = 60.0
 _MISSING_SOURCE_WARNINGS: dict[tuple[str, str, str], float] = {}
+_UNMAPPED_VALUE_WARNINGS: dict[tuple[str, str, str], float] = {}
 _SUPPORTED_TRANSFORMS = {
     "bitfield_bit_to_bool",
     "enum_map",
     "days_since_epoch_to_date",
 }
 _SUPPORTED_OUTPUT_TYPES = {"bool", "number", "string", "date", "datetime"}
+_CODE_SENSOR_KEYS_REQUIRE_MAP = {
+    "output_source",
+    "battery_status",
+}
 
 
 def _parse_bool(value: Any) -> bool:
@@ -117,7 +123,7 @@ def _transform_enum_map(source_value: Any, params: dict[str, Any]) -> str | None
             if mapped is None:
                 return None
             return str(mapped)
-    raise ValueError(f"enum_map has no mapping for {source_value!r}")
+    return None
 
 
 def _transform_days_since_epoch_to_date(
@@ -261,10 +267,20 @@ def apply_catalog_transforms(
 
     # No chaining in v1. Any transform sourcing another declared output key is skipped.
     declared_output_keys: set[str] = set()
+    enum_source_keys: set[str] = set()
+    bitfield_source_keys_mapped: set[str] = set()
     for declaration in transforms:
         output_key = str(declaration.get("output_key", "")).strip()
         if output_key:
             declared_output_keys.add(output_key)
+        if str(declaration.get("transform", "")).strip() == "enum_map":
+            source_key = str(declaration.get("source_key", "")).strip()
+            if source_key:
+                enum_source_keys.add(source_key)
+        if str(declaration.get("transform", "")).strip() == "bitfield_bit_to_bool":
+            source_key = str(declaration.get("source_key", "")).strip()
+            if source_key:
+                bitfield_source_keys_mapped.add(source_key)
 
     for declaration in transforms:
         validated = _validate_transform_declaration(declaration)
@@ -307,6 +323,22 @@ def apply_catalog_transforms(
                 params=params,
             )
             if transformed_value is None:
+                if transform_name == "enum_map":
+                    rate_key = (
+                        device_uid,
+                        output_key,
+                        f"unmapped_enum:{source_value}",
+                    )
+                    now = monotonic()
+                    last_logged = _UNMAPPED_VALUE_WARNINGS.get(rate_key, 0.0)
+                    if now - last_logged >= _MISSING_SOURCE_LOG_INTERVAL_S:
+                        _UNMAPPED_VALUE_WARNINGS[rate_key] = now
+                        LOG.warning(
+                            "Transform skipped (unmapped enum): %s source=%s value=%r",
+                            output_key,
+                            source_key,
+                            source_value,
+                        )
                 continue
             if not _type_matches(output_type, transformed_value):
                 raise ValueError(
@@ -314,6 +346,11 @@ def apply_catalog_transforms(
                 )
             output[output_key] = transformed_value
             value_cache[output_key] = transformed_value
+            # For required status/code sensors, publish human-readable text on
+            # the primary key as well (e.g. output_source, battery_status).
+            if transform_name == "enum_map" and source_key in _CODE_SENSOR_KEYS_REQUIRE_MAP:
+                output[source_key] = transformed_value
+                value_cache[source_key] = transformed_value
             LOG.debug(
                 "Transform applied: %s from %s (source=%s)",
                 output_key,
@@ -323,5 +360,42 @@ def apply_catalog_transforms(
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             LOG.error("Transform failed: %s (%s)", output_key, err)
             continue
+
+    # Hide raw bitfield sensors; publish decoded flag outputs only.
+    repo = get_capability_repository()
+    bitfield_source_keys = repo.load_bitfield_source_keys(runtime_source)
+    for source_key in sorted(bitfield_source_keys):
+        if source_key not in bitfield_source_keys_mapped:
+            rate_key = (device_uid, source_key, "missing_bitfield_mapping")
+            now = monotonic()
+            last_logged = _UNMAPPED_VALUE_WARNINGS.get(rate_key, 0.0)
+            if now - last_logged >= _MISSING_SOURCE_LOG_INTERVAL_S:
+                _UNMAPPED_VALUE_WARNINGS[rate_key] = now
+                LOG.warning(
+                    "Suppressing unmapped bitfield source %s for %s",
+                    source_key,
+                    runtime_source,
+                )
+        output.pop(source_key, None)
+        value_cache.pop(source_key, None)
+
+    # For designated code-like sensors, suppress raw if no enum map exists.
+    for sensor_key in sorted(_CODE_SENSOR_KEYS_REQUIRE_MAP):
+        if sensor_key not in output:
+            continue
+        if sensor_key in enum_source_keys:
+            continue
+        rate_key = (device_uid, sensor_key, "missing_enum_mapping")
+        now = monotonic()
+        last_logged = _UNMAPPED_VALUE_WARNINGS.get(rate_key, 0.0)
+        if now - last_logged >= _MISSING_SOURCE_LOG_INTERVAL_S:
+            _UNMAPPED_VALUE_WARNINGS[rate_key] = now
+            LOG.warning(
+                "Suppressing unmapped code sensor %s for %s",
+                sensor_key,
+                runtime_source,
+            )
+        output.pop(sensor_key, None)
+        value_cache.pop(sensor_key, None)
 
     return output

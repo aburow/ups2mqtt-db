@@ -14,7 +14,6 @@
             <th>Unit</th>
             <th>Register/OID</th>
             <th>MQTT</th>
-            <th>HA Visible</th>
           </tr>
         </thead>
         <tbody>
@@ -27,35 +26,19 @@
             <td><small class="text-muted">{{ sensor.reference or "" }}</small></td>
             <td>
               <input type="hidden" name="sensor_key__{{ sensor.key }}" value="1"/>
-              <input type="hidden" name="sensor_visible_prev__{{ sensor.key }}" value="{{ 1 if sensor.ha_visible else 0 }}"/>
-              <input type="hidden" name="sensor_visible_active__{{ sensor.key }}" value="{{ 1 if sensor.mqtt_enabled else 0 }}" data-pref-active-for="{{ sensor.key }}"/>
               <input
                 class="form-check-input"
                 type="checkbox"
                 name="sensor_mqtt__{{ sensor.key }}"
                 data-pref-toggle="mqtt"
                 data-key="{{ sensor.key }}"
-                onchange="window.ups2mqttSyncVisibility(this)"
                 {% if sensor.mqtt_enabled %}checked{% endif %}
                 {% if selection_controls_disabled %}disabled{% endif %}
               />
             </td>
-            <td>
-              <input
-                class="form-check-input"
-                type="checkbox"
-                name="sensor_visible__{{ sensor.key }}"
-                data-pref-toggle="visible"
-                data-key="{{ sensor.key }}"
-                data-visibility-locked="{{ 1 if selection_controls_disabled else 0 }}"
-                onchange="window.ups2mqttTrackVisibility(this)"
-                {% if sensor.ha_visible %}checked{% endif %}
-                {% if selection_controls_disabled or not sensor.mqtt_enabled %}disabled{% endif %}
-              />
-            </td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="small text-muted">{{ empty_unified_message }}</td></tr>
+          <tr><td colspan="6" class="small text-muted">{{ empty_unified_message }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -100,7 +83,6 @@
               <th>Unit</th>
               <th>Register/OID</th>
               <th>MQTT</th>
-              <th>HA Visible</th>
               <th>Aliases</th>
             </tr>
           </thead>
@@ -113,30 +95,14 @@
               <td><small class="text-muted">{{ sensor.reference or "" }}</small></td>
               <td>
                 <input type="hidden" name="sensor_key__{{ sensor.key }}" value="1"/>
-                <input type="hidden" name="sensor_visible_prev__{{ sensor.key }}" value="{{ 1 if sensor.ha_visible else 0 }}"/>
-                <input type="hidden" name="sensor_visible_active__{{ sensor.key }}" value="{{ 1 if sensor.mqtt_enabled else 0 }}" data-pref-active-for="{{ sensor.key }}"/>
                 <input
                   class="form-check-input"
                   type="checkbox"
                   name="sensor_mqtt__{{ sensor.key }}"
                   data-pref-toggle="mqtt"
                   data-key="{{ sensor.key }}"
-                  onchange="window.ups2mqttSyncVisibility(this)"
                   {% if sensor.mqtt_enabled %}checked{% endif %}
                   {% if selection_controls_disabled %}disabled{% endif %}
-                />
-              </td>
-              <td>
-                <input
-                  class="form-check-input"
-                  type="checkbox"
-                  name="sensor_visible__{{ sensor.key }}"
-                  data-pref-toggle="visible"
-                  data-key="{{ sensor.key }}"
-                  data-visibility-locked="{{ 1 if selection_controls_disabled else 0 }}"
-                  onchange="window.ups2mqttTrackVisibility(this)"
-                  {% if sensor.ha_visible %}checked{% endif %}
-                  {% if selection_controls_disabled or not sensor.mqtt_enabled %}disabled{% endif %}
                 />
               </td>
               <td><small class="text-muted">{{ sensor.aliases or "" }}</small></td>

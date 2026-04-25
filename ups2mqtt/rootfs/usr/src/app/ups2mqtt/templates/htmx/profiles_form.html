@@ -128,7 +128,7 @@
       <div class="card">
         <div class="card-body py-2">
           <div class="small fw-semibold mb-1">Sensor Pass-through Selection</div>
-          <div class="small text-muted mb-2">Select per-sensor MQTT publish and HA visibility behavior for this profile.</div>
+          <div class="small text-muted mb-2">Select per-sensor MQTT publish behavior for this profile.</div>
           {% with
             selection_controls_disabled=profile_is_protected,
             empty_unified_message="No unified contract sensors.",
@@ -150,41 +150,3 @@
     </form>
   </div>
 </div>
-<script>
-  (() => {
-    if (!window.ups2mqttTrackVisibility) {
-      window.ups2mqttTrackVisibility = (visibleInput) => {
-        if (!visibleInput) return;
-        const key = visibleInput.dataset.key;
-        const form = visibleInput.closest("form");
-        if (!key || !form) return;
-        const prev = form.querySelector(`[name="sensor_visible_prev__${key}"]`);
-        if (prev) prev.value = visibleInput.checked ? "1" : "0";
-      };
-    }
-    if (!window.ups2mqttSyncVisibility) {
-      window.ups2mqttSyncVisibility = (mqttInput) => {
-        if (!mqttInput) return;
-        const key = mqttInput.dataset.key;
-        const form = mqttInput.closest("form");
-        if (!key || !form) return;
-        const visible = form.querySelector(`[name="sensor_visible__${key}"]`);
-        const active = form.querySelector(`[name="sensor_visible_active__${key}"]`);
-        if (!visible || !active) return;
-        const mqttOn = !!mqttInput.checked;
-        const locked = visible.dataset.visibilityLocked === "1";
-        visible.disabled = locked || !mqttOn;
-        active.value = locked ? "0" : (mqttOn ? "1" : "0");
-      };
-    }
-    if (!window.ups2mqttInitVisibilityState) {
-      window.ups2mqttInitVisibilityState = (root) => {
-        if (!root) return;
-        root.querySelectorAll('input[data-pref-toggle="mqtt"]').forEach((input) => {
-          window.ups2mqttSyncVisibility(input);
-        });
-      };
-    }
-    window.ups2mqttInitVisibilityState(document);
-  })();
-</script>

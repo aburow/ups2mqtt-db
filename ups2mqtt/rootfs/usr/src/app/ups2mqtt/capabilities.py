@@ -5,18 +5,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
-from .drivers.runtime_metadata import (
-    get_legacy_driver_ids,
-    get_migrated_driver_ids,
-    load_plugin_capability_profile,
-    validate_driver_metadata_ownership,
-)
+from .capability_repository import get_capability_repository
+from .drivers.runtime_metadata import validate_driver_metadata_ownership
 
 RUNTIME_PROFILE_EXCEPTIONS = (
     OSError,
@@ -906,62 +901,27 @@ def _discover_runtime_profiles(
 def load_capabilities(
     path: str = "/usr/src/app/capabilities/capabilities.json",
 ) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    bundled_profiles = data.get("profiles", {})
-    if not isinstance(bundled_profiles, dict) or not bundled_profiles:
-        raise ValueError(f"No profiles found in {path}")
-
+    """Load capability metadata from SQLite (canonical source)."""
+    del path  # DB is now the canonical source of capability metadata.
     validate_driver_metadata_ownership()
-    migrated_profile_ids = get_migrated_driver_ids()
-    legacy_profile_ids = get_legacy_driver_ids() & EXPECTED_RUNTIME_PROFILE_IDS
 
-    plugin_profiles: dict[str, Any] = {}
-    plugin_errors: list[str] = []
-    for driver_id in sorted(migrated_profile_ids):
-        try:
-            profile = load_plugin_capability_profile(driver_id)
-            plugin_profiles[driver_id] = profile
-        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-            plugin_errors.append(f"{driver_id}: plugin profile load failed: {err}")
+    repo = get_capability_repository()
+    repo.seed_baseline_if_needed()
+    profiles, runtime_errors = repo.load_runtime_profiles()
+    metric_contracts = repo.load_metric_contracts()
 
-    runtime_profiles, runtime_source, runtime_errors = _discover_runtime_profiles(
-        allowed_profile_ids=legacy_profile_ids,
-        migrated_profile_ids=migrated_profile_ids,
-    )
-    mixed_drivers = migrated_profile_ids & set(runtime_profiles.keys())
-    if mixed_drivers:
-        message = "Mixed metadata sourcing detected for migrated drivers: " + ", ".join(
-            sorted(mixed_drivers)
-        )
-        LOG.error(message)
-        raise RuntimeError(message)
+    if not profiles:
+        raise ValueError("No profiles found in capability database")
 
-    runtime_errors.extend(plugin_errors)
-    if plugin_profiles:
-        runtime_profiles = dict(runtime_profiles)
-        runtime_profiles.update(plugin_profiles)
-        runtime_source = (
-            f"{runtime_source}+plugin"
-            if runtime_source != "none"
-            else "runtime_plugin_registry"
-        )
-    if runtime_profiles:
-        merged_profiles = dict(bundled_profiles)
-        merged_profiles.update(runtime_profiles)
-        payload: dict[str, Any] = {
-            "source": runtime_source,
-            "profiles": merged_profiles,
-        }
-        for key in ("metadata", "metric_contracts"):
-            if key in data:
-                payload[key] = data[key]
-        if runtime_errors:
-            payload["validation_errors"] = runtime_errors
-        return payload
-
+    payload: dict[str, Any] = {
+        "source": "database",
+        "profiles": profiles,
+    }
+    if metric_contracts:
+        payload["metric_contracts"] = metric_contracts
     if runtime_errors:
-        data["validation_errors"] = runtime_errors
-    return data
+        payload["validation_errors"] = runtime_errors
+    return payload
 
 
 def source_keys(profile: dict[str, Any]) -> list[str]:
@@ -1035,11 +995,10 @@ def source_keys(profile: dict[str, Any]) -> list[str]:
 def bundled_source_keys(
     source: str, path: str = "/usr/src/app/capabilities/capabilities.json"
 ) -> list[str]:
-    """Return metric keys for a source from bundled capabilities only."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    profiles = data.get("profiles", {})
-    if not isinstance(profiles, dict):
-        return []
+    """Return metric keys for a source from DB-backed capabilities."""
+    del path
+    repo = get_capability_repository()
+    profiles, _errors = repo.load_runtime_profiles()
     profile = profiles.get(source)
     if not isinstance(profile, dict):
         return []

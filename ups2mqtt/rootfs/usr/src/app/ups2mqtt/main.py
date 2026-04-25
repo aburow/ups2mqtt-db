@@ -14,6 +14,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+from .capability_repository import configure_capability_repository
 from .capabilities import (
     bundled_source_keys,
     load_capabilities,
@@ -226,7 +227,6 @@ async def _device_loop(
     runtime_source: str,
     profile: dict[str, Any],
     discovery_keys: list[str],
-    discovery_visibility: dict[str, bool],
     mqtt: MqttPublisher,
     default_interval: int,
     poll_timeout: int,
@@ -365,7 +365,6 @@ async def _device_loop(
                     runtime_device,
                     mqtt_values,
                     discovery_keys=discovery_keys,
-                    discovery_visibility=discovery_visibility,
                 )
                 if published:
                     LOG.info(
@@ -426,6 +425,8 @@ async def _reconcile_device_tasks(
     discovery_registry: dict[str, set[str]],
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]],
     apps_dir: str | None = None,
+    ha_url: str | None = None,
+    ha_token: str | None = None,
 ) -> None:
     desired = {device.device_uid: device for device in store.list_devices()}
 
@@ -450,7 +451,6 @@ async def _reconcile_device_tasks(
             _existing_source,
             _existing_resolved_profile,
             _existing_discovery_keys,
-            _existing_discovery_visibility,
             new_runtime_signature,
         ) = _resolve_runtime_profile(
             device=new_device,
@@ -486,7 +486,6 @@ async def _reconcile_device_tasks(
             runtime_source,
             runtime_profile,
             discovery_keys,
-            discovery_visibility,
             runtime_signature,
         ) = _resolve_runtime_profile(
             device=device,
@@ -549,9 +548,29 @@ async def _reconcile_device_tasks(
             mqtt.publish_discovery(
                 runtime_device,
                 keys,
-                discovery_visibility=discovery_visibility,
             )
             discovery_registry[uid] = current
+            if ha_url and ha_token:
+                expected_defaults = {key: True for key in keys}
+                if expected_defaults:
+                    apply_result = await apply_entity_default_states(
+                        ha_url=ha_url,
+                        ha_token=ha_token,
+                        device_identity=runtime_device.device_uid or runtime_device.id,
+                        expected_defaults=expected_defaults,
+                    )
+                    if "error" in apply_result:
+                        LOG.warning(
+                            "HA default-state apply failed for %s: %s",
+                            runtime_device.id,
+                            apply_result.get("error"),
+                        )
+                    elif apply_result.get("failed"):
+                        LOG.warning(
+                            "HA default-state apply had %d failed updates for %s",
+                            len(apply_result.get("failed", [])),
+                            runtime_device.id,
+                        )
 
         if not device.polling_enabled:
             mqtt.publish_unavailable(device)
@@ -568,7 +587,6 @@ async def _reconcile_device_tasks(
                 runtime_source,
                 runtime_profile,
                 keys,
-                discovery_visibility,
                 mqtt,
                 default_interval,
                 poll_timeout,
@@ -711,7 +729,12 @@ def _resolve_runtime_profile(
             )
 
     # Get contract sensor keys
-    available_keys = [str(item) for item in source_keys(effective_profile) if str(item)]
+    available_keys = [
+        key
+        for item in source_keys(effective_profile)
+        for key in [str(item).strip()]
+        if key and not key.lower().endswith("_bf")
+    ]
     available_set = set(available_keys)
     contract_count = len(available_keys)
 
@@ -731,7 +754,7 @@ def _resolve_runtime_profile(
             apps_dir,
         )
         try:
-            from .catalog import get_catalog_keys
+            from .catalog import get_catalog_derived_metrics, get_catalog_keys
 
             catalog_keys = get_catalog_keys(
                 driver_key=runtime_source,
@@ -752,6 +775,29 @@ def _resolve_runtime_profile(
                 contract_count,
                 len(available_set),
             )
+            derived = get_catalog_derived_metrics(
+                driver_key=runtime_source,
+                apps_dir=apps_dir,
+            )
+            derived_added = 0
+            for declaration in derived:
+                if not isinstance(declaration, dict):
+                    continue
+                output_key = str(declaration.get("output_key", "")).strip()
+                if (
+                    output_key
+                    and output_key not in available_set
+                    and not output_key.lower().endswith("_bf")
+                ):
+                    available_keys.append(output_key)
+                    available_set.add(output_key)
+                    derived_added += 1
+            if derived_added:
+                LOG.debug(
+                    "Profile resolution for %s: added %d transform output keys",
+                    device.id,
+                    derived_added,
+                )
         except (ImportError, ValueError) as err:
             LOG.warning(
                 "Profile resolution for %s: catalog unavailable for %s (%s), using contract keys only",
@@ -780,7 +826,6 @@ def _resolve_runtime_profile(
             sensor_preferences = {
                 str(key): {
                     "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                    "ha_visible": bool(values.get("ha_visible", True)),
                 }
                 for key, values in binding.sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
@@ -800,7 +845,6 @@ def _resolve_runtime_profile(
             sensor_preferences = {
                 str(key): {
                     "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                    "ha_visible": bool(values.get("ha_visible", True)),
                 }
                 for key, values in device.local_sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
@@ -832,7 +876,6 @@ def _resolve_runtime_profile(
             sensor_preferences = {
                 str(key): {
                     "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                    "ha_visible": bool(values.get("ha_visible", True)),
                 }
                 for key, values in device.local_sensor_preferences.items()
                 if str(key) and isinstance(values, dict)
@@ -893,22 +936,13 @@ def _resolve_runtime_profile(
                 mqtt_disabled_count,
             )
 
-    discovery_visibility = {
-        key: bool(sensor_preferences.get(key, {}).get("ha_visible", True))
-        for key in selected_keys
-        if key in sensor_preferences
-    }
-
-    ha_hidden_count = sum(1 for v in discovery_visibility.values() if not v)
-
     LOG.info(
-        "Profile resolution for %s: resolved %d discovery keys (contract=%d, catalog=%d, mqtt_disabled=%d, ha_hidden=%d)",
+        "Profile resolution for %s: resolved %d discovery keys (contract=%d, catalog=%d, mqtt_disabled=%d)",
         device.id,
         len(selected_keys),
         contract_count,
         catalog_count,
         selected_before_prefs - len(selected_keys) if sensor_preferences else 0,
-        ha_hidden_count,
     )
     LOG.debug(
         "Profile resolution for %s: discovery keys: %s",
@@ -922,14 +956,12 @@ def _resolve_runtime_profile(
         "profile_mode": device.profile_mode,
         "effective_profile": effective_profile,
         "selected_keys": selected_keys,
-        "discovery_visibility": discovery_visibility,
     }
     signature = json.dumps(signature_payload, sort_keys=True, default=str)
     return (
         runtime_source,
         effective_profile,
         selected_keys,
-        discovery_visibility,
         signature,
     )
 
@@ -1049,6 +1081,10 @@ async def async_main() -> None:
     else:
         LOG.warning("  apps_dir does not exist: %s", config.apps_dir)
 
+    # Initialize database
+    db = Database()
+    configure_capability_repository(db)
+
     all_caps = load_capabilities()
     LOG.info("Capabilities source: %s", all_caps.get("source", "bundled"))
     for err in all_caps.get("validation_errors", []):
@@ -1064,9 +1100,6 @@ async def async_main() -> None:
         LOG.info("MQTT target configured: %s:%s", config.mqtt_host, config.mqtt_port)
     else:
         LOG.info("MQTT is disabled; polling + web UI only")
-
-    # Initialize database
-    db = Database()
 
     # Load devices from database, fallback to config if database is empty
     db_devices = db.load_devices()
@@ -1217,7 +1250,6 @@ async def async_main() -> None:
                         runtime_source,
                         runtime_profile,
                         keys,
-                        discovery_visibility,
                         _,
                     ) = _resolve_runtime_profile(
                         device=device,
@@ -1261,13 +1293,9 @@ async def async_main() -> None:
                             mqtt.publish_discovery(
                                 runtime_device,
                                 keys,
-                                discovery_visibility=discovery_visibility,
                             )
                             if config.ha_url and config.ha_token:
-                                defaults = {
-                                    key: bool(discovery_visibility.get(key, True))
-                                    for key in keys
-                                }
+                                defaults = {key: True for key in keys}
                                 apply_result = await apply_entity_default_states(
                                     config.ha_url,
                                     config.ha_token,
@@ -1330,6 +1358,8 @@ async def async_main() -> None:
                     discovery_registry=discovery_registry,
                     running=running,
                     apps_dir=config.apps_dir,
+                    ha_url=config.ha_url,
+                    ha_token=config.ha_token,
                 )
                 _metrics_prune_to_store_devices()
                 await _prune_stale_ha_entities(
@@ -1372,7 +1402,7 @@ def _run_discovery_migration_cleanup(
             "Profile resolution call site: _run_discovery_migration_cleanup (apps_dir=%s)",
             apps_dir,
         )
-        runtime_source, runtime_profile, keys, _discovery_visibility, _ = (
+        runtime_source, runtime_profile, keys, _ = (
             _resolve_runtime_profile(
                 device=device,
                 capability_profiles=profiles,
@@ -1408,7 +1438,7 @@ async def _prune_stale_ha_entities(
             "Profile resolution call site: _prune_stale_ha_entities (apps_dir=%s)",
             config.apps_dir,
         )
-        runtime_source, runtime_profile, keys, _discovery_visibility, _ = (
+        runtime_source, runtime_profile, keys, _ = (
             _resolve_runtime_profile(
                 device=device,
                 capability_profiles=profiles,

@@ -25,7 +25,7 @@ TIER GATING:
 - extended: Additional fields, opt-in only (require enable_extended_fields = True)
 
 Discovery/publication happens AFTER runtime resolution, based on the same tier
-rules plus user configuration (mqtt_enabled, ha_visible, etc.).
+rules plus user configuration (mqtt_enabled, etc.).
 
 See catalog.py module docstring for full architectural model.
 """

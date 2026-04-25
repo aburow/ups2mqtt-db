@@ -174,12 +174,297 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name)
         """)
 
+        self._init_capability_schema(cursor)
+
         # Honor DISABLE_PROFILE_PROTECTION env var for development
         if self._is_profile_protection_disabled():
             cursor.execute("UPDATE profiles SET is_protected = 0")
         else:
             self._mark_default_profiles_protected(cursor)
         conn.commit()
+
+    @staticmethod
+    def _init_capability_schema(cursor: sqlite3.Cursor) -> None:
+        """Initialize normalized capability metadata schema."""
+        cursor.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS capability_transports (
+                name TEXT PRIMARY KEY,
+                runtime_supported INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_drivers (
+                driver_key TEXT PRIMARY KEY,
+                family TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                transport TEXT NOT NULL,
+                owns_runtime_metadata INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                display_name TEXT,
+                vendor_display TEXT,
+                family_display TEXT,
+                source_display TEXT,
+                search_aliases_json TEXT NOT NULL DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_driver_transports (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, transport_name),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE,
+                FOREIGN KEY(transport_name) REFERENCES capability_transports(name) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_driver_profiles (
+                driver_key TEXT PRIMARY KEY,
+                profile_json TEXT NOT NULL,
+                profile_hash TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_poll_groups (
+                driver_key TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                interval_s INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, group_name),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_modbus_mappings (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                address INTEGER NOT NULL,
+                count INTEGER NOT NULL DEFAULT 1,
+                data_type TEXT NOT NULL,
+                scale REAL NOT NULL DEFAULT 1,
+                word_order TEXT NOT NULL DEFAULT 'big',
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, transport_name, sensor_key, address),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_snmp_mappings (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                oid TEXT NOT NULL,
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                timeticks_minutes INTEGER NOT NULL DEFAULT 0,
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, transport_name, sensor_key, oid),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_bacnet_mappings (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                object_type TEXT NOT NULL DEFAULT '',
+                object_instance INTEGER NOT NULL DEFAULT 0,
+                property_name TEXT NOT NULL DEFAULT '',
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                spec_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key, object_type, object_instance, property_name),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_rest_mappings (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                method TEXT NOT NULL DEFAULT 'GET',
+                endpoint TEXT NOT NULL DEFAULT '',
+                json_path TEXT NOT NULL DEFAULT '',
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                spec_json TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key, method, endpoint, json_path),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_register_blocks (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                start_address INTEGER NOT NULL,
+                count INTEGER NOT NULL,
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, transport_name, name, start_address),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_snmp_blocks (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                poll_group TEXT NOT NULL DEFAULT 'slow',
+                metrics_json TEXT NOT NULL DEFAULT '[]',
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, transport_name, name),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_key_precedence (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                preferred_source TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_sensors (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                unit TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                aliases_json TEXT NOT NULL DEFAULT '[]',
+                reference TEXT NOT NULL DEFAULT '',
+                tier TEXT NOT NULL DEFAULT 'normalized',
+                note TEXT NOT NULL DEFAULT '',
+                position INTEGER NOT NULL DEFAULT 0,
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_derived_metrics (
+                driver_key TEXT NOT NULL,
+                metric_key TEXT NOT NULL,
+                spec_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, metric_key),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_value_maps (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                raw_value TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                publish_raw INTEGER NOT NULL DEFAULT 1,
+                text_suffix TEXT NOT NULL DEFAULT '_text',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key, raw_value),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_bitfield_flags (
+                driver_key TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                bit_index INTEGER NOT NULL,
+                flag_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'status',
+                tier TEXT NOT NULL DEFAULT 'extended',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, source_key, bit_index, flag_key),
+                FOREIGN KEY(driver_key) REFERENCES capability_drivers(driver_key) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_metric_contracts (
+                metric_key TEXT PRIMARY KEY,
+                value_kind TEXT NOT NULL,
+                canonical_unit TEXT NOT NULL DEFAULT '',
+                default_multiplier REAL NOT NULL DEFAULT 1,
+                default_offset REAL NOT NULL DEFAULT 0,
+                default_unit TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_seed_version (
+                seed_key TEXT PRIMARY KEY,
+                seed_hash TEXT NOT NULL,
+                seeded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_sensor_overrides (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                override_json TEXT NOT NULL DEFAULT '{}',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_key_precedence_overrides (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                preferred_source TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_mapping_overrides (
+                driver_key TEXT NOT NULL,
+                transport_name TEXT NOT NULL,
+                mapping_kind TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                match_value TEXT NOT NULL,
+                override_json TEXT NOT NULL DEFAULT '{}',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (
+                    driver_key, transport_name, mapping_kind, sensor_key, match_value
+                )
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_value_map_overrides (
+                driver_key TEXT NOT NULL,
+                sensor_key TEXT NOT NULL,
+                raw_value TEXT NOT NULL,
+                display_text TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, sensor_key, raw_value)
+            );
+
+            CREATE TABLE IF NOT EXISTS capability_bitfield_flag_overrides (
+                driver_key TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                bit_index INTEGER NOT NULL,
+                flag_key TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT 'status',
+                tier TEXT NOT NULL DEFAULT 'extended',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_key, source_key, bit_index, flag_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_capability_sensors_driver_position
+            ON capability_sensors(driver_key, position, sensor_key);
+
+            CREATE INDEX IF NOT EXISTS idx_capability_modbus_driver
+            ON capability_modbus_mappings(driver_key, transport_name);
+
+            CREATE INDEX IF NOT EXISTS idx_capability_snmp_driver
+            ON capability_snmp_mappings(driver_key, transport_name);
+
+            CREATE INDEX IF NOT EXISTS idx_capability_value_maps_driver
+            ON capability_value_maps(driver_key, sensor_key);
+
+            CREATE INDEX IF NOT EXISTS idx_capability_bitfield_flags_driver
+            ON capability_bitfield_flags(driver_key, source_key, bit_index);
+            """
+        )
 
     # Device operations
 
@@ -289,7 +574,6 @@ class Database:
                                 continue
                             local_sensor_preferences[key] = {
                                 "mqtt_enabled": bool(raw.get("mqtt_enabled", True)),
-                                "ha_visible": bool(raw.get("ha_visible", True)),
                             }
                 except (TypeError, ValueError, json.JSONDecodeError):
                     local_sensor_preferences = None
@@ -441,7 +725,6 @@ class Database:
                             continue
                         sensor_preferences[key] = {
                             "mqtt_enabled": bool(raw.get("mqtt_enabled", True)),
-                            "ha_visible": bool(raw.get("ha_visible", True)),
                         }
             items.append(
                 ProfileConfig(

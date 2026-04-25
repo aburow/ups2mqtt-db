@@ -93,7 +93,6 @@ def _parse_device(item: dict[str, Any]) -> DeviceConfig:
                 continue
             local_sensor_preferences[key] = {
                 "mqtt_enabled": bool(raw.get("mqtt_enabled", True)),
-                "ha_visible": bool(raw.get("ha_visible", True)),
             }
     return DeviceConfig(
         id=device_id,
@@ -165,7 +164,6 @@ def _device_to_dict(device: DeviceConfig) -> dict[str, Any]:
         payload["local_sensor_preferences"] = {
             str(key): {
                 "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                "ha_visible": bool(values.get("ha_visible", True)),
             }
             for key, values in device.local_sensor_preferences.items()
             if isinstance(key, str) and isinstance(values, dict)

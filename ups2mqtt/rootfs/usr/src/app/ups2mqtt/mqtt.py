@@ -234,7 +234,6 @@ class MqttPublisher:
         keys: list[str],
         *,
         authoritative_keys: bool = True,
-        discovery_visibility: dict[str, bool] | None = None,
     ) -> bool:
         if not self._attempt_connect():
             return False
@@ -291,8 +290,6 @@ class MqttPublisher:
                 payload["icon"] = icon
             # Resolve default-enabled state from the device source's external app
             enabled = bool(enabled_defaults.get(key, True))
-            if isinstance(discovery_visibility, dict) and key in discovery_visibility:
-                enabled = bool(discovery_visibility.get(key, True))
             LOG.debug(
                 "Metric %s for %s: enabled_by_default=%s", key, device.source, enabled
             )
@@ -343,7 +340,6 @@ class MqttPublisher:
         values: dict[str, Any],
         *,
         discovery_keys: list[str] | None = None,
-        discovery_visibility: dict[str, bool] | None = None,
     ) -> bool:
         if not self._attempt_connect():
             return False
@@ -404,7 +400,6 @@ class MqttPublisher:
                     device,
                     republish_keys,
                     authoritative_keys=bool(discovery_keys),
-                    discovery_visibility=discovery_visibility,
                 )
             except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
                 LOG.debug("Discovery republish on metadata change failed: %s", err)

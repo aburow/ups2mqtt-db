@@ -63,11 +63,20 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Local Profiles are work in progress.
 - Import/export exists and can be useful, but it is not thoroughly tested yet.
 - Recommended usage: create multiple Global Profiles per scenario (for example `SMT-UIO1-temp-humidity`) and assign one per device.
+- Profile sensor selection is now single-toggle: if a sensor is selected it is published to MQTT and discovered by Home Assistant.
+- The previous per-sensor `HA visible` option was removed. Existing stored `ha_visible` values are ignored.
 - The app currently has 8 polling slots and uses a simple semaphore to share polling resources.
 - The polling model is tunable for larger workloads compared with fixed Home Assistant add-on defaults.
 - Ignore slow/fast poll settings for now; that concept is not fully wired through and will change.
 - `Keep Conn` improves TCP/Modbus efficiency when the NMC keepalive is configured (around 300 seconds).
 - The local log buffer is for troubleshooting and does not persist across restarts/reboots.
+
+## Human-Readable Mapping Policy
+- Runtime output is now human-readable for mapped status/code fields.
+- Integer code fields (for example `output_source`, `battery_status`) publish companion text fields (`output_source_text`, `battery_status_text`).
+- Raw bitfield sensors (`*_bf`) are not exposed in profile selection, discovery, or published state.
+- Bitfields are decoded into named boolean state fields (for example `ups_online_state`, `ups_on_battery_state`).
+- When a required mapping is missing, the runtime logs a warning and suppresses that unmapped output.
 
 ## Security
 - The web interface currently has no authentication/authorization.
@@ -78,6 +87,20 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Update lockfile after dependency changes:
   - `cd ups2mqtt/rootfs/usr/src/app`
   - `uv lock`
+
+## Capability DB Snapshot
+- A versioned SQL snapshot can prime all `capability_*` tables in a fresh database.
+- Dump snapshot from current DB:
+  - `make db-cap-dump`
+- Prime DB from snapshot:
+  - `make db-cap-prime`
+- Maintenance workflow after capability/schema changes:
+  - run app startup once to apply DB schema updates and seed changes
+  - run `make db-cap-dump` to refresh snapshot SQL
+  - commit both code changes and `capabilities/capability_snapshot.sql` together
+- Override paths when needed:
+  - `make db-cap-dump DB_PATH=standalone/data/ups2mqtt.db CAP_SNAPSHOT=ups2mqtt/rootfs/usr/src/app/capabilities/capability_snapshot.sql`
+  - `make db-cap-prime DB_PATH=/tmp/new.db CAP_SNAPSHOT=ups2mqtt/rootfs/usr/src/app/capabilities/capability_snapshot.sql`
 
 ## Linting
 Run from `ups2mqtt/rootfs/usr/src/app`:

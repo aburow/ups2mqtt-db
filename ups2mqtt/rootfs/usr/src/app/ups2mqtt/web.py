@@ -216,7 +216,6 @@ def _normalize_sensor_preferences(
             continue
         normalized[key] = {
             "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-            "ha_visible": bool(values.get("ha_visible", True)),
         }
     return normalized
 
@@ -225,14 +224,11 @@ def _build_sensor_preferences_from_selected(
     *,
     selected_sensors: list[str] | None,
     available_keys: list[str],
-    default_visible: dict[str, bool] | None = None,
 ) -> dict[str, dict[str, bool]]:
     selected_set = {str(item) for item in (selected_sensors or []) if str(item)}
-    defaults = default_visible or {}
     return {
         key: {
             "mqtt_enabled": key in selected_set,
-            "ha_visible": bool(defaults.get(key, True)),
         }
         for key in available_keys
     }
@@ -326,7 +322,6 @@ def _clone_device(
             {
                 str(key): {
                     "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                    "ha_visible": bool(values.get("ha_visible", True)),
                 }
                 for key, values in device.local_sensor_preferences.items()
                 if isinstance(key, str) and isinstance(values, dict)
@@ -894,13 +889,11 @@ def start_web_server(
             merged_preferences = _build_sensor_preferences_from_selected(
                 selected_sensors=merged_selected,
                 available_keys=available_sensor_keys,
-                default_visible=default_enabled,
             )
         for key in available_sensor_keys:
             if key not in merged_preferences:
                 merged_preferences[key] = {
                     "mqtt_enabled": key in selected_set,
-                    "ha_visible": bool(default_enabled.get(key, True)),
                 }
         # Get catalog rows
         apps_dir = str(get_capability_status().get("apps_dir", "/data/apps"))
@@ -929,7 +922,6 @@ def start_web_server(
                 key,
                 {
                     "mqtt_enabled": key in selected_set,
-                    "ha_visible": bool(default_enabled.get(key, True)),
                 },
             )
             unified_rows.append(
@@ -937,7 +929,6 @@ def start_web_server(
                     "key": key,
                     "selected": bool(prefs.get("mqtt_enabled", False)),
                     "mqtt_enabled": bool(prefs.get("mqtt_enabled", False)),
-                    "ha_visible": bool(prefs.get("ha_visible", True)),
                     "default_enabled": bool(default_enabled.get(key, True)),
                     "label": key,
                     "category": "other",
@@ -958,14 +949,12 @@ def start_web_server(
                 key,
                 {
                     "mqtt_enabled": key in selected_set,
-                    "ha_visible": True,  # Catalog sensors default to visible
                 },
             )
             row = {
                 "key": key,
                 "selected": bool(prefs.get("mqtt_enabled", False)),
                 "mqtt_enabled": bool(prefs.get("mqtt_enabled", False)),
-                "ha_visible": bool(prefs.get("ha_visible", True)),
                 "default_enabled": False,  # Catalog-only sensors are not contract defaults
                 "label": str(sensor_meta.get("label", key)),
                 "category": category,
@@ -1447,7 +1436,6 @@ def start_web_server(
                 {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                        "ha_visible": bool(values.get("ha_visible", True)),
                     }
                     for key, values in device.local_sensor_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1537,7 +1525,6 @@ def start_web_server(
                 base_preferences = {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                        "ha_visible": bool(values.get("ha_visible", True)),
                     }
                     for key, values in selected_profile.sensor_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1559,7 +1546,6 @@ def start_web_server(
                 base_preferences = {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                        "ha_visible": bool(values.get("ha_visible", True)),
                     }
                     for key, values in stored_local_preferences.items()
                     if isinstance(key, str) and isinstance(values, dict)
@@ -1582,7 +1568,6 @@ def start_web_server(
                     key.startswith("sensor__")
                     or key.startswith("sensor_key__")
                     or key.startswith("sensor_mqtt__")
-                    or key.startswith("sensor_visible__")
                 )
                 for key in post_data
             )
@@ -1644,16 +1629,11 @@ def start_web_server(
                     driver_key,
                     contract_profile,
                 )
-                default_visible = _profile_default_enabled_map(
-                    driver_key,
-                    contract_profile,
-                )
                 selected_set = {str(item) for item in base_selected if str(item)}
                 if not base_preferences:
                     base_preferences = _build_sensor_preferences_from_selected(
                         selected_sensors=base_selected,
                         available_keys=available_sensor_keys,
-                        default_visible=default_visible,
                     )
                 allowed_set = set(available_sensor_keys)
                 base_preferences = _normalize_sensor_preferences(
@@ -1664,7 +1644,6 @@ def start_web_server(
                     if key not in base_preferences:
                         base_preferences[key] = {
                             "mqtt_enabled": key in selected_set,
-                            "ha_visible": bool(default_visible.get(key, True)),
                         }
 
                 apps_dir = str(get_capability_status().get("apps_dir", "/data/apps"))
@@ -1688,7 +1667,6 @@ def start_web_server(
                         if key not in base_preferences:
                             base_preferences[key] = {
                                 "mqtt_enabled": False,
-                                "ha_visible": bool(default_visible.get(key, True)),
                             }
                     by_key = {
                         str(item.get("key", "")).strip(): item for item in catalog_rows
@@ -1701,11 +1679,6 @@ def start_web_server(
                                 "mqtt_enabled": bool(
                                     base_preferences.get(key, {}).get(
                                         "mqtt_enabled", False
-                                    )
-                                ),
-                                "ha_visible": bool(
-                                    base_preferences.get(key, {}).get(
-                                        "ha_visible", True
                                     )
                                 ),
                                 "category": str(item.get("category", "other")),
@@ -1721,13 +1694,11 @@ def start_web_server(
                     for key in sorted(available_sensor_keys):
                         prefs = base_preferences.get(
                             key,
-                            {"mqtt_enabled": key in selected_set, "ha_visible": True},
                         )
                         sensor_rows.append(
                             {
                                 "key": key,
                                 "mqtt_enabled": bool(prefs.get("mqtt_enabled", True)),
-                                "ha_visible": bool(prefs.get("ha_visible", True)),
                                 "category": "other",
                                 "label": key,
                                 "unit": "",
@@ -1892,7 +1863,6 @@ def start_web_server(
                         key.startswith("sensor__")
                         or key.startswith("sensor_key__")
                         or key.startswith("sensor_mqtt__")
-                        or key.startswith("sensor_visible__")
                     )
                     for key in data
                 )
@@ -1903,15 +1873,10 @@ def start_web_server(
                         allowed_keys=available_sensor_keys,
                     )
                     if not local_sensor_preferences:
-                        default_visible = _profile_default_enabled_map(
-                            source,
-                            contract_profile,
-                        )
                         local_sensor_preferences = (
                             _build_sensor_preferences_from_selected(
                                 selected_sensors=local_selected_sensors,
                                 available_keys=sorted(available_sensor_keys),
-                                default_visible=default_visible,
                             )
                         )
                 else:
@@ -1929,15 +1894,10 @@ def start_web_server(
                         allowed_keys=available_sensor_keys,
                     )
                     if not local_sensor_preferences:
-                        default_visible = _profile_default_enabled_map(
-                            source,
-                            contract_profile,
-                        )
                         local_sensor_preferences = (
                             _build_sensor_preferences_from_selected(
                                 selected_sensors=local_selected_sensors,
                                 available_keys=sorted(available_sensor_keys),
-                                default_visible=default_visible,
                             )
                         )
             else:
@@ -2003,9 +1963,6 @@ def start_web_server(
         selected_sensors: list[str] = []
         sensor_keys: set[str] = set()
         mqtt_enabled: set[str] = set()
-        ha_visible: set[str] = set()
-        ha_visible_active: set[str] = set()
-        ha_visible_previous: dict[str, bool] = {}
         for key, value in values.items():
             if key.startswith("cfg_poll_group__"):
                 group = key.removeprefix("cfg_poll_group__").strip()
@@ -2028,44 +1985,11 @@ def start_web_server(
                 sensor_key = key.removeprefix("sensor_mqtt__").strip()
                 if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     mqtt_enabled.add(sensor_key)
-            elif key.startswith("sensor_visible__"):
-                sensor_key = key.removeprefix("sensor_visible__").strip()
-                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
-                    ha_visible.add(sensor_key)
-            elif key.startswith("sensor_visible_active__"):
-                sensor_key = key.removeprefix("sensor_visible_active__").strip()
-                if (
-                    sensor_key
-                    and not _is_bitfield_sensor_key(sensor_key)
-                    and value.strip().lower() in {"1", "true", "on", "yes"}
-                ):
-                    ha_visible_active.add(sensor_key)
-            elif key.startswith("sensor_visible_prev__"):
-                sensor_key = key.removeprefix("sensor_visible_prev__").strip()
-                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
-                    ha_visible_previous[sensor_key] = value.strip().lower() in {
-                        "1",
-                        "true",
-                        "on",
-                        "yes",
-                    }
         sensor_preferences: dict[str, dict[str, bool]] = {}
         if sensor_keys:
             for key in sorted(sensor_keys):
-                mqtt_on = key in mqtt_enabled
-                ha_input_active = key in ha_visible_active
-                if ha_input_active:
-                    # HA visibility checkbox is active in UI: trust submitted value.
-                    ha_value = key in ha_visible
-                elif not mqtt_on and key in ha_visible_previous:
-                    # MQTT is off and HA checkbox is disabled: preserve prior value.
-                    ha_value = bool(ha_visible_previous[key])
-                else:
-                    # Backward-compatible fallback for requests without marker fields.
-                    ha_value = key in ha_visible
                 sensor_preferences[key] = {
-                    "mqtt_enabled": mqtt_on,
-                    "ha_visible": ha_value,
+                    "mqtt_enabled": key in mqtt_enabled,
                 }
             selected_sensors = [
                 key for key in sorted(sensor_keys) if key in mqtt_enabled
@@ -2183,11 +2107,9 @@ def start_web_server(
             posted_preferences, allowed_keys=sensor_set
         )
         if not normalized_preferences:
-            default_visible = _profile_default_enabled_map(driver_key, contract_profile)
             normalized_preferences = _build_sensor_preferences_from_selected(
                 selected_sensors=selected_sensors,
                 available_keys=sensor_keys,
-                default_visible=default_visible,
             )
 
         return ProfileConfig(

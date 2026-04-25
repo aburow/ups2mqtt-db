@@ -94,7 +94,6 @@ class DeviceStore:
                     {
                         str(key): {
                             "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
-                            "ha_visible": bool(values.get("ha_visible", True)),
                         }
                         for key, values in device.local_sensor_preferences.items()
                         if isinstance(key, str) and isinstance(values, dict)
