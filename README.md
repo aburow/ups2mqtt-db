@@ -36,6 +36,43 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Tail logs: `make dev-logs`
 - Stop stack: `make dev-down`
 
+## Current Status
+- The core runtime reuses proven code from related UPS apps; some UI/display differences are still expected.
+- Development is currently focused on this standalone deployment for convenience.
+- Direction is toward a Home Assistant add-on/app model (not HACS).
+- This standalone instance avoids loading Home Assistant core resources directly and reduces main-loop impact.
+
+## Driver Coverage
+- APC Smart UPS (legacy Modbus and legacy SNMP): supported.
+- APC PDU: limited support.
+- APC SMT devices: supported.
+- RFC1628 UPS devices: expected to be supported.
+- CyberPower Modbus devices: supported.
+
+## Home Assistant + MQTT Notes
+- Tested against Mosquitto MQTT broker in Home Assistant.
+- You must create/use an MQTT user for this app.
+- Discovery adds/removes entities through MQTT discovery; polling must also be enabled.
+- Disabling discovery or deleting a device should remove visible HA values.
+- If a deleted ups2mqtt device still appears in HA, remove the device manually in Home Assistant.
+- Home Assistant token is not required for normal operation.
+- Home Assistant token is used during device reinitialization to remove stale entity data for that device.
+
+## Profiles, Polling, and Runtime Behavior
+- Global Profiles are functional.
+- Local Profiles are work in progress.
+- Import/export exists and can be useful, but it is not thoroughly tested yet.
+- Recommended usage: create multiple Global Profiles per scenario (for example `SMT-UIO1-temp-humidity`) and assign one per device.
+- The app currently has 8 polling slots and uses a simple semaphore to share polling resources.
+- The polling model is tunable for larger workloads compared with fixed Home Assistant add-on defaults.
+- Ignore slow/fast poll settings for now; that concept is not fully wired through and will change.
+- `Keep Conn` improves TCP/Modbus efficiency when the NMC keepalive is configured (around 300 seconds).
+- The local log buffer is for troubleshooting and does not persist across restarts/reboots.
+
+## Security
+- The web interface currently has no authentication/authorization.
+- Do not expose the Docker web port to public or untrusted network segments.
+
 ## Development
 - Project dependencies are managed with `uv` in `ups2mqtt/rootfs/usr/src/app/`.
 - Update lockfile after dependency changes:
