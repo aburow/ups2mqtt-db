@@ -105,6 +105,11 @@ def _bool_from_form(data: dict[str, list[str]], key: str) -> bool:
     return value in {"1", "true", "on", "yes"}
 
 
+def _is_bitfield_sensor_key(sensor_key: str) -> bool:
+    """Return True when a sensor key is a raw bitfield register marker."""
+    return sensor_key.strip().lower().endswith("_bf")
+
+
 def _validate_device_id(device_id: str) -> str:
     """Validate device ID format (non-empty, alphanumeric + underscore/dash)."""
     if not device_id:
@@ -746,14 +751,19 @@ def start_web_server(
         driver_key: str,
         contract_profile: dict[str, object],
     ) -> list[str]:
-        keys = {str(item) for item in source_keys(contract_profile) if str(item)}
+        keys = {
+            key
+            for item in source_keys(contract_profile)
+            for key in [str(item).strip()]
+            if key and not _is_bitfield_sensor_key(key)
+        }
         apps_dir = str(get_capability_status().get("apps_dir", "/data/apps"))
         for item in _catalog_sensor_rows_for_driver(
             apps_dir=apps_dir,
             driver_key=driver_key,
         ):
             key = str(item.get("key", "")).strip()
-            if key:
+            if key and not _is_bitfield_sensor_key(key):
                 keys.add(key)
         return sorted(keys)
 
@@ -2008,27 +2018,31 @@ def start_web_server(
                     payload["key_precedence"][metric] = option
             elif key.startswith("sensor__"):
                 sensor_key = key.removeprefix("sensor__").strip()
-                if sensor_key:
+                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     selected_sensors.append(sensor_key)
             elif key.startswith("sensor_key__"):
                 sensor_key = key.removeprefix("sensor_key__").strip()
-                if sensor_key:
+                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     sensor_keys.add(sensor_key)
             elif key.startswith("sensor_mqtt__"):
                 sensor_key = key.removeprefix("sensor_mqtt__").strip()
-                if sensor_key:
+                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     mqtt_enabled.add(sensor_key)
             elif key.startswith("sensor_visible__"):
                 sensor_key = key.removeprefix("sensor_visible__").strip()
-                if sensor_key:
+                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     ha_visible.add(sensor_key)
             elif key.startswith("sensor_visible_active__"):
                 sensor_key = key.removeprefix("sensor_visible_active__").strip()
-                if sensor_key and value.strip().lower() in {"1", "true", "on", "yes"}:
+                if (
+                    sensor_key
+                    and not _is_bitfield_sensor_key(sensor_key)
+                    and value.strip().lower() in {"1", "true", "on", "yes"}
+                ):
                     ha_visible_active.add(sensor_key)
             elif key.startswith("sensor_visible_prev__"):
                 sensor_key = key.removeprefix("sensor_visible_prev__").strip()
-                if sensor_key:
+                if sensor_key and not _is_bitfield_sensor_key(sensor_key):
                     ha_visible_previous[sensor_key] = value.strip().lower() in {
                         "1",
                         "true",
