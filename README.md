@@ -71,6 +71,52 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - `Keep Conn` improves TCP/Modbus efficiency when the NMC keepalive is configured (around 300 seconds).
 - The local log buffer is for troubleshooting and does not persist across restarts/reboots.
 
+## Polling Flow Diagrams
+```mermaid
+flowchart TD
+  A["device loop start"] --> B["load poll group intervals from profile"]
+  B --> C["init next due per group"]
+  C --> D{"any group due"}
+  D -- "no" --> E["sleep briefly"] --> C
+  D -- "yes" --> F["collect due groups"]
+  F --> G["poll device with due groups"]
+  G --> H["apply derived values and transforms"]
+  H --> I["filter to selected discovery keys"]
+  I --> J["publish state and merge into MQTT cache"]
+  J --> K["advance next due for each due group"]
+  K --> C
+```
+
+```mermaid
+flowchart TD
+  A["fast tick due"] --> B["due groups is fast"]
+  B --> C["poll device with fast group"]
+  C --> D["read only metrics tagged fast"]
+  D --> E["slow metrics are not refreshed in this cycle"]
+  E --> F["MQTT cache keeps prior slow values"]
+```
+
+```mermaid
+flowchart TD
+  A["slow tick due"] --> B["due groups includes slow"]
+  B --> C["poll device with slow or fast plus slow"]
+  C --> D["read metrics tagged slow"]
+  D --> E["if fast also due then fast metrics refresh too"]
+  E --> F["derived fields can use fresh slow raw values"]
+  F --> G["MQTT cache updated with refreshed slow values"]
+```
+
+```mermaid
+flowchart TD
+  A["polled sensor values"] --> E["merge metadata sources"]
+  B["contract resolver metadata"] --> E
+  C["runtime metadata cache"] --> E
+  E --> F{"metadata changed"}
+  F -- "no" --> G["publish state only"]
+  F -- "yes" --> H["publish state then republish discovery"]
+  H --> I["Home Assistant updates device info block"]
+```
+
 ## Human-Readable Mapping Policy
 - Runtime output is now human-readable for mapped status/code fields.
 - Integer code fields (for example `output_source`, `battery_status`) publish companion text fields (`output_source_text`, `battery_status_text`).
