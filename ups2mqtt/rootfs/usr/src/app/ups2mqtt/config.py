@@ -13,8 +13,8 @@ import yaml
 
 from .model import AppConfig, DeviceConfig
 
-RUNTIME_DEVICES_PATH = "/data/ups_unified_devices.yaml"
-RUNTIME_SETTINGS_PATH = "/data/ups_unified_settings.yaml"
+RUNTIME_DEVICES_PATH = "/data/ups2mqtt_devices.yaml"
+RUNTIME_SETTINGS_PATH = "/data/ups2mqtt_settings.yaml"
 STANDALONE_OPTIONS_PATH = "/usr/src/app/options.json"
 
 
@@ -32,17 +32,32 @@ def _env_or_default(name: str, default: Any) -> Any:
     return value
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _resolve_runtime_devices_path() -> str:
-    return os.environ.get("UPS_UNIFIED_RUNTIME_DEVICES_PATH", RUNTIME_DEVICES_PATH)
+    return os.environ.get("UPS2MQTT_RUNTIME_DEVICES_PATH", RUNTIME_DEVICES_PATH)
 
 
 def _resolve_runtime_settings_path() -> str:
-    return os.environ.get("UPS_UNIFIED_RUNTIME_SETTINGS_PATH", RUNTIME_SETTINGS_PATH)
+    return os.environ.get("UPS2MQTT_RUNTIME_SETTINGS_PATH", RUNTIME_SETTINGS_PATH)
 
 
 def _load_raw_options(options_path: str | None) -> dict[str, Any]:
     candidates: list[Path] = []
-    env_path = os.environ.get("UPS_UNIFIED_OPTIONS_PATH")
+    env_path = os.environ.get("UPS2MQTT_OPTIONS_PATH")
     if env_path:
         candidates.append(Path(env_path))
     if options_path:
@@ -218,6 +233,7 @@ def load_config(options_path: str | None = None) -> AppConfig:
     if not isinstance(parsed, dict):
         parsed = {}
     devices = _parse_devices(parsed)
+    runtime_settings = load_runtime_settings()
 
     runtime_devices = load_runtime_devices()
     if runtime_devices:
@@ -225,17 +241,25 @@ def load_config(options_path: str | None = None) -> AppConfig:
 
     mqtt_host = str(
         _env_or_default(
-            "UPS_UNIFIED_MQTT_HOST", raw_options.get("mqtt_host", "core-mosquitto")
+            "UPS2MQTT_MQTT_HOST", raw_options.get("mqtt_host", "core-mosquitto")
         )
     ).strip()
     mqtt_port_raw = _env_or_default(
-        "UPS_UNIFIED_MQTT_PORT", raw_options.get("mqtt_port", 1883)
+        "UPS2MQTT_MQTT_PORT", raw_options.get("mqtt_port", 1883)
     )
     mqtt_username = _clean_optional(
-        _env_or_default("UPS_UNIFIED_MQTT_USERNAME", raw_options.get("mqtt_username"))
+        _env_or_default("UPS2MQTT_MQTT_USERNAME", raw_options.get("mqtt_username"))
     )
     mqtt_password = _clean_optional(
-        _env_or_default("UPS_UNIFIED_MQTT_PASSWORD", raw_options.get("mqtt_password"))
+        _env_or_default("UPS2MQTT_MQTT_PASSWORD", raw_options.get("mqtt_password"))
+    )
+    raw_ha_bridge_enabled = runtime_settings.get(
+        "ha_bridge_enabled",
+        raw_options.get("ha_bridge_enabled", False),
+    )
+    ha_bridge_enabled = _coerce_bool(
+        _env_or_default("UPS2MQTT_HA_BRIDGE_ENABLED", raw_ha_bridge_enabled),
+        default=False,
     )
 
     return AppConfig(
@@ -258,9 +282,10 @@ def load_config(options_path: str | None = None) -> AppConfig:
         devices=devices,
         raw=raw_options,
         ha_url=_clean_optional(
-            _env_or_default("UPS_UNIFIED_HA_URL", raw_options.get("ha_url"))
+            _env_or_default("UPS2MQTT_HA_URL", raw_options.get("ha_url"))
         ),
         ha_token=_clean_optional(
-            _env_or_default("UPS_UNIFIED_HA_TOKEN", raw_options.get("ha_token"))
+            _env_or_default("UPS2MQTT_HA_TOKEN", raw_options.get("ha_token"))
         ),
+        ha_bridge_enabled=ha_bridge_enabled,
     )

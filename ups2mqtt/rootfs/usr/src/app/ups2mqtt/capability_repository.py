@@ -41,6 +41,56 @@ _ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, str]] = {
 }
 
 _DRIVER_ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, dict[str, str]]] = {
+    "cyberpower_modbus_single_phase": {
+        "hardware_fault": {
+            "0": "ok",
+            "1": "fault",
+        },
+        "utility_frequency_out_of_range": {
+            "0": "in_range",
+            "1": "out_of_range",
+        },
+        "inverter_off": {
+            "0": "on",
+            "1": "off",
+        },
+        "battery_not_present": {
+            "0": "present",
+            "1": "not_present",
+        },
+        "on_battery_state": {
+            "0": "off",
+            "1": "on",
+        },
+        "battery_discharging": {
+            "0": "off",
+            "1": "on",
+        },
+        "battery_charging": {
+            "0": "not_charging",
+            "1": "charging",
+        },
+        "battery_fully_charged": {
+            "0": "not_fully_charged",
+            "1": "fully_charged",
+        },
+        "buzzer_muted": {
+            "0": "unmuted",
+            "1": "muted",
+        },
+        "runtime_low": {
+            "0": "normal",
+            "1": "low",
+        },
+        "no_output": {
+            "0": "output_on",
+            "1": "output_off",
+        },
+        "over_temperature": {
+            "0": "normal",
+            "1": "over_temperature",
+        },
+    },
     "cyberpower_modbus_three_phase": {
         # CyberPower RMCARD205 3-phase register map (K01-E000099-00).
         "load_on_source": {
@@ -1638,7 +1688,7 @@ def configure_capability_repository(db: Database) -> CapabilityRepository:
 def get_capability_repository() -> CapabilityRepository:
     global _REPOSITORY
     if _REPOSITORY is None:
-        db_path = os.environ.get("UPS_UNIFIED_DB_PATH", "/data/ups2mqtt.db")
+        db_path = os.environ.get("UPS2MQTT_DB_PATH", "/data/ups2mqtt.db")
         _REPOSITORY = CapabilityRepository(Database(db_path=db_path))
     return _REPOSITORY
 

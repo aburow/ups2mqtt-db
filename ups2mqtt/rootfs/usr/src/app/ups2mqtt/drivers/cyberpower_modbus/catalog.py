@@ -271,7 +271,7 @@ SINGLE_PHASE_CATALOG: dict[str, Any] = {
         },
         {
             "key": "battery_replace_date_snmp",
-            "label": "Battery Replace Date (SNMP)",
+            "label": "Battery Replace Date",
             "source": "snmp",
             "oid": "1.3.6.1.4.1.3808.1.1.1.2.1.3.0",
             "category": "metadata",

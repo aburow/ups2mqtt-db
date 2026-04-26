@@ -20,6 +20,10 @@ from .model import AppConfig, DeviceConfig
 from . import pollers
 
 LOG = logging.getLogger("ups2mqtt.mqtt")
+HA_ID_NAMESPACE = "ups2mqtt"
+LEGACY_HA_ID_NAMESPACE = "ups_unified"
+BRIDGE_UNIQUE_ID = f"{HA_ID_NAMESPACE}_bridge"
+LEGACY_BRIDGE_UNIQUE_ID = f"{LEGACY_HA_ID_NAMESPACE}_bridge"
 
 
 def _friendly_name(key: str) -> str:
@@ -114,7 +118,7 @@ class MqttPublisher:
     def __init__(self, config: AppConfig):
         self._config = config
         self._client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id="ups_unified_mqtt"
+            mqtt.CallbackAPIVersion.VERSION2, client_id="ups2mqtt_mqtt"
         )
         self._bridge_availability_topic = (
             f"{self._config.mqtt_topic_prefix}/bridge/availability"
@@ -152,10 +156,10 @@ class MqttPublisher:
             "entities": [
                 {
                     "key": key,
-                    "unique_id": f"ups_unified_{identity}_{key}",
+                    "unique_id": f"{HA_ID_NAMESPACE}_{identity}_{key}",
                     "discovery_topic": (
                         f"{self._config.mqtt_discovery_prefix}/sensor/"
-                        f"ups_unified_{identity}_{key}/config"
+                        f"{HA_ID_NAMESPACE}_{identity}_{key}/config"
                     ),
                 }
                 for key in entities
@@ -221,11 +225,11 @@ class MqttPublisher:
             device.source
         )
         info: dict[str, Any] = {
-            "identifiers": [f"ups_unified_{identity}"],
+            "identifiers": [f"{HA_ID_NAMESPACE}_{identity}"],
             "name": device.name or device.id,
             "manufacturer": fallback_manufacturer,
             "model": fallback_model,
-            "via_device": "ups_unified_bridge",
+            "via_device": BRIDGE_UNIQUE_ID,
             # HA Device Info field for linking to device web UI.
             "configuration_url": f"http://{device.host}/",
         }
@@ -255,6 +259,12 @@ class MqttPublisher:
 
     def ensure_connected(self) -> bool:
         return self._attempt_connect()
+
+    def sync_bridge_discovery_visibility(self) -> bool:
+        """Apply current bridge visibility setting by publishing or clearing discovery."""
+        if not self._attempt_connect():
+            return False
+        return self._publish_bridge_discovery()
 
     def _attempt_connect(self, *, force: bool = False) -> bool:
         if not self._config.mqtt_enabled:
@@ -292,8 +302,18 @@ class MqttPublisher:
 
     def _publish_bridge_discovery(self) -> bool:
         """Publish discovery message for the bridge itself."""
-        unique_id = "ups_unified_bridge"
+        unique_id = BRIDGE_UNIQUE_ID
         config_topic = f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+        legacy_config_topic = (
+            f"{self._config.mqtt_discovery_prefix}/sensor/{LEGACY_BRIDGE_UNIQUE_ID}/config"
+        )
+        if not bool(self._config.ha_bridge_enabled):
+            # Clear retained discovery for current and legacy bridge topics.
+            self._client.publish(config_topic, payload="", qos=1, retain=True)
+            self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
+            return True
+        # Always clear legacy bridge discovery when publishing the new namespace.
+        self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
         payload: dict[str, Any] = {
             "name": "ups2mqtt Bridge",
             "unique_id": unique_id,
@@ -339,10 +359,16 @@ class MqttPublisher:
         sensor_meta = self._sensor_metadata_for_source(device.source)
 
         for key in keys:
-            unique_id = f"ups_unified_{identity}_{key}"
+            unique_id = f"{HA_ID_NAMESPACE}_{identity}_{key}"
             config_topic = (
                 f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
             )
+            legacy_config_topic = (
+                f"{self._config.mqtt_discovery_prefix}/sensor/"
+                f"{LEGACY_HA_ID_NAMESPACE}_{identity}_{key}/config"
+            )
+            # Clear legacy retained discovery to avoid namespace duplication.
+            self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
             declared = sensor_meta.get(key, {})
             declared_unit = _string_or_none(declared.get("unit"))
             if declared_unit is not None or key in sensor_meta:
@@ -408,11 +434,12 @@ class MqttPublisher:
             return False
         identity = device.device_uid or device.id
         for key in keys:
-            unique_id = f"ups_unified_{identity}_{key}"
-            config_topic = (
-                f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
-            )
-            self._client.publish(config_topic, payload="", qos=1, retain=True)
+            for namespace in (HA_ID_NAMESPACE, LEGACY_HA_ID_NAMESPACE):
+                unique_id = f"{namespace}_{identity}_{key}"
+                config_topic = (
+                    f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+                )
+                self._client.publish(config_topic, payload="", qos=1, retain=True)
         return True
 
     def clear_legacy_discovery(self, device_id: str, keys: list[str]) -> bool:

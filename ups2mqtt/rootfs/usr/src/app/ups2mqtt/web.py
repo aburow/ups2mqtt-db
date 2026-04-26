@@ -671,6 +671,8 @@ def start_web_server(
     set_metadata_refresh_interval_seconds: Callable[[int], None] | None = None,
     get_idle_reconnect_seconds: Callable[[], float] | None = None,
     set_idle_reconnect_seconds: Callable[[float], None] | None = None,
+    get_ha_bridge_enabled: Callable[[], bool] | None = None,
+    set_ha_bridge_enabled: Callable[[bool], None] | None = None,
     get_capability_profiles: Callable[[], dict[str, dict[str, object]]] | None = None,
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
@@ -693,6 +695,8 @@ def start_web_server(
     )
     idle_reconnect_getter = get_idle_reconnect_seconds or (lambda: 300.0)
     idle_reconnect_setter = set_idle_reconnect_seconds or (lambda value: None)
+    ha_bridge_enabled_getter = get_ha_bridge_enabled or (lambda: False)
+    ha_bridge_enabled_setter = set_ha_bridge_enabled or (lambda value: None)
     capability_profiles_getter = get_capability_profiles or (lambda: {})
     profile_device_info_keys = {
         # Canonical device-info/identity-like fields used by existing contract adapters.
@@ -1402,6 +1406,7 @@ def start_web_server(
             theme_options=THEME_OPTIONS,
             metadata_refresh_interval_seconds=max(1, int(metadata_refresh_getter())),
             idle_reconnect_seconds=max(1.0, float(idle_reconnect_getter())),
+            ha_bridge_enabled=bool(ha_bridge_enabled_getter()),
             runtime_log_level=logging.getLevelName(
                 logging.getLogger().getEffectiveLevel()
             ),
@@ -3223,6 +3228,14 @@ def start_web_server(
                             f"metadata refresh={metadata_seconds}s, "
                             f"idle reconnect={idle_seconds:.1f}s"
                         )
+                elif action == "set_ha_bridge_enabled":
+                    raw_value = (data.get("ha_bridge_enabled", ["true"])[0]).strip()
+                    enabled = raw_value.lower() in {"1", "true", "yes", "on"}
+                    ha_bridge_enabled_setter(enabled)
+                    toast_message = (
+                        "Home Assistant bridge visibility "
+                        f"{'enabled' if enabled else 'disabled'}"
+                    )
                 else:
                     selected = _normalize_timezone(
                         (data.get("timezone", [""])[0]).strip()
@@ -4637,7 +4650,7 @@ def start_web_server(
 
     server = ThreadingHTTPServer((host, port), Handler)
     thread = threading.Thread(
-        target=server.serve_forever, daemon=True, name="ups-unified-web"
+        target=server.serve_forever, daemon=True, name="ups2mqtt-web"
     )
     thread.start()
     LOG.info("Web UI listening on http://%s:%s", host, port)

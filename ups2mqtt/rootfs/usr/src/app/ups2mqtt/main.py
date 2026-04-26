@@ -1160,7 +1160,7 @@ def _apply_sensor_poll_group_overrides(
 
 async def async_main() -> None:
     # Default to INFO for better observability, can be overridden by environment
-    log_level_name = os.environ.get("UPS_UNIFIED_LOG_LEVEL", "INFO").upper()
+    log_level_name = os.environ.get("UPS2MQTT_LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
     logging.basicConfig(
         level=log_level,
@@ -1168,7 +1168,7 @@ async def async_main() -> None:
     )
     _configure_audit_syslog_handler()
     config = load_config()
-    os.environ.setdefault("UPS_UNIFIED_APPS_DIR", config.apps_dir)
+    os.environ.setdefault("UPS2MQTT_APPS_DIR", config.apps_dir)
     runtime_settings = load_runtime_settings()
     runtime_settings_state: dict[str, Any] = {
         "timezone": str(runtime_settings.get("timezone", "UTC")).strip() or "UTC",
@@ -1177,6 +1177,9 @@ async def async_main() -> None:
             if str(runtime_settings.get("theme", "system")).strip().lower()
             in {"light", "dark", "system"}
             else "system"
+        ),
+        "ha_bridge_enabled": bool(
+            runtime_settings.get("ha_bridge_enabled", config.ha_bridge_enabled)
         ),
         "metadata_refresh_interval_seconds": max(
             1,
@@ -1198,6 +1201,7 @@ async def async_main() -> None:
         ),
     }
     runtime_settings_lock = threading.Lock()
+    config.ha_bridge_enabled = bool(runtime_settings_state["ha_bridge_enabled"])
 
     def _persist_runtime_settings() -> None:
         save_runtime_settings(dict(runtime_settings_state))
@@ -1222,6 +1226,10 @@ async def async_main() -> None:
             )
             _persist_runtime_settings()
 
+    def _get_ha_bridge_enabled() -> bool:
+        with runtime_settings_lock:
+            return bool(runtime_settings_state["ha_bridge_enabled"])
+
     def _get_metadata_refresh_interval_seconds() -> int:
         with runtime_settings_lock:
             return int(runtime_settings_state["metadata_refresh_interval_seconds"])
@@ -1243,6 +1251,18 @@ async def async_main() -> None:
         with runtime_settings_lock:
             runtime_settings_state["idle_reconnect_seconds"] = seconds_value
             _persist_runtime_settings()
+
+    def _set_ha_bridge_enabled(enabled: bool) -> None:
+        enabled_bool = bool(enabled)
+        with runtime_settings_lock:
+            runtime_settings_state["ha_bridge_enabled"] = enabled_bool
+            config.ha_bridge_enabled = enabled_bool
+            _persist_runtime_settings()
+        if not mqtt.sync_bridge_discovery_visibility():
+            LOG.warning(
+                "Failed to apply HA bridge visibility update (enabled=%s)",
+                enabled_bool,
+            )
 
     # Apply persisted runtime timer settings at startup.
     _set_metadata_refresh_interval_seconds(
@@ -1402,6 +1422,8 @@ async def async_main() -> None:
             set_metadata_refresh_interval_seconds=_set_metadata_refresh_interval_seconds,
             get_idle_reconnect_seconds=_get_idle_reconnect_seconds,
             set_idle_reconnect_seconds=_set_idle_reconnect_seconds,
+            get_ha_bridge_enabled=_get_ha_bridge_enabled,
+            set_ha_bridge_enabled=_set_ha_bridge_enabled,
             get_cached_ha_payload_preview=mqtt.get_cached_ha_payload_preview,
         )
 
@@ -1639,8 +1661,11 @@ async def _prune_stale_ha_entities(
     if not config.ha_url or not config.ha_token:
         return
 
-    expected_unique_ids: set[str] = {"ups_unified_bridge"}
-    expected_device_identifiers: set[str] = {"ups_unified_bridge"}
+    expected_unique_ids: set[str] = set()
+    expected_device_identifiers: set[str] = set()
+    if bool(getattr(config, "ha_bridge_enabled", False)):
+        expected_unique_ids.add("ups2mqtt_bridge")
+        expected_device_identifiers.add("ups2mqtt_bridge")
     for device in devices:
         if not device.discovery_enabled:
             continue
@@ -1659,9 +1684,9 @@ async def _prune_stale_ha_entities(
         if not isinstance(runtime_profile, dict):
             continue
         identity = device.device_uid or device.id
-        expected_device_identifiers.add(f"ups_unified_{identity}")
+        expected_device_identifiers.add(f"ups2mqtt_{identity}")
         for key in keys:
-            expected_unique_ids.add(f"ups_unified_{identity}_{key}")
+            expected_unique_ids.add(f"ups2mqtt_{identity}_{key}")
 
     result = await delete_stale_ups_entities(
         config.ha_url,

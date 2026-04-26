@@ -18,9 +18,9 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 1. Create your env file at the repository root:
    - `cp standalone/.env.example .env`
 2. Edit `.env` and set at minimum:
-   - `UPS_UNIFIED_MQTT_HOST`
-   - `UPS_UNIFIED_MQTT_PORT` (default `1883`)
-   - `UPS_UNIFIED_MQTT_USERNAME` / `UPS_UNIFIED_MQTT_PASSWORD` if your broker requires auth
+   - `UPS2MQTT_MQTT_HOST`
+   - `UPS2MQTT_MQTT_PORT` (default `1883`)
+   - `UPS2MQTT_MQTT_USERNAME` / `UPS2MQTT_MQTT_PASSWORD` if your broker requires auth
 3. Edit `standalone/options.json` for runtime options and device definitions (`config` YAML payload).
 4. Start the stack:
    - `make dev-up`
@@ -135,6 +135,10 @@ flowchart TD
 - Update lockfile after dependency changes:
   - `cd ups2mqtt/rootfs/usr/src/app`
   - `uv lock`
+- Runtime settings/devices files now use:
+  - `/data/ups2mqtt_settings.yaml`
+  - `/data/ups2mqtt_devices.yaml`
+- Environment variable namespace is `UPS2MQTT_*`.
 
 ## Capability DB Snapshot
 - A versioned SQL snapshot can prime all `capability_*` tables in a fresh database.
@@ -152,6 +156,7 @@ flowchart TD
 
 ## Linting
 Run from `ups2mqtt/rootfs/usr/src/app`:
+- `./.venv/bin/pytest -q`
 - `uv run --group lint ruff check .`
 - `uv run --group lint grain check --all`
 - `HOME=/tmp uv run --group lint semgrep --config auto --error ups2mqtt`
@@ -163,6 +168,6 @@ YAML lint from repository root:
 
 ## Troubleshooting
 - If `make dev-up` fails with missing variables, confirm `.env` exists in the repository root.
-- Prefer `make` targets over raw `docker compose` commands in this repo. The `make` workflow passes `--env-file .env`; running Compose directly can inject empty `UPS_UNIFIED_*` values.
+- Prefer `make` targets over raw `docker compose` commands in this repo. The `make` workflow passes `--env-file .env`; running Compose directly can inject empty `UPS2MQTT_*` values.
 - If the service is up but not publishing data, verify MQTT host/port/credentials in `.env` and check `make dev-logs`.
 - If startup fails during DB init with `Unsupported table for migration: profiles`, rebuild and restart with `make dev-up` so the latest migration logic is applied to `standalone/data/ups2mqtt.db`.

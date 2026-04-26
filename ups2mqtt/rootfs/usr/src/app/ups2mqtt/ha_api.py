@@ -16,6 +16,28 @@ except ImportError:
     aiohttp = None
 
 LOG = logging.getLogger("ups2mqtt.ha_api")
+HA_ID_NAMESPACE = "ups2mqtt"
+LEGACY_HA_ID_NAMESPACE = "ups_unified"
+BRIDGE_UNIQUE_ID = f"{HA_ID_NAMESPACE}_bridge"
+LEGACY_BRIDGE_UNIQUE_ID = f"{LEGACY_HA_ID_NAMESPACE}_bridge"
+
+
+def _map_legacy_unique_id_to_new(unique_id: str) -> str | None:
+    legacy_prefix = f"{LEGACY_HA_ID_NAMESPACE}_"
+    if unique_id == LEGACY_BRIDGE_UNIQUE_ID:
+        return BRIDGE_UNIQUE_ID
+    if unique_id.startswith(legacy_prefix):
+        return f"{HA_ID_NAMESPACE}_{unique_id[len(legacy_prefix):]}"
+    return None
+
+
+def _map_legacy_identifier_to_new(identifier: str) -> str | None:
+    if identifier == LEGACY_BRIDGE_UNIQUE_ID:
+        return BRIDGE_UNIQUE_ID
+    prefix = f"{LEGACY_HA_ID_NAMESPACE}_"
+    if identifier.startswith(prefix):
+        return f"{HA_ID_NAMESPACE}_{identifier[len(prefix):]}"
+    return None
 
 
 async def _ws_recv_result(
@@ -55,7 +77,7 @@ async def delete_device_entities(
         ha_url: Base URL of Home Assistant (e.g., "http://homeassistant.local:8123")
         ha_token: Long-lived access token for Home Assistant API
         device_identity: Device UUID/identity used in discovery unique_id
-            (e.g. "02faf945-..." for unique_id "ups_unified_<id>_<metric>")
+            (e.g. "02faf945-..." for unique_id "ups2mqtt_<id>_<metric>")
 
     Returns:
         Dict with keys:
@@ -69,7 +91,7 @@ async def delete_device_entities(
     if aiohttp is None:
         return {"error": "aiohttp not available for HA API calls"}
 
-    unique_id_prefix = f"ups_unified_{device_identity}_"
+    unique_id_prefix = f"{HA_ID_NAMESPACE}_{device_identity}_"
     deleted_entities: list[str] = []
 
     try:
@@ -155,7 +177,7 @@ async def apply_entity_default_states(
     if aiohttp is None:
         return {"error": "aiohttp not available for HA API calls"}
 
-    unique_id_prefix = f"ups_unified_{device_identity}_"
+    unique_id_prefix = f"{HA_ID_NAMESPACE}_{device_identity}_"
     updated: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
 
@@ -262,8 +284,10 @@ async def delete_stale_ups_entities(
 ) -> dict[str, Any]:
     """Delete stale ups2mqtt entities from Home Assistant entity registry.
 
-    Any entity with `unique_id` starting with `ups_unified_` that is not present
+    Any entity with `unique_id` starting with `ups2mqtt_` that is not present
     in `expected_unique_ids` will be removed.
+    Legacy `ups_unified_` entities are only removed after their mapped
+    `ups2mqtt_` replacement is both expected and present in the registry.
     """
     if not ha_url or not ha_token:
         return {"skipped": True, "reason": "HA URL or token not configured"}
@@ -292,14 +316,24 @@ async def delete_stale_ups_entities(
                     return {"error": "HA entity registry list failed"}
 
                 registry_entries = response.get("result", [])
+                current_unique_ids = {
+                    str(entry.get("unique_id", "")) for entry in registry_entries
+                }
                 for entry in registry_entries:
                     unique_id = str(entry.get("unique_id", ""))
                     entity_id = str(entry.get("entity_id", "")).strip()
-                    if (
-                        unique_id.startswith("ups_unified_")
+                    is_active_stale = (
+                        unique_id.startswith(f"{HA_ID_NAMESPACE}_")
                         and unique_id not in expected_unique_ids
-                        and entity_id
-                    ):
+                    )
+                    mapped_new_id = _map_legacy_unique_id_to_new(unique_id)
+                    is_legacy_stale = bool(
+                        mapped_new_id
+                        and mapped_new_id in expected_unique_ids
+                        and mapped_new_id in current_unique_ids
+                        and unique_id not in expected_unique_ids
+                    )
+                    if (is_active_stale or is_legacy_stale) and entity_id:
                         stale_entities.append((entity_id, unique_id))
 
                 command_id = 100
@@ -331,7 +365,7 @@ async def delete_stale_ups_entities(
                 # Also remove stale/orphan ups2mqtt device-registry entries.
                 # These can persist after entities are deleted and inflate HA device count.
                 if expected_device_identifiers is None:
-                    expected_device_identifiers = {"ups_unified_bridge"}
+                    expected_device_identifiers = {BRIDGE_UNIQUE_ID}
 
                 await ws.send_json({"id": 2, "type": "config/entity_registry/list"})
                 current_entities_resp = await _ws_recv_result(ws, 2)
@@ -342,7 +376,7 @@ async def delete_stale_ups_entities(
                 for entry in current_entities:
                     unique_id = str(entry.get("unique_id", ""))
                     device_id = str(entry.get("device_id", "")).strip()
-                    if unique_id.startswith("ups_unified_") and device_id:
+                    if unique_id.startswith(f"{HA_ID_NAMESPACE}_") and device_id:
                         ups_entities_by_device[device_id] = (
                             ups_entities_by_device.get(device_id, 0) + 1
                         )
@@ -367,11 +401,23 @@ async def delete_stale_ups_entities(
                         and item[0] == "mqtt"
                     ]
                     ups_ids = [
-                        item for item in mqtt_ids if item.startswith("ups_unified_")
+                        item
+                        for item in mqtt_ids
+                        if item.startswith(f"{HA_ID_NAMESPACE}_")
+                        or item.startswith(f"{LEGACY_HA_ID_NAMESPACE}_")
                     ]
                     if not ups_ids:
                         continue
-                    if any(item in expected_device_identifiers for item in ups_ids):
+                    if any(
+                        item in expected_device_identifiers
+                        for item in (
+                            *ups_ids,
+                            *[
+                                _map_legacy_identifier_to_new(item) or ""
+                                for item in ups_ids
+                            ],
+                        )
+                    ):
                         continue
                     if ups_entities_by_device.get(device_id, 0) > 0:
                         continue

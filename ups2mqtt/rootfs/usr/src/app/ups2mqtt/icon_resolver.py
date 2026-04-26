@@ -17,7 +17,7 @@ from .drivers.runtime_metadata import driver_owns_runtime_metadata
 
 LOG = logging.getLogger("ups2mqtt.icon_resolver")
 LOCAL_CONTRACTS_DIR = Path(
-    os.environ.get("UPS_UNIFIED_LOCAL_CONTRACTS_DIR", "/usr/src/app/contracts")
+    os.environ.get("UPS2MQTT_LOCAL_CONTRACTS_DIR", "/usr/src/app/contracts")
 )
 
 # Cache loaded modules to avoid repeated imports

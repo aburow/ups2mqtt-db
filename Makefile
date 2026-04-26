@@ -3,7 +3,7 @@
 
 ENV_FILE ?= .env
 COMPOSE_FILE ?= standalone/docker-compose.yml
-SERVICE ?= ups-unified
+SERVICE ?= ups2mqtt
 
 .PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime
 

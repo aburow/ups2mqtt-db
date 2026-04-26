@@ -61,7 +61,7 @@ def _save_cache(apps_dir: str, cache: dict[str, str]) -> None:
 
 
 def _env_repo_url(name: str, default: str) -> str:
-    env_name = f"UPS_UNIFIED_REPO_{name.upper().replace('-', '_')}_URL"
+    env_name = f"UPS2MQTT_REPO_{name.upper().replace('-', '_')}_URL"
     return os.environ.get(env_name, default).strip() or default
 
 
@@ -270,7 +270,7 @@ def sync_sources(
     app_name: str | None = None,
     release: str | None = None,
 ) -> dict[str, dict[str, str | bool]]:
-    branch = os.environ.get("UPS_UNIFIED_REPO_BRANCH", branch).strip() or branch
+    branch = os.environ.get("UPS2MQTT_REPO_BRANCH", branch).strip() or branch
     root = Path(apps_dir)
     root.mkdir(parents=True, exist_ok=True)
     results: dict[str, dict[str, str | bool]] = {}

@@ -25,6 +25,32 @@ _SUPPORTED_OUTPUT_TYPES = {"bool", "number", "string", "date", "datetime"}
 _CODE_SENSOR_KEYS_REQUIRE_MAP = {
     "output_source",
     "battery_status",
+    "hardware_fault",
+    "utility_frequency_out_of_range",
+    "inverter_off",
+    "battery_not_present",
+    "on_battery_state",
+    "battery_discharging",
+    "battery_charging",
+    "battery_fully_charged",
+    "buzzer_muted",
+    "runtime_low",
+    "no_output",
+    "over_temperature",
+}
+_BINARY_STATUS_ENUM_KEYS = {
+    "hardware_fault",
+    "utility_frequency_out_of_range",
+    "inverter_off",
+    "battery_not_present",
+    "on_battery_state",
+    "battery_discharging",
+    "battery_charging",
+    "battery_fully_charged",
+    "buzzer_muted",
+    "runtime_low",
+    "no_output",
+    "over_temperature",
 }
 
 
@@ -324,6 +350,30 @@ def apply_catalog_transforms(
             )
             if transformed_value is None:
                 if transform_name == "enum_map":
+                    # Some device firmwares report boolean state registers as
+                    # non-zero integers (e.g., 10/100) instead of strict 0/1.
+                    # For designated status sensors, coerce any non-zero to 1.
+                    if source_key in _BINARY_STATUS_ENUM_KEYS:
+                        try:
+                            numeric_source = int(source_value)
+                        except (TypeError, ValueError):
+                            numeric_source = 0
+                        bool_key = str(1 if numeric_source != 0 else 0)
+                        mapped = params.get("map", {}).get(bool_key)
+                        if mapped is not None:
+                            transformed_value = str(mapped)
+                    if transformed_value is not None:
+                        if not _type_matches(output_type, transformed_value):
+                            raise ValueError(
+                                "type mismatch: expected "
+                                f"{output_type}, got {type(transformed_value).__name__}"
+                            )
+                        output[output_key] = transformed_value
+                        value_cache[output_key] = transformed_value
+                        if source_key in _CODE_SENSOR_KEYS_REQUIRE_MAP:
+                            output[source_key] = transformed_value
+                            value_cache[source_key] = transformed_value
+                        continue
                     rate_key = (
                         device_uid,
                         output_key,

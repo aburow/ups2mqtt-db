@@ -8,7 +8,7 @@ Merges icon definitions from cyberpower-modbus-ha, apc-modbus-ha, and ups-snmp-h
 into a single, framework-independent module with no homeassistant dependencies.
 
 This is the canonical reference implementation suitable for:
-- Embedding in ups_unified_mqtt icon resolver
+- Embedding in ups2mqtt_mqtt icon resolver
 - Standardizing across all three HACS projects
 - Using in standalone tools and external integrations
 """

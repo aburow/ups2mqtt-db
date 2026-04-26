@@ -158,7 +158,7 @@ def load_capabilities(
     repo.seed_baseline_if_needed()
     profiles, runtime_errors = repo.load_runtime_profiles()
     metric_contracts = repo.load_metric_contracts()
-    apps_dir = os.environ.get("UPS_UNIFIED_APPS_DIR", "/data/apps")
+    apps_dir = os.environ.get("UPS2MQTT_APPS_DIR", "/data/apps")
 
     if not profiles:
         raise ValueError("No profiles found in capability database")

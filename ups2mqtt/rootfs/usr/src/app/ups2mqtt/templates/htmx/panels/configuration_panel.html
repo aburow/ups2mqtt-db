@@ -108,6 +108,30 @@
 
       <hr class="my-1"/>
 
+      <h3 class="h6 m-0">Home Assistant Bridge Visibility</h3>
+      <p class="text-muted small mb-0">
+        Controls only the bridge helper entity (<code>ups2mqtt_bridge</code>). Device entities are unaffected.
+      </p>
+      <form
+        class="d-flex flex-wrap gap-2 align-items-end"
+        hx-post="/htmx/devices/actions/configuration"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >
+        <input type="hidden" name="action" value="set_ha_bridge_enabled"/>
+        <div>
+          <label class="form-label small mb-1">Bridge visibility</label>
+          <select class="form-select form-select-sm" name="ha_bridge_enabled" style="width:auto">
+            <option value="true" {% if ha_bridge_enabled %}selected{% endif %}>Enabled</option>
+            <option value="false" {% if not ha_bridge_enabled %}selected{% endif %}>Disabled</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      </form>
+
+      <hr class="my-1"/>
+
       <h3 class="h6 m-0">Application Debug Level</h3>
       <p class="text-muted small mb-0">
         Controls runtime logging verbosity for the running service instance.

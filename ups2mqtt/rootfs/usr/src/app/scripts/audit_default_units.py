@@ -59,7 +59,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--apps-dir",
-        default=os.environ.get("UPS_UNIFIED_APPS_DIR", "/data/apps"),
+        default=os.environ.get("UPS2MQTT_APPS_DIR", "/data/apps"),
         help="Apps directory used for default-enable resolution.",
     )
     parser.add_argument(
@@ -74,8 +74,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    os.environ.setdefault("UPS_UNIFIED_DB_PATH", args.db_path)
-    os.environ.setdefault("UPS_UNIFIED_APPS_DIR", args.apps_dir)
+    os.environ.setdefault("UPS2MQTT_DB_PATH", args.db_path)
+    os.environ.setdefault("UPS2MQTT_APPS_DIR", args.apps_dir)
 
     payload = load_capabilities()
     profiles = payload.get("profiles", {})

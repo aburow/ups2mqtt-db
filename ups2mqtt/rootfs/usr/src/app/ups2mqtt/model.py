@@ -107,6 +107,7 @@ class AppConfig:
     raw: dict[str, Any]
     ha_url: str | None = None
     ha_token: str | None = None
+    ha_bridge_enabled: bool = False
 
 
 @dataclass(slots=True)

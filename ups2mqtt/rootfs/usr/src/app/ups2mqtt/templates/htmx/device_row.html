@@ -84,7 +84,11 @@
     <div class="d-flex gap-2">
       <button
         class="btn btn-sm btn-outline-primary"
-        @click="openModal('/htmx/devices/partials/modal/ha-payload?id={{ device.id }}')"
+        hx-get="/htmx/devices/partials/modal/ha-payload?id={{ device.id }}"
+        hx-target="#device-modal-content"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+        @click="modalOpen = true"
       >HA Payload</button>
       <button
         class="btn btn-sm btn-outline-secondary"

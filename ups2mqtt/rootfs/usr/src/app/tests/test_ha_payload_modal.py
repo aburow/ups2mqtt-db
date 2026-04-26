@@ -86,8 +86,14 @@ def test_devices_table_renders_ha_payload_button_for_each_device(tmp_path: Path)
         status, body = _fetch(base_url, "/htmx/devices/partials/table")
         assert status == HTTPStatus.OK
         assert body.count("HA Payload") == 2
-        assert "/htmx/devices/partials/modal/ha-payload?id=ups-a" in body
-        assert "/htmx/devices/partials/modal/ha-payload?id=ups-b" in body
+        assert (
+            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-a"' in body
+        )
+        assert (
+            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-b"' in body
+        )
+        assert 'hx-target="#device-modal-content"' in body
+        assert '@click="modalOpen = true"' in body
     finally:
         server.shutdown()
         server.server_close()
@@ -122,7 +128,7 @@ def test_ha_payload_modal_known_device_renders_readable_cached_html(tmp_path: Pa
             "entities": [
                 {
                     "key": "battery_state_of_charge",
-                    "discovery_topic": "homeassistant/sensor/ups_unified_uid-ups-1_battery_state_of_charge/config",
+                    "discovery_topic": "homeassistant/sensor/ups2mqtt_uid-ups-1_battery_state_of_charge/config",
                 }
             ],
         }

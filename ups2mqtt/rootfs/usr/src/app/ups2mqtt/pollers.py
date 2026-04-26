@@ -237,7 +237,12 @@ def _close_session_client(session: _EndpointSession) -> None:
     try:
         session.client.close()
     except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-        return
+        pass
+    # Always drop the client object after close so reconnects rebuild a fresh
+    # transaction context. Reusing a timed-out pymodbus client can lead to
+    # misaligned/stale responses being associated with subsequent reads.
+    session.client = None
+    session.resolved_unit_param = None
 
 
 def _recreate_session_client(session: _EndpointSession, device: DeviceConfig) -> None:
@@ -463,7 +468,11 @@ def _try_individual_reads(
 
 
 def _poll_modbus_sync(
-    device: DeviceConfig, profile: dict[str, Any], poll_groups: set[str] | None = None
+    device: DeviceConfig,
+    profile: dict[str, Any],
+    poll_groups: set[str] | None = None,
+    *,
+    suppress_runtime_metadata_merge: bool = False,
 ) -> dict[str, Any]:
     output: dict[str, Any] = {}
 
@@ -552,8 +561,9 @@ def _poll_modbus_sync(
     # Multi-source drivers handle metadata independently through their own runtime metadata path.
     protocol = profile.get("protocol")
     is_multi_source = protocol == "multi_source"
+    skip_runtime_metadata_merge = suppress_runtime_metadata_merge or is_multi_source
 
-    if device.source.startswith("apc_modbus") and not is_multi_source:
+    if device.source.startswith("apc_modbus") and not skip_runtime_metadata_merge:
         snmp_metadata_started = time.monotonic()
         cache = _maybe_refresh_apc_snmp_metadata(device)
         snmp_metadata_elapsed = time.monotonic() - snmp_metadata_started
@@ -562,7 +572,10 @@ def _poll_modbus_sync(
         snmp_external_started = time.monotonic()
         _merge_apc_external_probe_data(device, output, cache.detection)
         snmp_external_elapsed = time.monotonic() - snmp_external_started
-    elif device.source.startswith("cyberpower_modbus") and not is_multi_source:
+    elif (
+        device.source.startswith("cyberpower_modbus")
+        and not skip_runtime_metadata_merge
+    ):
         snmp_metadata_started = time.monotonic()
         # Get SNMP fields from catalog (respects tier gating)
         snmp_oid_map = _metadata_snmp_oid_map(device)
@@ -1034,7 +1047,14 @@ def _metadata_snmp_oid_map(device: DeviceConfig) -> dict[str, str]:
         }
 
     enable_extended = bool(getattr(device, "enable_extended_fields", False))
-    metadata_candidates = {"model", "serial_number", "sw_version", "firmware_version"}
+    metadata_candidates = {
+        "model",
+        "serial_number",
+        "sw_version",
+        "firmware_version",
+        "battery_replace_date_snmp",
+        "battery_replace_date",
+    }
     out: dict[str, str] = {}
     for spec in specs:
         source = str(spec.get("source", "")).strip().lower()
@@ -1055,6 +1075,7 @@ def _metadata_snmp_oid_map(device: DeviceConfig) -> dict[str, str]:
         "model": CYBERPOWER_OID_MODEL,
         "serial_number": CYBERPOWER_OID_SERIAL,
         "sw_version": CYBERPOWER_OID_FIRMWARE,
+        "battery_replace_date_snmp": "1.3.6.1.4.1.3808.1.1.1.2.1.3.0",
     }
 
 
@@ -1715,7 +1736,11 @@ async def _poll_multi_source(
     if should_poll_modbus:
         LOG.debug("Polling modbus for %s", device.source)
         modbus_values = await asyncio.to_thread(
-            _poll_modbus_sync, device, modbus_config, groups
+            _poll_modbus_sync,
+            device,
+            modbus_config,
+            groups,
+            suppress_runtime_metadata_merge=True,
         )
         LOG.debug(
             "Modbus poll completed for %s: %d values", device.source, len(modbus_values)

@@ -1,98 +1,4 @@
 <div data-shared-selection-table="1">
-  {% if unified_sensor_rows %}
-  <div class="border rounded p-2 mb-2">
-    <div class="small fw-semibold text-primary mb-1">Unified (Contract) Sensors</div>
-    <div class="small text-muted mb-2">Cross-driver unified sensor definitions from contract.</div>
-    {% if sensor_rows_are_dual_toggle %}
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0 sensor-selection-table">
-        <colgroup>
-          <col class="col-key"/>
-          <col class="col-label"/>
-          <col class="col-meta-a"/>
-          <col class="col-meta-b"/>
-          <col class="col-mqtt"/>
-          <col class="col-poll"/>
-          <col class="col-extra"/>
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Key</th>
-            <th>Label</th>
-            <th>Category</th>
-            <th>Unit</th>
-            <th>Register/OID</th>
-            <th>MQTT</th>
-            <th>Poll Group</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for sensor in unified_sensor_rows %}
-          <tr>
-            <td><code>{{ sensor.key }}</code></td>
-            <td>{{ sensor.label }}</td>
-            <td>{{ sensor.category }}</td>
-            <td>{{ sensor.unit }}</td>
-            <td><small class="text-muted">{{ sensor.reference or "" }}</small></td>
-            <td>
-              <input type="hidden" name="sensor_key__{{ sensor.key }}" value="1"/>
-              <input
-                class="form-check-input"
-                type="checkbox"
-                name="sensor_mqtt__{{ sensor.key }}"
-                data-pref-toggle="mqtt"
-                data-key="{{ sensor.key }}"
-                {% if sensor.mqtt_enabled %}checked{% endif %}
-                {% if selection_controls_disabled %}disabled{% endif %}
-              />
-            </td>
-            <td>
-              <div class="d-flex flex-wrap gap-2">
-                {% for group_name in sensor_poll_group_choices %}
-                <label class="form-check form-check-inline small mb-0">
-                  <input
-                    class="form-check-input"
-                    type="radio"
-                    name="sensor_poll_group__{{ sensor.key }}"
-                    value="{{ group_name }}"
-                    {% if sensor.poll_group == group_name %}checked{% endif %}
-                    {% if selection_controls_disabled %}disabled{% endif %}
-                  />
-                  <span class="form-check-label">{{ group_name }}</span>
-                </label>
-                {% endfor %}
-              </div>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="7" class="small text-muted">{{ empty_unified_message }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="row g-1">
-      {% for sensor in unified_sensor_rows %}
-      <div class="col-12 col-md-6 col-lg-4">
-        <label class="form-check small mb-0">
-          <input
-            class="form-check-input me-1"
-            type="checkbox"
-            name="sensor__{{ sensor.key }}"
-            {% if (sensor.selected|default(sensor.mqtt_enabled)) %}checked{% endif %}
-            {% if selection_controls_disabled %}disabled{% endif %}
-          />
-          <span class="form-check-label"><code>{{ sensor.key }}</code></span>
-        </label>
-      </div>
-      {% else %}
-      <div class="small text-muted">{{ empty_unified_message }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-
   {% if has_catalog_sensors %}
   <div class="border rounded p-2">
     <div class="small fw-semibold text-secondary mb-1">Catalog (Driver-Specific) Sensors</div>
@@ -188,7 +94,7 @@
   </div>
   {% endif %}
 
-  {% if not unified_sensor_rows and not has_catalog_sensors %}
+  {% if not has_catalog_sensors %}
   <div class="small text-muted mt-2">{{ empty_all_message }}</div>
   {% endif %}
   {% if show_sensor_count %}
