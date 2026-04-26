@@ -156,6 +156,7 @@ Run from `ups2mqtt/rootfs/usr/src/app`:
 - `uv run --group lint grain check --all`
 - `HOME=/tmp uv run --group lint semgrep --config auto --error ups2mqtt`
 - `uv run --group lint sqlfluff lint .`
+- SQLFluff intentionally ignores capability snapshot dump files via `ups2mqtt/rootfs/usr/src/app/.sqlfluffignore` (`capabilities/capability_snapshot*.sql`) to avoid non-source large-file warnings.
 
 YAML lint from repository root:
 - `./ups2mqtt/rootfs/usr/src/app/.venv/bin/yamllint -s --no-warnings standalone/docker-compose.yml ups2mqtt/rootfs/usr/src/app/ups2mqtt`
