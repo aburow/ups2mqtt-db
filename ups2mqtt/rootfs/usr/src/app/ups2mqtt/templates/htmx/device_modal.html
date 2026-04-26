@@ -154,8 +154,8 @@
           </div>
           {% with
             selection_controls_disabled=(not is_local_mode),
-            empty_unified_message="No contract-derived sensor keys available for this selection.",
-            empty_all_message="No contract-derived sensor keys available for this selection.",
+            empty_unified_message="No sensor keys available for this selection.",
+            empty_all_message="No sensor keys available for this selection.",
             show_sensor_count=False
           %}
           {% include "htmx/components/sensor_selection_table.html" %}

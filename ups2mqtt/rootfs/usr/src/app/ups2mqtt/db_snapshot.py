@@ -13,6 +13,12 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _INSERT_RE = re.compile(r'^INSERT INTO "?([A-Za-z_][A-Za-z0-9_]*)"?\s')
 
 
+def _sql_text_literal(value: str | None) -> str:
+    if value is None:
+        return "NULL"
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -52,6 +58,78 @@ def _capability_insert_map(conn: sqlite3.Connection) -> dict[str, list[str]]:
     return out
 
 
+def _default_profile_inserts(conn: sqlite3.Connection) -> list[str]:
+    has_profiles_table = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'profiles'
+        """
+    ).fetchone()
+    if not has_profiles_table:
+        return []
+
+    rows = conn.execute(
+        """
+        SELECT
+            profile_uid,
+            name,
+            driver_key,
+            config_payload,
+            selected_sensors,
+            sensor_preferences,
+            comments,
+            is_protected,
+            created_at,
+            updated_at
+        FROM profiles
+        WHERE name LIKE '%[default]%'
+        ORDER BY updated_at, profile_uid
+        """
+    ).fetchall()
+    inserts: list[str] = []
+    for row in rows:
+        profile_uid = str(row["profile_uid"] or "")
+        name = str(row["name"] or "")
+        driver_key = str(row["driver_key"] or "")
+        config_payload = str(row["config_payload"] or "{}")
+        selected_sensors = str(row["selected_sensors"] or "[]")
+        sensor_preferences = _sql_text_literal(
+            None
+            if row["sensor_preferences"] is None
+            else str(row["sensor_preferences"])
+        )
+        comments = _sql_text_literal(
+            None if row["comments"] is None else str(row["comments"])
+        )
+        is_protected = int(row["is_protected"] or 0)
+        created_at = _sql_text_literal(
+            None if row["created_at"] is None else str(row["created_at"])
+        )
+        updated_at = _sql_text_literal(
+            None if row["updated_at"] is None else str(row["updated_at"])
+        )
+        inserts.append(
+            "INSERT OR REPLACE INTO profiles("
+            "profile_uid, name, driver_key, config_payload, selected_sensors, "
+            "sensor_preferences, comments, is_protected, created_at, updated_at"
+            ") VALUES ("
+            f"{_sql_text_literal(profile_uid)}, "
+            f"{_sql_text_literal(name)}, "
+            f"{_sql_text_literal(driver_key)}, "
+            f"{_sql_text_literal(config_payload)}, "
+            f"{_sql_text_literal(selected_sensors)}, "
+            f"{sensor_preferences}, "
+            f"{comments}, "
+            f"{is_protected}, "
+            f"{created_at}, "
+            f"{updated_at}"
+            ");"
+        )
+    return inserts
+
+
 def dump_capability_snapshot(*, db_path: str, output_path: str) -> None:
     conn = _connect(db_path)
     try:
@@ -75,6 +153,7 @@ def dump_capability_snapshot(*, db_path: str, output_path: str) -> None:
 
         for table in reversed(tables):
             lines.append(f"DELETE FROM {table};")
+        lines.append("DELETE FROM profiles WHERE name LIKE '%[default]%';")
         lines.append("")
 
         for table in tables:
@@ -82,6 +161,11 @@ def dump_capability_snapshot(*, db_path: str, output_path: str) -> None:
             lines.append(f"-- {table} rows: {len(inserts)}")
             lines.extend(inserts)
             lines.append("")
+
+        default_profile_inserts = _default_profile_inserts(conn)
+        lines.append(f"-- profiles default rows: {len(default_profile_inserts)}")
+        lines.extend(default_profile_inserts)
+        lines.append("")
 
         lines.extend(
             [

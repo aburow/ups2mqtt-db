@@ -12,6 +12,7 @@ from typing import Any
 
 from .database import Database
 from .drivers.registry import DRIVER_REGISTRY
+from .icons_unified import resolve_sensor_icon
 from .drivers.runtime_metadata import (
     load_plugin_capability_profile,
     load_plugin_sensor_catalog,
@@ -39,7 +40,54 @@ _ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, str]] = {
     },
 }
 
+_DRIVER_ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, dict[str, str]]] = {
+    "cyberpower_modbus_three_phase": {
+        # CyberPower RMCARD205 3-phase register map (K01-E000099-00).
+        "load_on_source": {
+            "0": "none",
+            "1": "ups_supply",
+            "2": "bypass_supply",
+        },
+        "battery_status": {
+            "0": "not_work",
+            "1": "float_charge",
+            "2": "boost_charge",
+            "3": "discharge",
+        },
+        "battery_test_result": {
+            "0": "no_test",
+            "1": "test_success",
+            "2": "test_fail",
+            "3": "testing",
+        },
+        "battery_maintain_result": {
+            "0": "no_maintain",
+            "1": "maintain_success",
+            "2": "maintain_fail",
+            "3": "maintaining",
+        },
+    }
+}
+
 _BITFIELD_FLAG_MAPS: dict[str, dict[int, tuple[str, str]]] = {
+    "status_word_1": {
+        0: ("ups_on_battery_low_shutdown_state", "Low Battery Shutdown"),
+        1: ("ups_unable_transfer_overload_state", "Unable to Transfer (Overload)"),
+        2: ("ups_main_relay_fault_state", "Main Relay Fault"),
+        5: ("ups_battery_charger_fault_state", "Battery Charger Fault"),
+        7: ("ups_temperature_fault_state", "Temperature Fault"),
+    },
+    "status_word_2": {
+        4: ("ups_bypass_fault_state", "Bypass Fault"),
+        7: ("ups_inverter_fault_state", "Inverter Fault"),
+    },
+    "status_word_3": {
+        3: ("ups_online_state", "UPS Online"),
+        4: ("ups_on_battery_state", "UPS On Battery"),
+        5: ("ups_overload_state", "UPS Overload"),
+        6: ("ups_low_battery_state", "UPS Low Battery"),
+        7: ("ups_replace_battery_state", "UPS Replace Battery"),
+    },
     "ups_status_bf": {
         0: ("ups_online_state", "UPS Online"),
         1: ("ups_on_battery_state", "UPS On Battery"),
@@ -99,11 +147,10 @@ class CapabilityRepository:
         cursor = conn.cursor()
         rows = cursor.execute(
             """
-            SELECT p.driver_key, p.profile_json
-            FROM capability_driver_profiles p
-            INNER JOIN capability_drivers d ON d.driver_key = p.driver_key
-            WHERE d.enabled = 1
-            ORDER BY p.driver_key
+            SELECT driver_key, protocol
+            FROM capability_drivers
+            WHERE enabled = 1
+            ORDER BY driver_key
             """
         ).fetchall()
 
@@ -111,16 +158,264 @@ class CapabilityRepository:
         errors: list[str] = []
         for row in rows:
             driver_key = str(row["driver_key"])
+            protocol = str(row["protocol"] or "")
             try:
-                profile = json.loads(str(row["profile_json"]))
-                if not isinstance(profile, dict):
-                    raise ValueError("profile_json must decode to object")
+                profile = self._build_runtime_profile_from_tables(
+                    driver_key=driver_key,
+                    protocol=protocol,
+                )
             except (TypeError, ValueError, json.JSONDecodeError) as err:
-                errors.append(f"{driver_key}: invalid profile_json ({err})")
+                errors.append(f"{driver_key}: runtime profile build failed ({err})")
                 continue
             merged = self._apply_overrides(driver_key, profile)
             profiles[driver_key] = merged
         return profiles, errors
+
+    def _build_runtime_profile_from_tables(
+        self,
+        *,
+        driver_key: str,
+        protocol: str,
+    ) -> dict[str, Any]:
+        poll_groups = self._load_poll_groups(driver_key)
+        base: dict[str, Any] = {
+            "profile_id": driver_key,
+            "protocol": protocol,
+            "poll_groups": poll_groups if poll_groups else {"slow": {"interval_s": 60}},
+        }
+
+        if protocol == "modbus":
+            base["registers"] = self._load_modbus_mappings(driver_key, "modbus")
+            base["register_blocks"] = self._load_register_blocks(driver_key, "modbus")
+            return base
+
+        if protocol == "snmp":
+            base["oids"] = self._load_snmp_mappings(driver_key, "snmp")
+            base["snmp_blocks"] = self._load_snmp_blocks(driver_key, "snmp")
+            return base
+
+        if protocol == "hybrid":
+            base["modbus"] = {
+                "registers": self._load_modbus_mappings(driver_key, "modbus"),
+                "register_blocks": self._load_register_blocks(driver_key, "modbus"),
+            }
+            base["snmp"] = {
+                "oids": self._load_snmp_mappings(driver_key, "snmp"),
+                "snmp_blocks": self._load_snmp_blocks(driver_key, "snmp"),
+            }
+            base["key_precedence"] = self._load_key_precedence(driver_key)
+            return base
+
+        if protocol == "multi_source":
+            modbus_registers = self._load_modbus_mappings(driver_key, "modbus")
+            modbus_blocks = self._load_register_blocks(driver_key, "modbus")
+            snmp_oids = self._load_snmp_mappings(driver_key, "snmp")
+            snmp_blocks = self._load_snmp_blocks(driver_key, "snmp")
+            base["active_sources"] = {
+                "modbus": {
+                    "enabled": bool(modbus_registers or modbus_blocks),
+                    "registers": modbus_registers,
+                    "register_blocks": modbus_blocks,
+                },
+                "snmp": {
+                    "enabled": bool(snmp_oids or snmp_blocks),
+                    "oids": snmp_oids,
+                    "snmp_blocks": snmp_blocks,
+                },
+            }
+            return base
+
+        # Fallback for protocols not yet normalized at runtime (e.g., future NUT/BACnet/REST).
+        return self._load_profile_json(driver_key)
+
+    def _load_poll_groups(self, driver_key: str) -> dict[str, dict[str, int]]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT group_name, interval_s
+            FROM capability_poll_groups
+            WHERE driver_key = ?
+            ORDER BY group_name
+            """,
+            (driver_key,),
+        ).fetchall()
+        out: dict[str, dict[str, int]] = {}
+        for row in rows:
+            name = str(row["group_name"] or "").strip()
+            if not name:
+                continue
+            try:
+                interval_s = int(row["interval_s"] or 60)
+            except (TypeError, ValueError):
+                interval_s = 60
+            out[name] = {"interval_s": max(1, interval_s)}
+        return out
+
+    def _load_modbus_mappings(
+        self,
+        driver_key: str,
+        transport_name: str,
+    ) -> list[dict[str, Any]]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT spec_json
+            FROM capability_modbus_mappings
+            WHERE driver_key = ? AND transport_name = ?
+            ORDER BY address, sensor_key
+            """,
+            (driver_key, transport_name),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(str(row["spec_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if isinstance(payload, dict) and str(payload.get("key", "")).strip():
+                out.append(payload)
+        return out
+
+    def _load_snmp_mappings(
+        self,
+        driver_key: str,
+        transport_name: str,
+    ) -> dict[str, dict[str, Any]]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT sensor_key, spec_json
+            FROM capability_snmp_mappings
+            WHERE driver_key = ? AND transport_name = ?
+            ORDER BY sensor_key, oid
+            """,
+            (driver_key, transport_name),
+        ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = str(row["sensor_key"] or "").strip()
+            if not key:
+                continue
+            try:
+                payload = json.loads(str(row["spec_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if isinstance(payload, dict):
+                out[key] = payload
+        return out
+
+    def _load_register_blocks(
+        self,
+        driver_key: str,
+        transport_name: str,
+    ) -> list[dict[str, Any]]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT spec_json
+            FROM capability_register_blocks
+            WHERE driver_key = ? AND transport_name = ?
+            ORDER BY start_address, name
+            """,
+            (driver_key, transport_name),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(str(row["spec_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if isinstance(payload, dict):
+                out.append(payload)
+        return out
+
+    def _load_snmp_blocks(
+        self,
+        driver_key: str,
+        transport_name: str,
+    ) -> list[dict[str, Any]]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT spec_json
+            FROM capability_snmp_blocks
+            WHERE driver_key = ? AND transport_name = ?
+            ORDER BY name
+            """,
+            (driver_key, transport_name),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(str(row["spec_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if isinstance(payload, dict):
+                out.append(payload)
+        return out
+
+    def _load_key_precedence(self, driver_key: str) -> dict[str, str]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT sensor_key, preferred_source
+            FROM capability_key_precedence
+            WHERE driver_key = ?
+            ORDER BY sensor_key
+            """,
+            (driver_key,),
+        ).fetchall()
+        out: dict[str, str] = {}
+        for row in rows:
+            key = str(row["sensor_key"] or "").strip()
+            preferred = str(row["preferred_source"] or "").strip()
+            if key and preferred:
+                out[key] = preferred
+        return out
+
+    def _load_profile_json(self, driver_key: str) -> dict[str, Any]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        row = cursor.execute(
+            """
+            SELECT profile_json
+            FROM capability_driver_profiles
+            WHERE driver_key = ?
+            """,
+            (driver_key,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{driver_key}: missing capability_driver_profiles row")
+        profile = json.loads(str(row["profile_json"] or "{}"))
+        if not isinstance(profile, dict):
+            raise ValueError(f"{driver_key}: profile_json must decode to object")
+        return profile
+
+    def load_catalog_sensor_specs(self, driver_key: str) -> list[dict[str, Any]]:
+        rows = self.load_catalog_sensor_rows(driver_key)
+        specs: list[dict[str, Any]] = []
+        for row in rows:
+            key = str(row.get("key", "")).strip()
+            if not key:
+                continue
+            aliases_raw = str(row.get("aliases", "")).strip()
+            aliases = [item.strip() for item in aliases_raw.split(",") if item.strip()]
+            specs.append(
+                {
+                    "key": key,
+                    "source": str(row.get("source", "")).strip().lower(),
+                    "tier": str(row.get("tier", "normalized")).strip().lower(),
+                    "aliases": aliases,
+                    "reference": str(row.get("reference", "")).strip(),
+                }
+            )
+        return specs
 
     def load_catalog_sensor_rows(self, driver_key: str) -> list[dict[str, str]]:
         conn = self._db._get_conn()
@@ -233,6 +528,64 @@ class CapabilityRepository:
             }
 
         return [dict(item) for item in keyed.values()]
+
+    def load_sensor_icon_map(self, driver_key: str) -> dict[str, str]:
+        conn = self._db._get_conn()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT sensor_key, spec_json
+            FROM capability_sensors
+            WHERE driver_key = ?
+            ORDER BY position, sensor_key
+            """,
+            (driver_key,),
+        ).fetchall()
+        icons: dict[str, str] = {}
+        for row in rows:
+            sensor_key = str(row["sensor_key"] or "").strip()
+            if not sensor_key:
+                continue
+            try:
+                payload = json.loads(str(row["spec_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                continue
+            icon = str(payload.get("icon", "")).strip()
+            if icon:
+                icons[sensor_key] = icon
+
+        overrides = cursor.execute(
+            """
+            SELECT sensor_key, override_json, is_deleted
+            FROM capability_sensor_overrides
+            WHERE driver_key = ?
+            ORDER BY sensor_key
+            """,
+            (driver_key,),
+        ).fetchall()
+        for row in overrides:
+            sensor_key = str(row["sensor_key"] or "").strip()
+            if not sensor_key:
+                continue
+            if int(row["is_deleted"] or 0):
+                icons.pop(sensor_key, None)
+                continue
+            try:
+                payload = json.loads(str(row["override_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                continue
+            if "icon" not in payload:
+                continue
+            icon = str(payload.get("icon", "")).strip()
+            if icon:
+                icons[sensor_key] = icon
+            else:
+                icons.pop(sensor_key, None)
+        return icons
 
     def load_catalog_derived_metrics(self, driver_key: str) -> list[dict[str, Any]]:
         conn = self._db._get_conn()
@@ -1113,6 +1466,10 @@ class CapabilityRepository:
                 key = str(item.get("key", "")).strip()
                 if not key:
                     continue
+                spec_item = dict(item)
+                icon = str(spec_item.get("icon", "")).strip()
+                if not icon:
+                    spec_item["icon"] = resolve_sensor_icon(key)
                 aliases = item.get("aliases", [])
                 aliases_json = _stable_json(
                     [str(alias) for alias in aliases if str(alias)]
@@ -1139,16 +1496,16 @@ class CapabilityRepository:
                     (
                         driver_key,
                         key,
-                        str(item.get("label", key)),
-                        str(item.get("category", "other")),
-                        str(item.get("unit", "")),
-                        str(item.get("source", "")),
+                        str(spec_item.get("label", key)),
+                        str(spec_item.get("category", "other")),
+                        str(spec_item.get("unit", "")),
+                        str(spec_item.get("source", "")),
                         aliases_json,
                         reference,
-                        str(item.get("tier", "normalized")),
-                        str(item.get("note", "")),
+                        str(spec_item.get("tier", "normalized")),
+                        str(spec_item.get("note", "")),
                         index,
-                        _stable_json(item),
+                        _stable_json(spec_item),
                     ),
                 )
                 CapabilityRepository._seed_humanization_mappings(
@@ -1180,7 +1537,9 @@ class CapabilityRepository:
         driver_key: str,
         sensor_key: str,
     ) -> None:
-        enum_map = _ENUM_SENSOR_VALUE_MAPS.get(sensor_key)
+        enum_map = _DRIVER_ENUM_SENSOR_VALUE_MAPS.get(driver_key, {}).get(sensor_key)
+        if not isinstance(enum_map, dict):
+            enum_map = _ENUM_SENSOR_VALUE_MAPS.get(sensor_key)
         if isinstance(enum_map, dict):
             for raw_value, display_text in enum_map.items():
                 cursor.execute(
@@ -1211,8 +1570,7 @@ class CapabilityRepository:
                     ),
                 )
 
-    @staticmethod
-    def _build_seed_payload() -> dict[str, Any]:
+    def _build_seed_payload(self) -> dict[str, Any]:
         drivers_payload: dict[str, dict[str, Any]] = {}
         for driver_key in sorted(DRIVER_REGISTRY.keys()):
             profile: dict[str, Any] | None = None
@@ -1250,15 +1608,24 @@ class CapabilityRepository:
                 "catalog": catalog or {},
             }
 
-        metric_contracts = _load_metric_contracts_from_bundle()
+        metric_contracts = self._load_metric_contracts_seed_source()
         return {
             "drivers": drivers_payload,
             "metric_contracts": metric_contracts,
             "humanization_maps": {
                 "enum": _ENUM_SENSOR_VALUE_MAPS,
+                "driver_enum": _DRIVER_ENUM_SENSOR_VALUE_MAPS,
                 "bitfield": _BITFIELD_FLAG_MAPS,
+                "icon_seed": "sensor_spec_icon_v1",
             },
         }
+
+    def _load_metric_contracts_seed_source(self) -> dict[str, dict[str, Any]]:
+        # Prefer DB-maintained contracts to reduce bundle coupling.
+        existing = self.load_metric_contracts()
+        if existing:
+            return existing
+        return _load_metric_contracts_from_bundle()
 
 
 

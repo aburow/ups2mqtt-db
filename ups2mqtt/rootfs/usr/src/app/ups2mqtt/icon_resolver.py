@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from .capability_repository import get_capability_repository
 from .drivers.runtime_metadata import driver_owns_runtime_metadata
 
 LOG = logging.getLogger("ups2mqtt.icon_resolver")
@@ -350,6 +351,21 @@ def _resolve_icon_from_fallback(source_prefix: str, metric_key: str) -> str | No
     return mappings.get("_default")
 
 
+def _resolve_icon_from_db(device_source: str, metric_key: str) -> str | None:
+    sensor_key = metric_key.strip()
+    if not sensor_key:
+        return None
+    try:
+        icon_map = get_capability_repository().load_sensor_icon_map(device_source)
+    except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        LOG.debug("DB icon lookup failed for %s: %s", device_source, err)
+        icon_map = {}
+    icon = icon_map.get(sensor_key)
+    if not icon:
+        return None
+    return str(icon).strip() or None
+
+
 def _local_module_for_source(
     device_source: str, module_map: dict[str, Path]
 ) -> Path | None:
@@ -380,6 +396,11 @@ def resolve_icon(
     Returns:
         Icon string like "mdi:battery" or None if icon not resolved
     """
+    # DB-managed icons take precedence so they can be edited alongside sensors.
+    db_icon = _resolve_icon_from_db(device_source, metric_key)
+    if db_icon:
+        return db_icon
+
     # Find which app this source belongs to
     app_config = None
     source_prefix = None
@@ -391,6 +412,11 @@ def resolve_icon(
 
     if app_config is None:
         LOG.debug("No icon mapping found for source: %s", device_source)
+        return None
+
+    # Migrated drivers own their runtime metadata in DB/code.
+    # After DB lookup, do not consult legacy/fallback icon contracts.
+    if driver_owns_runtime_metadata(device_source):
         return None
 
     app_name, module_path, resolver_func_name = app_config
@@ -491,6 +517,11 @@ def resolve_enabled_by_default(
             break
 
     if avail_config is None:
+        return True
+
+    # Migrated drivers use DB/profile metadata for sensor presentation. Do not
+    # consult legacy contract modules for default-entity availability.
+    if driver_owns_runtime_metadata(device_source):
         return True
 
     app_name, module_path = avail_config
@@ -594,6 +625,11 @@ def resolve_device_info(
             break
 
     if info_config is None:
+        return {}
+
+    # Migrated drivers publish identity metadata from runtime pollers and DB
+    # fields; skip legacy contract resolvers entirely.
+    if driver_owns_runtime_metadata(device_source):
         return {}
 
     app_name, module_path = info_config

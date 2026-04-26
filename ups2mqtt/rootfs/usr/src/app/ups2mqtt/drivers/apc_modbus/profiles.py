@@ -255,6 +255,35 @@ def get_smart_profile() -> dict[str, Any]:
     """
     # Modbus registers (real-time metrics + configuration/diagnostics)
     modbus_registers = [
+        # Raw status bitfield registers (decoded into derived state flags)
+        {
+            "key": "status_word_0",
+            "address": 0x0000,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "slow",
+        },
+        {
+            "key": "status_word_1",
+            "address": 0x0001,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "fast",
+        },
+        {
+            "key": "status_word_2",
+            "address": 0x0002,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "fast",
+        },
+        {
+            "key": "status_word_3",
+            "address": 0x0003,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "fast",
+        },
         # Normalized tier - fast poll (core operational metrics)
         {
             "key": "battery_state_of_charge",
@@ -398,6 +427,20 @@ def get_smart_profile() -> dict[str, Any]:
             "type": "uint16",
             "poll_group": "slow",
         },
+        {
+            "key": "status_word_4",
+            "address": 0x002A,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "slow",
+        },
+        {
+            "key": "status_word_5",
+            "address": 0x002B,
+            "count": 1,
+            "type": "uint16",
+            "poll_group": "slow",
+        },
     ]
 
     # SNMP OIDs (static metadata)
@@ -414,6 +457,12 @@ def get_smart_profile() -> dict[str, Any]:
     # Block reads optimized to cover both normalized and extended tier registers
     modbus_blocks = [
         {
+            "name": "status_words_core",
+            "start_address": 0x0000,
+            "count": 4,  # 0x0000-0x0003 status words for decoded fault/power flags
+            "poll_group": "fast",
+        },
+        {
             "name": "status_battery_load",
             "start_address": 0x0004,
             "count": 15,  # 0x0004-0x0012 (covers line_quality through input_frequency)
@@ -427,6 +476,12 @@ def get_smart_profile() -> dict[str, Any]:
             "count": 6,  # 0x001B-0x0020 (transfer points and delays)
             "poll_group": "slow",
             # Covers extended: 0x001B, 0x001C, 0x001E, 0x001F, 0x0020
+        },
+        {
+            "name": "status_words_extended",
+            "start_address": 0x002A,
+            "count": 2,  # 0x002A-0x002B extended status words
+            "poll_group": "slow",
         },
     ]
 

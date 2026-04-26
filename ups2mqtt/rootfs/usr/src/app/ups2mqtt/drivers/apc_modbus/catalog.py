@@ -557,6 +557,43 @@ APC_SMART_CATALOG: dict[str, Any] = {
         },
     },
     "sensors": [
+        # Extended tier - raw status bitfields (decoded into derived flags)
+        {
+            "key": "status_word_0",
+            "label": "Status Word 0",
+            "source": "modbus",
+            "register": 0x0000,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
+        },
+        {
+            "key": "status_word_1",
+            "label": "Status Word 1",
+            "source": "modbus",
+            "register": 0x0001,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
+        },
+        {
+            "key": "status_word_2",
+            "label": "Status Word 2",
+            "source": "modbus",
+            "register": 0x0002,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
+        },
+        {
+            "key": "status_word_3",
+            "label": "Status Word 3",
+            "source": "modbus",
+            "register": 0x0003,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
+        },
         # Normalized tier - core battery/power metrics (modbus-only for real-time)
         {
             "key": "battery_state_of_charge",
@@ -770,6 +807,24 @@ APC_SMART_CATALOG: dict[str, Any] = {
             "category": "diagnostic",
             "tier": "extended",
             "note": "Value 0 = internal battery only, >0 = external battery cabinets",
+        },
+        {
+            "key": "status_word_4",
+            "label": "Status Word 4",
+            "source": "modbus",
+            "register": 0x002A,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
+        },
+        {
+            "key": "status_word_5",
+            "label": "Status Word 5",
+            "source": "modbus",
+            "register": 0x002B,
+            "category": "extended",
+            "tier": "extended",
+            "note": "Raw status register - NOT a derived field",
         },
     ],
 }

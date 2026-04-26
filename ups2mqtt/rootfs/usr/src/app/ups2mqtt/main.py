@@ -649,25 +649,6 @@ def _selected_keys_require_extended_fields(
     if not selected_set:
         return False
 
-    if runtime_source in {"ups_snmp_ups_mib", "ups_snmp_apc_mib"}:
-        try:
-            from .drivers.ups_snmp.catalog import APC_MIB_CATALOG, UPS_MIB_CATALOG
-
-            driver_catalog = (
-                APC_MIB_CATALOG
-                if runtime_source == "ups_snmp_apc_mib"
-                else UPS_MIB_CATALOG
-            )
-            for sensor in driver_catalog.get("sensors", []):
-                if (
-                    str(sensor.get("tier", "normalized")) == "extended"
-                    and str(sensor.get("key")) in selected_set
-                ):
-                    return True
-            return False
-        except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-            return False
-
     if not apps_dir:
         return False
     try:

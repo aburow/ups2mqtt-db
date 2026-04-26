@@ -15,6 +15,7 @@ from typing import Any
 
 from pymodbus.client import ModbusTcpClient
 
+from .capability_repository import get_capability_repository
 from .model import DeviceConfig
 
 LOG = logging.getLogger("ups2mqtt.pollers")
@@ -37,6 +38,10 @@ UIO_SENSOR_STATUS_TEMP_C_BASE = "1.3.6.1.4.1.318.1.1.25.1.2.1.6"
 UIO_SENSOR_STATUS_HUMIDITY_BASE = "1.3.6.1.4.1.318.1.1.25.1.2.1.7"
 SMARTUPS_OID_INPUT_FREQUENCY = "1.3.6.1.4.1.318.1.1.1.3.2.4.0"
 UPS_MIB_OID_INPUT_FREQUENCY_LINE1 = "1.3.6.1.2.1.33.1.3.3.1.2.1"
+UPS_MIB_OID_MANUFACTURER = "1.3.6.1.2.1.33.1.1.1.0"
+UPS_MIB_OID_MODEL = "1.3.6.1.2.1.33.1.1.2.0"
+UPS_MIB_OID_FIRMWARE = "1.3.6.1.2.1.33.1.1.3.0"
+UPS_MIB_OID_NAME = "1.3.6.1.2.1.33.1.1.5.0"
 
 CYBERPOWER_OID_MODEL = "1.3.6.1.4.1.3808.1.1.1.1.1.1.0"
 CYBERPOWER_OID_SERIAL = "1.3.6.1.4.1.3808.1.1.1.1.2.3.0"
@@ -66,12 +71,20 @@ class _CyberPowerSnmpCache:
     last_refresh_monotonic: float = 0.0
 
 
+@dataclass(slots=True)
+class _UpsMibSnmpCache:
+    metadata: dict[str, str] = field(default_factory=dict)
+    last_refresh_monotonic: float = 0.0
+
+
 _MODBUS_SESSIONS_LOCK = threading.Lock()
 _MODBUS_SESSIONS: dict[str, _EndpointSession] = {}
 _APC_SNMP_CACHE_LOCK = threading.Lock()
 _APC_SNMP_CACHE: dict[str, _ApcSnmpCache] = {}
 _CYBERPOWER_SNMP_CACHE_LOCK = threading.Lock()
 _CYBERPOWER_SNMP_CACHE: dict[str, _CyberPowerSnmpCache] = {}
+_UPS_MIB_SNMP_CACHE_LOCK = threading.Lock()
+_UPS_MIB_SNMP_CACHE: dict[str, _UpsMibSnmpCache] = {}
 
 
 def get_metadata_refresh_interval_seconds() -> int:
@@ -454,16 +467,8 @@ def _poll_modbus_sync(
 ) -> dict[str, Any]:
     output: dict[str, Any] = {}
 
-    # Contract: "Canonical-Field-Driven Planning"
-    # For CyberPower, get tier-enabled registers from catalog
-    if device.source.startswith("cyberpower_modbus"):
-        base_registers = _get_cyberpower_modbus_registers(profile, device)
-    elif device.source == "apc_modbus_smt":
-        base_registers = _get_apc_modbus_smt_registers(profile, device)
-    elif device.source == "apc_modbus_rack_pdu":
-        base_registers = _get_apc_modbus_rack_pdu_registers(profile, device)
-    else:
-        base_registers = profile.get("registers", [])
+    # Contract: planning is driven by tier-enabled DB catalog mappings.
+    base_registers = _filter_modbus_registers_by_catalog(device, profile)
 
     descriptors = [
         item for item in base_registers if isinstance(item, dict) and item.get("key")
@@ -537,6 +542,12 @@ def _poll_modbus_sync(
 
         modbus_elapsed = time.monotonic() - modbus_started
 
+    # Bridge raw transport keys to canonical catalog keys
+    # (e.g. utility_voltage -> input_voltage).
+    alias_map = _catalog_alias_to_canonical_map(device, transport="modbus")
+    if alias_map:
+        _promote_alias_values(output, alias_map)
+
     # For multi-source protocol drivers, skip automatic SNMP metadata merge.
     # Multi-source drivers handle metadata independently through their own runtime metadata path.
     protocol = profile.get("protocol")
@@ -554,7 +565,7 @@ def _poll_modbus_sync(
     elif device.source.startswith("cyberpower_modbus") and not is_multi_source:
         snmp_metadata_started = time.monotonic()
         # Get SNMP fields from catalog (respects tier gating)
-        snmp_oid_map = _get_cyberpower_snmp_oid_map(profile, device)
+        snmp_oid_map = _metadata_snmp_oid_map(device)
         cache = _maybe_refresh_cyberpower_snmp_metadata(device, snmp_oid_map)
         snmp_metadata_elapsed = time.monotonic() - snmp_metadata_started
         _merge_cyberpower_device_metadata(output, cache.metadata)
@@ -734,6 +745,19 @@ def get_runtime_metadata(device: DeviceConfig) -> dict[str, str]:
                 # (CyberPower stores as sw_version, ensure firmware_version alias)
                 if "sw_version" in metadata and "firmware_version" not in metadata:
                     metadata["firmware_version"] = metadata["sw_version"]
+    elif device.source == "ups_snmp_ups_mib":
+        key = _ups_mib_cache_key(device)
+        with _UPS_MIB_SNMP_CACHE_LOCK:
+            cache = _UPS_MIB_SNMP_CACHE.get(key)
+            if cache:
+                metadata.update(cache.metadata)
+                # Normalize metadata fields expected by HA discovery device blocks.
+                if "firmware_version" in metadata and "sw_version" not in metadata:
+                    metadata["sw_version"] = metadata["firmware_version"]
+                if "firmware" in metadata and "sw_version" not in metadata:
+                    metadata["sw_version"] = metadata["firmware"]
+                if "sw_version" in metadata and "firmware_version" not in metadata:
+                    metadata["firmware_version"] = metadata["sw_version"]
 
     return metadata
 
@@ -858,177 +882,180 @@ def _default_cyberpower_cache() -> _CyberPowerSnmpCache:
     return _CyberPowerSnmpCache(metadata={}, last_refresh_monotonic=0.0)
 
 
-def _get_cyberpower_modbus_registers(
-    profile: dict[str, Any], device: DeviceConfig
-) -> list[dict[str, Any]]:
-    """Get Modbus register descriptors from catalog respecting tier gating.
+def _ups_mib_cache_key(device: DeviceConfig) -> str:
+    return f"{device.source}|{device.host}|{device.snmp_community}"
 
-    Contract: "Canonical-Field-Driven Planning"
-    Rule: "Fetch planning MUST be driven by requested canonical fields"
 
-    This function implements canonical-field-driven planning for Modbus by:
-    1. Getting tier-enabled canonical fields from catalog
-    2. Filtering to Modbus source
-    3. Mapping to profile register descriptors for execution
+def _default_ups_mib_cache() -> _UpsMibSnmpCache:
+    return _UpsMibSnmpCache(metadata={}, last_refresh_monotonic=0.0)
 
-    Args:
-        profile: Driver profile with register metadata
-        device: Device config with enable_extended_fields flag
 
-    Returns:
-        List of register descriptors to poll
-    """
+def _catalog_sensor_specs(device: DeviceConfig) -> list[dict[str, Any]]:
+    repo = get_capability_repository()
     try:
-        from ups2mqtt.drivers.cyberpower_modbus.resolver import get_modbus_register_keys
-        from ups2mqtt.drivers.cyberpower_modbus.catalog import (
-            SINGLE_PHASE_CATALOG,
-            THREE_PHASE_CATALOG,
+        return repo.load_catalog_sensor_specs(device.source)
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        return []
+
+
+def _catalog_keys_for_transport(
+    device: DeviceConfig,
+    *,
+    transport: str,
+) -> tuple[set[str], set[str]]:
+    specs = _catalog_sensor_specs(device)
+    if not specs:
+        return set(), set()
+
+    enable_extended = bool(getattr(device, "enable_extended_fields", False))
+    all_keys: set[str] = set()
+    enabled_keys: set[str] = set()
+    for spec in specs:
+        source = str(spec.get("source", "")).strip().lower()
+        if source != transport:
+            continue
+        key = str(spec.get("key", "")).strip()
+        aliases = spec.get("aliases", [])
+        aliases_list = (
+            [str(item).strip() for item in aliases if str(item).strip()]
+            if isinstance(aliases, list)
+            else []
         )
-
-        # Determine which catalog to use based on driver
-        if device.source == "cyberpower_modbus_single_phase":
-            catalog = SINGLE_PHASE_CATALOG
-        elif device.source == "cyberpower_modbus_three_phase":
-            catalog = THREE_PHASE_CATALOG
-        else:
-            # Unknown CyberPower variant, fallback to profile
-            return profile.get("registers", [])
-
-        # Get tier-enabled Modbus register keys from catalog
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        catalog_register_keys = get_modbus_register_keys(
-            catalog, enable_extended, profile
-        )
-
-        # Filter profile registers to only those in catalog-enabled set
-        all_registers = profile.get("registers", [])
-        enabled_registers = [
-            reg for reg in all_registers if reg.get("key") in catalog_register_keys
-        ]
-
-        return enabled_registers
-    except ImportError:
-        # Fallback to all profile registers if resolver not available
-        return profile.get("registers", [])
+        names = {key, *aliases_list}
+        names.discard("")
+        if not names:
+            continue
+        all_keys.update(names)
+        tier = str(spec.get("tier", "normalized")).strip().lower() or "normalized"
+        if tier == "extended" and not enable_extended:
+            continue
+        enabled_keys.update(names)
+    return enabled_keys, all_keys
 
 
-def _get_apc_modbus_smt_registers(
-    profile: dict[str, Any], device: DeviceConfig
-) -> list[dict[str, Any]]:
-    """Get Modbus register descriptors from catalog respecting tier gating.
-
-    Contract: "Canonical-Field-Driven Planning"
-    Rule: "Fetch planning MUST be driven by requested canonical fields"
-
-    This function implements canonical-field-driven planning for Modbus by:
-    1. Getting tier-enabled canonical fields from catalog
-    2. Filtering to Modbus source
-    3. Mapping to profile register descriptors for execution
-
-    Args:
-        profile: Driver profile with register metadata
-        device: Device config with enable_extended_fields flag
-
-    Returns:
-        List of register descriptors to poll
-    """
-    try:
-        from ups2mqtt.drivers.apc_modbus.resolver import get_modbus_register_keys
-        from ups2mqtt.drivers.apc_modbus.catalog import APC_SMT_CATALOG
-
-        # Get tier-enabled Modbus register keys from catalog
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        catalog_register_keys = get_modbus_register_keys(
-            APC_SMT_CATALOG, enable_extended, profile
-        )
-
-        # Filter profile registers to only those in catalog-enabled set
-        all_registers = profile.get("registers", [])
-        enabled_registers = [
-            reg for reg in all_registers if reg.get("key") in catalog_register_keys
-        ]
-
-        return enabled_registers
-    except ImportError:
-        # Fallback to all profile registers if resolver not available
-        return profile.get("registers", [])
-
-
-def _get_apc_modbus_rack_pdu_registers(
-    profile: dict[str, Any], device: DeviceConfig
-) -> list[dict[str, Any]]:
-    """Get Modbus register descriptors from catalog respecting tier gating.
-
-    Contract: "Canonical-Field-Driven Planning"
-    Rule: "Fetch planning MUST be driven by requested canonical fields"
-
-    This function implements canonical-field-driven planning for Modbus by:
-    1. Getting tier-enabled canonical fields from catalog
-    2. Filtering to Modbus source
-    3. Mapping to profile register descriptors for execution
-
-    Args:
-        profile: Driver profile with register metadata
-        device: Device config with enable_extended_fields flag
-
-    Returns:
-        List of register descriptors to poll
-    """
-    try:
-        from ups2mqtt.drivers.apc_modbus.resolver import get_modbus_register_keys
-        from ups2mqtt.drivers.apc_modbus.catalog import APC_RACK_PDU_CATALOG
-
-        # Get tier-enabled Modbus register keys from catalog
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        catalog_register_keys = get_modbus_register_keys(
-            APC_RACK_PDU_CATALOG, enable_extended, profile
-        )
-
-        # Filter profile registers to only those in catalog-enabled set
-        all_registers = profile.get("registers", [])
-        enabled_registers = [
-            reg for reg in all_registers if reg.get("key") in catalog_register_keys
-        ]
-
-        return enabled_registers
-    except ImportError:
-        # Fallback to all profile registers if resolver not available
-        return profile.get("registers", [])
-
-
-def _get_cyberpower_snmp_oid_map(
-    profile: dict[str, Any], device: DeviceConfig
+def _catalog_alias_to_canonical_map(
+    device: DeviceConfig,
+    *,
+    transport: str,
 ) -> dict[str, str]:
-    """Extract SNMP OID map from CyberPower catalog respecting tier gating.
+    """Build alias->canonical map for tier-enabled catalog fields."""
+    specs = _catalog_sensor_specs(device)
+    if not specs:
+        return {}
 
-    Args:
-        profile: Driver profile with catalog reference
-        device: Device config with enable_extended_fields flag
+    enable_extended = bool(getattr(device, "enable_extended_fields", False))
+    out: dict[str, str] = {}
+    for spec in specs:
+        source = str(spec.get("source", "")).strip().lower()
+        if source != transport:
+            continue
+        canonical = str(spec.get("key", "")).strip()
+        if not canonical:
+            continue
+        tier = str(spec.get("tier", "normalized")).strip().lower() or "normalized"
+        if tier == "extended" and not enable_extended:
+            continue
+        aliases = spec.get("aliases", [])
+        if not isinstance(aliases, list):
+            continue
+        for alias in aliases:
+            alias_key = str(alias).strip()
+            if not alias_key or alias_key == canonical:
+                continue
+            out.setdefault(alias_key, canonical)
+    return out
 
-    Returns:
-        Dict mapping canonical key to OID
-    """
-    # Import resolver locally to avoid circular dependency
-    try:
-        from ups2mqtt.drivers.cyberpower_modbus.resolver import (
-            get_enabled_sensors,
-            get_sensors_by_source,
-            get_snmp_oid_map,
-        )
-        from ups2mqtt.drivers.cyberpower_modbus.catalog import SINGLE_PHASE_CATALOG
 
-        # Respect device config for extended field enablement
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        enabled_sensors = get_enabled_sensors(SINGLE_PHASE_CATALOG, enable_extended)
-        snmp_sensors = get_sensors_by_source(enabled_sensors, "snmp")
-        return get_snmp_oid_map(snmp_sensors)
-    except ImportError:
-        # Fallback to hardcoded normalized fields if resolver not available
+def _promote_alias_values(values: dict[str, Any], alias_map: dict[str, str]) -> None:
+    """Populate canonical keys from alias values when canonical key is absent."""
+    for alias_key, canonical_key in alias_map.items():
+        if canonical_key in values:
+            continue
+        if alias_key not in values:
+            continue
+        values[canonical_key] = values[alias_key]
+
+
+def _filter_modbus_registers_by_catalog(
+    device: DeviceConfig,
+    profile: dict[str, Any],
+) -> list[dict[str, Any]]:
+    all_registers = profile.get("registers", [])
+    if not isinstance(all_registers, list):
+        return []
+    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(device, transport="modbus")
+    if not all_catalog_keys:
+        return [item for item in all_registers if isinstance(item, dict)]
+
+    out: list[dict[str, Any]] = []
+    for item in all_registers:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        if key in enabled_keys or key not in all_catalog_keys or key.lower().endswith("_bf"):
+            out.append(item)
+    return out
+
+
+def _filter_snmp_oids_by_catalog(
+    device: DeviceConfig,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    all_oids = profile.get("oids", {})
+    if not isinstance(all_oids, dict):
+        return {}
+    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(device, transport="snmp")
+    if not all_catalog_keys:
+        return {
+            str(key): spec
+            for key, spec in all_oids.items()
+            if isinstance(spec, dict)
+        }
+
+    out: dict[str, Any] = {}
+    for key, spec in all_oids.items():
+        metric_key = str(key).strip()
+        if not isinstance(spec, dict) or not metric_key:
+            continue
+        if metric_key in enabled_keys or metric_key not in all_catalog_keys:
+            out[metric_key] = spec
+    return out
+
+
+def _metadata_snmp_oid_map(device: DeviceConfig) -> dict[str, str]:
+    specs = _catalog_sensor_specs(device)
+    if not specs:
         return {
             "model": CYBERPOWER_OID_MODEL,
             "serial_number": CYBERPOWER_OID_SERIAL,
             "sw_version": CYBERPOWER_OID_FIRMWARE,
         }
+
+    enable_extended = bool(getattr(device, "enable_extended_fields", False))
+    metadata_candidates = {"model", "serial_number", "sw_version", "firmware_version"}
+    out: dict[str, str] = {}
+    for spec in specs:
+        source = str(spec.get("source", "")).strip().lower()
+        if source != "snmp":
+            continue
+        key = str(spec.get("key", "")).strip()
+        if key not in metadata_candidates:
+            continue
+        tier = str(spec.get("tier", "normalized")).strip().lower() or "normalized"
+        if tier == "extended" and not enable_extended:
+            continue
+        reference = str(spec.get("reference", "")).strip()
+        if reference and "." in reference:
+            out[key] = reference
+    if out:
+        return out
+    return {
+        "model": CYBERPOWER_OID_MODEL,
+        "serial_number": CYBERPOWER_OID_SERIAL,
+        "sw_version": CYBERPOWER_OID_FIRMWARE,
+    }
 
 
 def _maybe_refresh_cyberpower_snmp_metadata(
@@ -1087,6 +1114,61 @@ def _maybe_refresh_cyberpower_snmp_metadata(
         "[%s] CyberPower SNMP metadata (hourly): %s",
         device.id,
         ", ".join(f"{k}={bool(v)}" for k, v in metadata.items() if k != "manufacturer"),
+    )
+
+    return refreshed
+
+
+def _maybe_refresh_ups_mib_snmp_metadata(device: DeviceConfig) -> _UpsMibSnmpCache:
+    key = _ups_mib_cache_key(device)
+    now = time.monotonic()
+    with _UPS_MIB_SNMP_CACHE_LOCK:
+        cache = _UPS_MIB_SNMP_CACHE.get(key)
+        if cache is None:
+            cache = _default_ups_mib_cache()
+            _UPS_MIB_SNMP_CACHE[key] = cache
+
+        if (
+            cache.last_refresh_monotonic > 0
+            and (now - cache.last_refresh_monotonic) < METADATA_REFRESH_INTERVAL_SECONDS
+        ):
+            return cache
+
+    metadata: dict[str, str] = {}
+
+    manufacturer = _snmp_get_sync(
+        device.host, device.snmp_community, UPS_MIB_OID_MANUFACTURER
+    )
+    if manufacturer:
+        metadata["manufacturer"] = manufacturer
+
+    model = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_MODEL)
+    if model:
+        metadata["model"] = model
+
+    firmware = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE)
+    if firmware:
+        metadata["firmware"] = firmware
+        metadata["firmware_version"] = firmware
+        metadata["sw_version"] = firmware
+
+    name = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_NAME)
+    if name:
+        metadata["name"] = name
+
+    with _UPS_MIB_SNMP_CACHE_LOCK:
+        refreshed = _UpsMibSnmpCache(
+            metadata=metadata,
+            last_refresh_monotonic=time.monotonic(),
+        )
+        _UPS_MIB_SNMP_CACHE[key] = refreshed
+
+    LOG.info(
+        "[%s] UPS-MIB SNMP metadata (hourly): manufacturer=%s, model=%s, sw_version=%s",
+        device.id,
+        bool(metadata.get("manufacturer")),
+        bool(metadata.get("model")),
+        bool(metadata.get("sw_version")),
     )
 
     return refreshed
@@ -1230,86 +1312,6 @@ def _coerce_snmp_value(raw: str, spec: dict[str, Any]) -> int | float | str:
     return value
 
 
-def _get_ups_snmp_ups_mib_oids(
-    profile: dict[str, Any], device: DeviceConfig
-) -> dict[str, Any]:
-    """Get SNMP OIDs from catalog respecting tier gating.
-
-    Contract: "Canonical-Field-Driven Planning"
-    Rule: "Fetch planning MUST be driven by requested canonical fields"
-
-    This function implements canonical-field-driven planning for SNMP by:
-    1. Getting tier-enabled canonical fields from catalog
-    2. Filtering to SNMP source
-    3. Mapping to profile OID descriptors for execution
-
-    Args:
-        profile: Driver profile with OID metadata
-        device: Device config with enable_extended_fields flag
-
-    Returns:
-        Dict of OID descriptors to poll
-    """
-    try:
-        from ups2mqtt.drivers.ups_snmp.resolver import get_snmp_oid_keys
-        from ups2mqtt.drivers.ups_snmp.catalog import UPS_MIB_CATALOG
-
-        # Get tier-enabled SNMP OID keys from catalog
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        catalog_oid_keys = get_snmp_oid_keys(UPS_MIB_CATALOG, enable_extended, profile)
-
-        # Filter profile OIDs to only those in catalog-enabled set
-        all_oids = profile.get("oids", {})
-        enabled_oids = {
-            key: spec for key, spec in all_oids.items() if key in catalog_oid_keys
-        }
-
-        return enabled_oids
-    except ImportError:
-        # Fallback to all profile OIDs if resolver not available
-        return profile.get("oids", {})
-
-
-def _get_ups_snmp_apc_mib_oids(
-    profile: dict[str, Any], device: DeviceConfig
-) -> dict[str, Any]:
-    """Get SNMP OIDs from APC-MIB catalog respecting tier gating.
-
-    Contract: "Canonical-Field-Driven Planning"
-    Rule: "Fetch planning MUST be driven by requested canonical fields"
-
-    This function implements canonical-field-driven planning for APC-MIB by:
-    1. Getting tier-enabled canonical fields from catalog
-    2. Filtering to SNMP source
-    3. Mapping to profile OID descriptors for execution
-
-    Args:
-        profile: Driver profile with OID metadata
-        device: Device config with enable_extended_fields flag
-
-    Returns:
-        Dict of OID descriptors to poll
-    """
-    try:
-        from ups2mqtt.drivers.ups_snmp.resolver import get_snmp_oid_keys
-        from ups2mqtt.drivers.ups_snmp.catalog import APC_MIB_CATALOG
-
-        # Get tier-enabled SNMP OID keys from catalog
-        enable_extended = getattr(device, "enable_extended_fields", False)
-        catalog_oid_keys = get_snmp_oid_keys(APC_MIB_CATALOG, enable_extended, profile)
-
-        # Filter profile OIDs to only those in catalog-enabled set
-        all_oids = profile.get("oids", {})
-        enabled_oids = {
-            key: spec for key, spec in all_oids.items() if key in catalog_oid_keys
-        }
-
-        return enabled_oids
-    except ImportError:
-        # Fallback to all profile OIDs if resolver not available
-        return profile.get("oids", {})
-
-
 def _poll_snmp_sync(
     device: DeviceConfig, profile: dict[str, Any], poll_groups: set[str] | None = None
 ) -> dict[str, Any]:
@@ -1324,15 +1326,13 @@ def _poll_snmp_sync(
             _maybe_refresh_apc_snmp_metadata(device)
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             LOG.debug("Runtime metadata refresh failed for %s: %s", device.source, err)
+    elif device.source == "ups_snmp_ups_mib":
+        try:
+            _maybe_refresh_ups_mib_snmp_metadata(device)
+        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.debug("Runtime metadata refresh failed for %s: %s", device.source, err)
 
-    # Contract: "Canonical-Field-Driven Planning"
-    # For UPS-MIB and APC-MIB, get tier-enabled OIDs from catalog
-    if device.source == "ups_snmp_ups_mib":
-        all_oids = _get_ups_snmp_ups_mib_oids(profile, device)
-    elif device.source == "ups_snmp_apc_mib":
-        all_oids = _get_ups_snmp_apc_mib_oids(profile, device)
-    else:
-        all_oids = profile.get("oids", {})
+    all_oids = _filter_snmp_oids_by_catalog(device, profile)
     block_metrics: set[str] = set()
     has_block_for_group = False
     for block in profile.get("snmp_blocks", []):
@@ -1614,46 +1614,63 @@ async def _poll_multi_source(
     modbus_config = active_sources.get("modbus", {})
     snmp_config = active_sources.get("snmp", {})
 
-    # STEP 1: Get catalog (REQUIRED for multi_source)
-    catalog = profile.get("_catalog")
-    if not catalog:
-        error_msg = (
-            f"Multi-source driver {device.source} missing embedded catalog in profile. "
-            f"Cannot perform tier-aware planning. This is a configuration error. "
-            f"Ensure the driver plugin embeds _catalog in the profile."
-        )
-        LOG.error(error_msg)
-        raise RuntimeError(error_msg)
-
-    # STEP 2: Tier filtering
+    # STEP 1: Tier filtering from DB catalog
     tier_config = _get_tier_config(device, profile)
     enable_extended = tier_config.get("enable_extended_fields", False)
 
-    all_sensors = catalog.get("sensors", [])
-    active_fields = []
-    for sensor in all_sensors:
-        tier = sensor.get("tier", "normalized")
+    all_specs = [
+        spec
+        for spec in _catalog_sensor_specs(device)
+        if str(spec.get("source", "")).strip().lower() in {"modbus", "snmp"}
+    ]
+    active_fields: list[dict[str, Any]] = []
+    for spec in all_specs:
+        tier = str(spec.get("tier", "normalized")).strip().lower() or "normalized"
         if tier == "extended" and not enable_extended:
             continue  # Skip extended fields if not enabled
-        active_fields.append(sensor)
+        active_fields.append(spec)
 
     LOG.info(
         "Tier filtering for %s: %d total sensors, extended=%s, %d active after filter",
         device.source,
-        len(all_sensors),
+        len(all_specs),
         enable_extended,
         len(active_fields),
     )
 
     if not active_fields:
-        LOG.info("No active fields after tier filtering for %s", device.source)
-        return {}
+        # Fallback when catalog metadata is unavailable: dispatch based on configured mappings.
+        modbus_fallback = len(
+            [
+                item
+                for item in modbus_config.get("registers", [])
+                if isinstance(item, dict) and str(item.get("key", "")).strip()
+            ]
+        )
+        snmp_fallback = len(
+            [
+                item
+                for item in dict(snmp_config.get("oids", {})).values()
+                if isinstance(item, dict)
+            ]
+        )
+        LOG.info(
+            "No active catalog fields after tier filtering for %s; falling back to source mappings "
+            "(modbus=%d, snmp=%d)",
+            device.source,
+            modbus_fallback,
+            snmp_fallback,
+        )
+        active_fields = (
+            [{"source": "modbus"}] * modbus_fallback
+            + [{"source": "snmp"}] * snmp_fallback
+        )
 
-    # STEP 3: Split by transport
-    modbus_fields = []
-    snmp_fields = []
+    # STEP 2: Split by transport
+    modbus_fields: list[dict[str, Any]] = []
+    snmp_fields: list[dict[str, Any]] = []
     for sensor in active_fields:
-        source = sensor.get("source")
+        source = str(sensor.get("source", "")).strip().lower()
         if source == "modbus":
             modbus_fields.append(sensor)
         elif source == "snmp":
@@ -1666,7 +1683,7 @@ async def _poll_multi_source(
         len(snmp_fields),
     )
 
-    # STEP 4: Check active sources and field counts
+    # STEP 3: Check active sources and field counts
     modbus_enabled = modbus_config.get("enabled", False)
     snmp_enabled = snmp_config.get("enabled", False)
 
@@ -1691,7 +1708,7 @@ async def _poll_multi_source(
         )
         return {}
 
-    # STEP 5: Dispatch
+    # STEP 4: Dispatch
     modbus_values = {}
     snmp_values = {}
 
@@ -1713,7 +1730,7 @@ async def _poll_multi_source(
             "SNMP poll completed for %s: %d values", device.source, len(snmp_values)
         )
 
-    # STEP 6: Refresh runtime metadata cache (for discovery device info)
+    # STEP 5: Refresh runtime metadata cache (for discovery device info)
     # This populates metadata independently from sensor poll results
     if device.source.startswith("apc_modbus"):
         try:
@@ -1722,7 +1739,7 @@ async def _poll_multi_source(
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             LOG.debug("Runtime metadata refresh failed for %s: %s", device.source, err)
 
-    # STEP 7: Merge with duplicate detection
+    # STEP 6: Merge with duplicate detection
     return _merge_multi_source_with_validation(device, modbus_values, snmp_values)
 
 

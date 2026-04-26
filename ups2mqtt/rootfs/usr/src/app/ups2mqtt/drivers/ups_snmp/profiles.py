@@ -47,6 +47,13 @@ UPS_MIB_FAST_OIDS = {
     "input_voltage",
 }
 
+UPS_MIB_TENTHS_SCALE_OIDS = {
+    "battery_voltage",
+    "input_frequency",
+    "output_frequency",
+    "bypass_frequency",
+}
+
 
 def _ups_mib_oid_poll_group(oid_key: str) -> str:
     """Assign fast polling only to frequently changing UPS-MIB status OIDs."""
@@ -64,10 +71,13 @@ def get_ups_mib_profile() -> dict[str, Any]:
     # Build OIDs dict with poll_group metadata
     oids: dict[str, dict[str, Any]] = {}
     for key, oid in OIDS_UPS_MIB.items():
-        oids[key] = {
+        spec: dict[str, Any] = {
             "oid": oid,
             "poll_group": _ups_mib_oid_poll_group(key),
         }
+        if key in UPS_MIB_TENTHS_SCALE_OIDS:
+            spec["scale"] = 0.1
+        oids[key] = spec
 
     return {
         "profile_id": "ups_snmp_ups_mib",

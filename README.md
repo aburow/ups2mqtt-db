@@ -122,6 +122,7 @@ flowchart TD
 - Integer code fields (for example `output_source`, `battery_status`) publish companion text fields (`output_source_text`, `battery_status_text`).
 - Raw bitfield sensors (`*_bf`) are not exposed in profile selection, discovery, or published state.
 - Bitfields are decoded into named boolean state fields (for example `ups_online_state`, `ups_on_battery_state`).
+- APC Smart-UPS legacy Modbus now decodes `status_word_1`, `status_word_2`, and `status_word_3` into named state flags (fault, power-source, overload, and battery state indicators).
 - When a required mapping is missing, the runtime logs a warning and suppresses that unmapped output.
 
 ## Security

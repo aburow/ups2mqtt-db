@@ -27,6 +27,8 @@ def _friendly_name(key: str) -> str:
 
 def _infer_units(key: str) -> tuple[str | None, str | None, str | None]:
     lower = key.lower()
+    if lower.endswith("_out_of_range"):
+        return None, None, None
     if "temperature" in lower or lower.endswith("_temp"):
         return "temperature", "°C", "measurement"
     if "humidity" in lower:
