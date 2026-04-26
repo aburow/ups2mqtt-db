@@ -1,0 +1,82 @@
+<div class="card">
+  <div class="card-body d-flex flex-column gap-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <h3 class="h6 m-0">Home Assistant Payload Preview</h3>
+      <button type="button" class="btn-close" aria-label="Close" @click="closeModal()"></button>
+    </div>
+
+    {% if not_found %}
+    <div class="alert alert-warning mb-0">
+      Device <code>{{ device_id }}</code> was not found.
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body py-2">
+        <div class="row g-2 small">
+          <div class="col-12 col-md-6"><strong>Name:</strong> {{ device.name or device.id }}</div>
+          <div class="col-12 col-md-6"><strong>ID:</strong> <code>{{ device.id }}</code></div>
+          <div class="col-12 col-md-6"><strong>Identity:</strong> <code>{{ identity }}</code></div>
+          <div class="col-12 col-md-6"><strong>Driver:</strong> <code>{{ device.source }}</code></div>
+          <div class="col-12 col-md-6"><strong>Manufacturer:</strong> {{ manufacturer or "Unknown" }}</div>
+          <div class="col-12 col-md-6"><strong>Model:</strong> {{ model or "Unknown" }}</div>
+        </div>
+      </div>
+    </div>
+
+    {% if has_cached_data %}
+    <div class="card">
+      <div class="card-body py-2 small">
+        <div class="fw-semibold mb-1">Topics</div>
+        <div><strong>State:</strong> <code>{{ topics.get("state_topic", "") }}</code></div>
+        <div><strong>Availability:</strong> <code>{{ topics.get("availability_topic", "") }}</code></div>
+        <div><strong>Discovery Prefix:</strong> <code>{{ topics.get("discovery_prefix", "") }}</code></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body py-2 small">
+        <div class="fw-semibold mb-1">Entities</div>
+        {% if entities %}
+        <ul class="mb-0 ps-3">
+          {% for row in entities %}
+          <li><code>{{ row.get("key", "") }}</code> -> <code>{{ row.get("discovery_topic", "") }}</code></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="text-muted">No cached entities available.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body py-2">
+        <div class="small fw-semibold mb-1">Cached Metadata JSON</div>
+        <pre class="small mb-0 bg-body-tertiary border rounded p-2"><code>{{ metadata_json }}</code></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body py-2">
+        <div class="small fw-semibold mb-1">Cached State Payload JSON</div>
+        <pre class="small mb-0 bg-body-tertiary border rounded p-2"><code>{{ state_json }}</code></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body py-2">
+        <div class="small fw-semibold mb-1">Raw Cached Preview JSON</div>
+        <pre class="small mb-0 bg-body-tertiary border rounded p-2"><code>{{ raw_json }}</code></pre>
+      </div>
+    </div>
+    {% else %}
+    <div class="alert alert-info mb-0">
+      No cached Home Assistant payload data is available for this device yet.
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <div class="d-flex justify-content-end">
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Close</button>
+    </div>
+  </div>
+</div>

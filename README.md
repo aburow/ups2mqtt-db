@@ -57,6 +57,7 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - If a deleted ups2mqtt device still appears in HA, remove the device manually in Home Assistant.
 - Home Assistant token is not required for normal operation.
 - Home Assistant token is used during device reinitialization to remove stale entity data for that device.
+- Device list rows include an `HA Payload` modal for read-only preview of currently cached Home Assistant payload data (including empty/not-found states) without publishing MQTT or regenerating discovery.
 
 ## Profiles, Polling, and Runtime Behavior
 - Global Profiles are functional.

@@ -15,6 +15,7 @@ from .icon_resolver import (
     resolve_enabled_defaults,
     resolve_icon,
 )
+from .capability_repository import get_capability_repository
 from .model import AppConfig, DeviceConfig
 from . import pollers
 
@@ -22,7 +23,12 @@ LOG = logging.getLogger("ups2mqtt.mqtt")
 
 
 def _friendly_name(key: str) -> str:
-    return key.replace("_", " ").strip().title()
+    normalized = key.strip()
+    for suffix in ("_snmp", "_modbus"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
+    return normalized.replace("_", " ").strip().title()
 
 
 def _infer_units(key: str) -> tuple[str | None, str | None, str | None]:
@@ -50,6 +56,29 @@ def _infer_units(key: str) -> tuple[str | None, str | None, str | None]:
     if "power" in lower:
         return "power", "W", "measurement"
     return None, None, None
+
+
+def _infer_from_declared_unit(
+    declared_unit: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    unit = _string_or_none(declared_unit)
+    if unit is None:
+        return None, None, None
+    if unit == "°C":
+        return "temperature", unit, "measurement"
+    if unit == "%":
+        return None, unit, "measurement"
+    if unit == "V":
+        return "voltage", unit, "measurement"
+    if unit == "A":
+        return "current", unit, "measurement"
+    if unit == "Hz":
+        return "frequency", unit, "measurement"
+    if unit in {"Wh", "kWh"}:
+        return "energy", unit, "total_increasing"
+    if unit == "W":
+        return "power", unit, "measurement"
+    return None, unit, None
 
 
 def _string_or_none(value: Any) -> str | None:
@@ -101,6 +130,59 @@ class MqttPublisher:
         self._last_connect_attempt = 0.0
         self._device_metadata: dict[str, dict[str, str]] = {}
         self._device_state_cache: dict[str, dict[str, Any]] = {}
+        self._sensor_meta_cache: dict[str, dict[str, dict[str, str]]] = {}
+
+    def get_cached_ha_payload_preview(self, device: DeviceConfig) -> dict[str, Any]:
+        """Return a read-only snapshot of cached HA-facing payload data for a device."""
+        identity = device.device_uid or device.id
+        cached_state = self._device_state_cache.get(identity, {})
+        cached_metadata = self._device_metadata.get(identity, {})
+        entities = sorted(
+            key for key in cached_state.keys() if isinstance(key, str) and key != "_meta"
+        )
+        return {
+            "identity": identity,
+            "topics": {
+                "state_topic": f"{self._config.mqtt_topic_prefix}/{device.id}/state",
+                "availability_topic": f"{self._config.mqtt_topic_prefix}/{device.id}/availability",
+                "discovery_prefix": self._config.mqtt_discovery_prefix,
+            },
+            "cached_metadata": dict(cached_metadata),
+            "cached_state": dict(cached_state),
+            "entities": [
+                {
+                    "key": key,
+                    "unique_id": f"ups_unified_{identity}_{key}",
+                    "discovery_topic": (
+                        f"{self._config.mqtt_discovery_prefix}/sensor/"
+                        f"ups_unified_{identity}_{key}/config"
+                    ),
+                }
+                for key in entities
+            ],
+        }
+
+    def _sensor_metadata_for_source(
+        self, source: str
+    ) -> dict[str, dict[str, str]]:
+        cached = self._sensor_meta_cache.get(source)
+        if cached is not None:
+            return cached
+        out: dict[str, dict[str, str]] = {}
+        try:
+            rows = get_capability_repository().load_catalog_sensor_rows(source)
+        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.debug("Catalog sensor metadata lookup failed for %s: %s", source, err)
+            rows = []
+        for row in rows:
+            key = _string_or_none(row.get("key"))
+            if key is None:
+                continue
+            out[key] = {
+                "unit": str(row.get("unit", "")),
+            }
+        self._sensor_meta_cache[source] = out
+        return out
 
     def _extract_device_metadata(self, values: dict[str, Any]) -> dict[str, str]:
         def pick(*keys: str) -> str | None:
@@ -254,13 +336,21 @@ class MqttPublisher:
             self._config.apps_dir,
             authoritative=authoritative_keys,
         )
+        sensor_meta = self._sensor_metadata_for_source(device.source)
 
         for key in keys:
             unique_id = f"ups_unified_{identity}_{key}"
             config_topic = (
                 f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
             )
-            device_class, unit, state_class = _infer_units(key)
+            declared = sensor_meta.get(key, {})
+            declared_unit = _string_or_none(declared.get("unit"))
+            if declared_unit is not None or key in sensor_meta:
+                device_class, unit, state_class = _infer_from_declared_unit(
+                    declared_unit
+                )
+            else:
+                device_class, unit, state_class = _infer_units(key)
             payload: dict[str, Any] = {
                 "name": _friendly_name(key),
                 "unique_id": unique_id,

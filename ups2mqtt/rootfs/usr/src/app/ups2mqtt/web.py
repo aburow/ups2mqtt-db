@@ -90,6 +90,42 @@ def _escape(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+_SENSITIVE_KEY_FRAGMENTS = (
+    "password",
+    "passwd",
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "credential",
+)
+_SENSITIVE_KEY_EXACT = {
+    "snmp_community",
+    "community",
+}
+
+
+def _redact_sensitive(data: Any) -> Any:
+    if isinstance(data, dict):
+        out: dict[Any, Any] = {}
+        for key, value in data.items():
+            key_text = str(key).strip().lower()
+            if key_text in _SENSITIVE_KEY_EXACT or any(
+                fragment in key_text for fragment in _SENSITIVE_KEY_FRAGMENTS
+            ):
+                out[key] = "***REDACTED***"
+            else:
+                out[key] = _redact_sensitive(value)
+        return out
+    if isinstance(data, list):
+        return [_redact_sensitive(item) for item in data]
+    return data
+
+
+def _pretty_json(value: Any) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True)
+
+
 def _int_or_default(raw: str, default: int) -> int:
     raw = raw.strip()
     if not raw:
@@ -636,6 +672,9 @@ def start_web_server(
     get_idle_reconnect_seconds: Callable[[], float] | None = None,
     set_idle_reconnect_seconds: Callable[[float], None] | None = None,
     get_capability_profiles: Callable[[], dict[str, dict[str, object]]] | None = None,
+    get_cached_ha_payload_preview: (
+        Callable[[DeviceConfig], dict[str, Any] | None] | None
+    ) = None,
 ) -> HTTPServer:
     session_store = SessionStore()
     # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
@@ -1250,6 +1289,56 @@ def start_web_server(
         return templates.get_template("htmx/panels/devices_panel.html").render(
             devices_table_html=_render_htmx_devices_table(effective_filters),
             filters=effective_filters,
+        )
+
+    def _render_htmx_device_ha_payload_modal(
+        *,
+        device: DeviceConfig | None = None,
+        not_found_device_id: str = "",
+    ) -> tuple[str, HTTPStatus]:
+        if device is None:
+            return (
+                templates.get_template("htmx/device_ha_payload_modal.html").render(
+                    not_found=True,
+                    device_id=not_found_device_id,
+                ),
+                HTTPStatus.OK,
+            )
+        preview = (
+            get_cached_ha_payload_preview(device)
+            if get_cached_ha_payload_preview is not None
+            else None
+        )
+        if not isinstance(preview, dict):
+            preview = {}
+        redacted = _redact_sensitive(preview)
+        cached_state = redacted.get("cached_state")
+        cached_metadata = redacted.get("cached_metadata")
+        entities = redacted.get("entities")
+        has_cached_data = bool(cached_state) or bool(cached_metadata) or bool(entities)
+        metadata_map = (
+            cached_metadata if isinstance(cached_metadata, dict) else {}
+        )
+        topics_map = (
+            redacted.get("topics") if isinstance(redacted.get("topics"), dict) else {}
+        )
+        return (
+            templates.get_template("htmx/device_ha_payload_modal.html").render(
+                not_found=False,
+                has_cached_data=has_cached_data,
+                device=device,
+                identity=str(redacted.get("identity", device.device_uid or device.id)),
+                manufacturer=metadata_map.get("manufacturer", ""),
+                model=metadata_map.get("model", ""),
+                topics=topics_map,
+                entities=entities if isinstance(entities, list) else [],
+                metadata_json=_pretty_json(metadata_map),
+                state_json=_pretty_json(
+                    cached_state if isinstance(cached_state, dict) else {}
+                ),
+                raw_json=_pretty_json(redacted),
+            ),
+            HTTPStatus.OK,
         )
 
     def _render_htmx_metrics_panel() -> str:
@@ -2381,6 +2470,16 @@ def start_web_server(
                         _device_filter_values_from_params(params)
                     )
                 )
+                return True
+
+            if parsed_path.path == "/htmx/devices/partials/modal/ha-payload":
+                device_id = params.get("id", [""])[0].strip()
+                device = store.get(device_id) if device_id else None
+                payload, status = _render_htmx_device_ha_payload_modal(
+                    device=device,
+                    not_found_device_id=device_id,
+                )
+                self._send_html(payload, status=status)
                 return True
 
             if parsed_path.path == "/htmx/devices/partials/modal":

@@ -83,6 +83,10 @@
   <td>
     <div class="d-flex gap-2">
       <button
+        class="btn btn-sm btn-outline-primary"
+        @click="openModal('/htmx/devices/partials/modal/ha-payload?id={{ device.id }}')"
+      >HA Payload</button>
+      <button
         class="btn btn-sm btn-outline-secondary"
         hx-post="/htmx/devices/actions/reinitialize"
         hx-target="#devices-table-container"

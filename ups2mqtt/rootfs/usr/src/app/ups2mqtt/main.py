@@ -14,7 +14,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from .capability_repository import configure_capability_repository
+from .capability_repository import configure_capability_repository, get_capability_repository
 from .capabilities import (
     bundled_source_keys,
     load_capabilities,
@@ -286,7 +286,22 @@ async def _device_loop(
         len(allowed_keys),
         _format_key_list(list(allowed_keys), max_display=20),
     )
-    next_due: dict[str, float] = {group: 0.0 for group in group_intervals}
+    now_started = monotonic()
+    next_due: dict[str, float] = {
+        group: now_started + float(interval)
+        for group, interval in group_intervals.items()
+    }
+    startup_poll_sequence: list[list[str]] = []
+    if "slow" in group_intervals:
+        startup_poll_sequence.append(["slow"])
+    if "fast" in group_intervals:
+        startup_poll_sequence.append(["fast"])
+    if startup_poll_sequence:
+        LOG.info(
+            "Startup poll warm-up for %s: %s",
+            device.id,
+            " -> ".join(",".join(groups) for groups in startup_poll_sequence),
+        )
     endpoint_key = f"{device.host}:{device.port}"
     endpoint_semaphore = endpoint_semaphores.setdefault(
         endpoint_key, asyncio.Semaphore(1)
@@ -297,9 +312,12 @@ async def _device_loop(
 
     while True:
         now = monotonic()
-        due_groups = sorted(
-            group for group, due_at in next_due.items() if due_at <= now
-        )
+        if startup_poll_sequence:
+            due_groups = startup_poll_sequence.pop(0)
+        else:
+            due_groups = sorted(
+                group for group, due_at in next_due.items() if due_at <= now
+            )
         if not due_groups:
             sleep_for = min(max(0.1, min(next_due.values()) - now), 0.5)
             await asyncio.sleep(sleep_for)
@@ -899,6 +917,7 @@ def _resolve_runtime_profile(
     sensor_poll_overrides = _apply_sensor_poll_group_overrides(
         effective_profile=effective_profile,
         sensor_preferences=sensor_preferences,
+        runtime_source=runtime_source,
     )
     if sensor_poll_overrides > 0:
         LOG.debug(
@@ -1005,6 +1024,7 @@ def _apply_sensor_poll_group_overrides(
     *,
     effective_profile: dict[str, Any],
     sensor_preferences: dict[str, dict[str, Any]],
+    runtime_source: str | None = None,
 ) -> int:
     poll_groups = effective_profile.get("poll_groups", {})
     if not isinstance(poll_groups, dict):
@@ -1032,6 +1052,38 @@ def _apply_sensor_poll_group_overrides(
     if not overrides:
         return 0
 
+    # Expand poll-group overrides across canonical/alias equivalents from catalog
+    # so profile selections expressed in canonical keys affect raw transport keys.
+    expanded_overrides = dict(overrides)
+    if runtime_source:
+        try:
+            specs = get_capability_repository().load_catalog_sensor_specs(runtime_source)
+        except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            specs = []
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            canonical = str(spec.get("key", "")).strip()
+            aliases_raw = spec.get("aliases", [])
+            aliases = (
+                [str(item).strip() for item in aliases_raw if str(item).strip()]
+                if isinstance(aliases_raw, list)
+                else []
+            )
+            names = [name for name in [canonical, *aliases] if name]
+            if len(names) < 2:
+                continue
+            chosen_group = ""
+            for name in names:
+                group = expanded_overrides.get(name, "")
+                if group:
+                    chosen_group = group
+                    break
+            if not chosen_group:
+                continue
+            for name in names:
+                expanded_overrides.setdefault(name, chosen_group)
+
     updated = 0
 
     def _apply_to_registers(registers: Any) -> None:
@@ -1042,7 +1094,7 @@ def _apply_sensor_poll_group_overrides(
             if not isinstance(item, dict):
                 continue
             key = str(item.get("key", "")).strip()
-            group = overrides.get(key)
+            group = expanded_overrides.get(key)
             if not group:
                 continue
             if str(item.get("poll_group", "slow")) != group:
@@ -1056,7 +1108,7 @@ def _apply_sensor_poll_group_overrides(
         for key, spec in oids.items():
             if not isinstance(spec, dict):
                 continue
-            group = overrides.get(str(key))
+            group = expanded_overrides.get(str(key))
             if not group:
                 continue
             if str(spec.get("poll_group", "slow")) != group:
@@ -1074,7 +1126,7 @@ def _apply_sensor_poll_group_overrides(
             if not isinstance(metrics, list):
                 continue
             block_groups = {
-                overrides.get(str(metric).strip(), "")
+                expanded_overrides.get(str(metric).strip(), "")
                 for metric in metrics
                 if str(metric).strip()
             }
@@ -1350,6 +1402,7 @@ async def async_main() -> None:
             set_metadata_refresh_interval_seconds=_set_metadata_refresh_interval_seconds,
             get_idle_reconnect_seconds=_get_idle_reconnect_seconds,
             set_idle_reconnect_seconds=_set_idle_reconnect_seconds,
+            get_cached_ha_payload_preview=mqtt.get_cached_ha_payload_preview,
         )
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}
