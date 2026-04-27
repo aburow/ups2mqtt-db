@@ -1,13 +1,25 @@
 <div id="logs-panel" class="d-flex flex-column gap-3">
   <div class="d-flex justify-content-between align-items-center">
-    <h2 class="h5 m-0">Logs</h2>
-    <button
-      class="btn btn-sm btn-outline-secondary"
-      hx-get="/htmx/devices/partials/panel/logs"
-      hx-target="#admin-panel"
-      hx-swap="innerHTML"
-      hx-indicator="#global-loading"
-    >Refresh</button>
+    <div class="d-flex flex-column">
+      <h2 class="h5 m-0">Logs</h2>
+      <small class="text-muted">Logs: {{ log_count }} / {{ log_capacity }}</small>
+    </div>
+    <div class="d-flex gap-2">
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        hx-get="/htmx/devices/partials/panel/logs"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >Refresh</button>
+      <button
+        class="btn btn-sm btn-outline-danger"
+        hx-post="/htmx/logs/actions/clear"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >Clear logs</button>
+    </div>
   </div>
 
   <form

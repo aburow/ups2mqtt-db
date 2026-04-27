@@ -44,6 +44,8 @@ APC_MODBUS_DRIVER_KEYS = {
 }
 # Legacy cache reference for backward compatibility (now managed by catalog module)
 APC_CATALOG_CACHE: dict[str, dict[str, list[dict[str, str]]]] = {}
+_LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED = False
+_LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOCK = threading.Lock()
 
 
 class SessionStore:
@@ -1392,6 +1394,8 @@ def start_web_server(
                 "log_device": log_device,
                 "log_limit": log_limit,
             },
+            log_count=log_buffer.count(),
+            log_capacity=log_buffer.capacity(),
             timezone_label=timezone_name,
             rows=prepared_logs,
         )
@@ -3160,6 +3164,27 @@ def start_web_server(
                 )
                 return True
 
+            if parsed_path.path in {
+                "/htmx/logs/actions/clear",
+                "/htmx/devices/actions/logs/clear",
+            }:
+                if parsed_path.path == "/htmx/devices/actions/logs/clear":
+                    global _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED
+                    if not _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED:
+                        with _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOCK:
+                            if not _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED:
+                                LOG.debug(
+                                    "Deprecated route used: /htmx/devices/actions/logs/clear -> use /htmx/logs/actions/clear"
+                                )
+                                _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED = True
+                log_buffer.clear()
+                LOG.debug("Cleared in-memory log buffer")
+                self._send_html(
+                    _render_htmx_logs_panel(),
+                    status=HTTPStatus.OK,
+                )
+                return True
+
             if parsed_path.path == "/htmx/devices/actions/maintenance":
                 action = data.get("action", [""])[0] if data.get("action") else ""
                 ok, message, err = _execute_maintenance_action(action, data)
@@ -4646,7 +4671,8 @@ def start_web_server(
                 self._redirect(err=str(err), framed=is_framed)
 
         def log_message(self, fmt: str, *args) -> None:
-            LOG.info("%s - %s", self.client_address[0], fmt % args)
+            # Keep routine HTTP access traces available without polluting INFO logs.
+            LOG.debug("%s - %s", self.client_address[0], fmt % args)
 
     server = ThreadingHTTPServer((host, port), Handler)
     thread = threading.Thread(

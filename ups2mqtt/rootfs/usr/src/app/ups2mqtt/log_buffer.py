@@ -53,6 +53,18 @@ class LogBuffer:
         with self._lock:
             self._entries.append(entry)
 
+    def count(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+    def capacity(self) -> int:
+        maxlen = self._entries.maxlen
+        return int(maxlen) if maxlen is not None else 0
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
     def query(
         self,
         *,

@@ -100,6 +100,8 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Ignore slow/fast poll settings for now; that concept is not fully wired through and will change.
 - `Keep Conn` improves TCP/Modbus efficiency when the NMC keepalive is configured (around 300 seconds).
 - The local log buffer is for troubleshooting and does not persist across restarts/reboots.
+- The Logs panel shows current in-memory buffer usage (`Logs: N / 2000`) and supports `Clear logs` for buffer-only reset.
+- HTMX logs clear route is `POST /htmx/logs/actions/clear`; legacy `POST /htmx/devices/actions/logs/clear` remains supported with a one-time DEBUG deprecation signal.
 
 ## Polling Flow Diagrams
 ```mermaid

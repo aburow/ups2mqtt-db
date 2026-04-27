@@ -31,12 +31,15 @@ _ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, str]] = {
         "5": "battery",
         "6": "booster",
         "7": "reducer",
+        "none": "none",
+        "normal": "normal",
     },
     "battery_status": {
         "1": "unknown",
         "2": "battery_normal",
         "3": "battery_low",
         "4": "battery_depleted",
+        "battery_normal": "battery_normal",
     },
 }
 
@@ -682,23 +685,39 @@ class CapabilityRepository:
                     "transform": "bitfield_bit_to_bool",
                     "output_type": "bool",
                     "null_to_value_fill": True,
+                    "optional_source": True,
                     "params": {"bit": int(row["bit_index"])},
                 }
             )
         return out
 
-    def load_bitfield_source_keys(self, driver_key: str) -> set[str]:
+    def load_bitfield_source_keys(
+        self, driver_key: str, *, warn_unmapped_only: bool = False
+    ) -> set[str]:
         conn = self._db._get_conn()
         cursor = conn.cursor()
         rows = cursor.execute(
             """
-            SELECT sensor_key
+            SELECT sensor_key, spec_json
             FROM capability_sensors
             WHERE driver_key = ? AND lower(sensor_key) LIKE '%_bf'
             """,
             (driver_key,),
         ).fetchall()
-        return {str(row["sensor_key"]).strip() for row in rows if str(row["sensor_key"]).strip()}
+        out: set[str] = set()
+        for row in rows:
+            sensor_key = str(row["sensor_key"]).strip()
+            if not sensor_key:
+                continue
+            if warn_unmapped_only:
+                try:
+                    payload = json.loads(str(row["spec_json"] or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    payload = {}
+                if isinstance(payload, dict) and payload.get("warn_unmapped_bitfield") is False:
+                    continue
+            out.add(sensor_key)
+        return out
 
     def _load_merged_value_maps(self, driver_key: str) -> dict[str, dict[str, str]]:
         conn = self._db._get_conn()
@@ -1563,6 +1582,16 @@ class CapabilityRepository:
                     driver_key=driver_key,
                     sensor_key=key,
                 )
+                if isinstance(aliases, list):
+                    for alias in aliases:
+                        alias_key = str(alias).strip()
+                        if not alias_key:
+                            continue
+                        CapabilityRepository._seed_humanization_mappings(
+                            cursor=cursor,
+                            driver_key=driver_key,
+                            sensor_key=alias_key,
+                        )
 
         derived_metrics = (
             catalog.get("derived_metrics", []) if isinstance(catalog, dict) else []

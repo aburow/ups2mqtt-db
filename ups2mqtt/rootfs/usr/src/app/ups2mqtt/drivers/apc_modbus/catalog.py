@@ -333,6 +333,7 @@ APC_SMT_CATALOG: dict[str, Any] = {
             "register": 0x0013,
             "category": "extended",
             "tier": "extended",
+            "warn_unmapped_bitfield": False,
             "note": "Raw error register - NOT a derived field",
         },
         {
@@ -342,6 +343,7 @@ APC_SMT_CATALOG: dict[str, Any] = {
             "register": 0x0014,
             "category": "extended",
             "tier": "extended",
+            "warn_unmapped_bitfield": False,
             "note": "Raw error register - NOT a derived field",
         },
         {
@@ -360,6 +362,7 @@ APC_SMT_CATALOG: dict[str, Any] = {
             "register": 0x0093,
             "category": "extended",
             "tier": "extended",
+            "warn_unmapped_bitfield": False,
             "note": "Raw status register - NOT a derived field",
         },
         {
@@ -369,6 +372,7 @@ APC_SMT_CATALOG: dict[str, Any] = {
             "register": 0x0096,
             "category": "extended",
             "tier": "extended",
+            "warn_unmapped_bitfield": False,
             "note": "Raw status register - NOT a derived field",
         },
     ],

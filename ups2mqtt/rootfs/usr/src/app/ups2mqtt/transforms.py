@@ -180,12 +180,13 @@ def _run_transform(
 
 def _validate_transform_declaration(
     declaration: dict[str, Any],
-) -> tuple[str, str, str, str, bool, dict[str, Any]] | None:
+) -> tuple[str, str, str, str, bool, bool, dict[str, Any]] | None:
     output_key = str(declaration.get("output_key", "")).strip()
     source_key = str(declaration.get("source_key", "")).strip()
     transform_name = str(declaration.get("transform", "")).strip()
     output_type = str(declaration.get("output_type", "")).strip().lower()
     null_to_value_fill = bool(declaration.get("null_to_value_fill", True))
+    optional_source = bool(declaration.get("optional_source", False))
     params_raw = declaration.get("params", {})
     params = params_raw if isinstance(params_raw, dict) else {}
 
@@ -262,6 +263,7 @@ def _validate_transform_declaration(
         transform_name,
         output_type,
         null_to_value_fill,
+        optional_source,
         params,
     )
 
@@ -318,6 +320,7 @@ def apply_catalog_transforms(
             transform_name,
             output_type,
             null_to_value_fill,
+            optional_source,
             params,
         ) = validated
         if source_key in declared_output_keys:
@@ -335,6 +338,13 @@ def apply_catalog_transforms(
             source_key=source_key,
         )
         if resolved is None:
+            if optional_source:
+                LOG.debug(
+                    "Transform skipped (optional source missing): %s source=%s",
+                    output_key,
+                    source_key,
+                )
+                continue
             _rate_limited_missing_source_warning(
                 device_uid=device_uid,
                 output_key=output_key,
@@ -414,8 +424,14 @@ def apply_catalog_transforms(
     # Hide raw bitfield sensors; publish decoded flag outputs only.
     repo = get_capability_repository()
     bitfield_source_keys = repo.load_bitfield_source_keys(runtime_source)
+    bitfield_warn_source_keys = repo.load_bitfield_source_keys(
+        runtime_source, warn_unmapped_only=True
+    )
     for source_key in sorted(bitfield_source_keys):
-        if source_key not in bitfield_source_keys_mapped:
+        if (
+            source_key not in bitfield_source_keys_mapped
+            and source_key in bitfield_warn_source_keys
+        ):
             rate_key = (device_uid, source_key, "missing_bitfield_mapping")
             now = monotonic()
             last_logged = _UNMAPPED_VALUE_WARNINGS.get(rate_key, 0.0)
