@@ -36,6 +36,9 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 ## Optional Caddy Reverse Proxy (HTTPS + Basic Auth)
 - Standalone compose includes a lightweight Caddy reverse proxy (`ups2mqtt-caddy`) as the public HTTP/HTTPS entrypoint.
 - Caddy enforces HTTP Basic Auth and proxies to `ups2mqtt:8099` on the internal Docker network.
+- Compose runs two containers in the same stack/network:
+  - `ups2mqtt` (application container, built from `standalone/Dockerfile`)
+  - `ups2mqtt-caddy` (reverse proxy sidecar container from `caddy:2-alpine`)
 - Default standalone ports:
   - proxy: `UPS2MQTT_PROXY_HTTP_PORT` (default `8080`)
   - proxy TLS: `UPS2MQTT_PROXY_HTTPS_PORT` (default `8443`)
@@ -57,6 +60,8 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Restart service: `make dev-restart`
 - Tail logs: `make dev-logs`
 - Stop stack: `make dev-down`
+- Restart proxy sidecar only: `make dev-restart SERVICE=caddy`
+- Tail proxy sidecar logs: `make dev-logs SERVICE=caddy`
 - Generate proxy admin password hash: `make proxy-hash-password PASSWORD='your-new-password'`
 - Set proxy admin password end-to-end: `make proxy-set-password PASSWORD='your-new-password'`
 
