@@ -20,6 +20,7 @@ class DeviceConfig:
     snmp_community: str = "public"
     poll_interval: int | None = None
     name: str | None = None
+    location: str | None = None
     debug_logging: bool = False
     keep_connection_open: bool = False
     device_uid: str = ""
@@ -41,6 +42,7 @@ class DeviceConfig:
         int,
         str,
         int | None,
+        str | None,
         str | None,
         bool,
         bool,
@@ -73,6 +75,7 @@ class DeviceConfig:
             self.snmp_community,
             self.poll_interval,
             self.name,
+            self.location,
             self.debug_logging,
             self.keep_connection_open,
             self.device_uid,

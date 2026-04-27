@@ -2,19 +2,6 @@
   <h2 class="h5 m-0">Devices</h2>
   <div class="d-flex gap-2 align-items-center">
     <button class="btn btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=add')">Add Device</button>
-    <a class="btn btn-outline-secondary" href="/export-csv">Export</a>
-    <form
-      hx-post="/htmx/devices/actions/import_csv"
-      hx-target="#devices-table-container"
-      hx-swap="innerHTML"
-      hx-indicator="#global-loading"
-      hx-encoding="multipart/form-data"
-      hx-include="#devices-filter-form"
-      class="d-flex gap-2 align-items-center m-0"
-    >
-      <input class="form-control form-control-sm" type="file" name="csv_file" accept=".csv" required />
-      <button class="btn btn-outline-secondary btn-sm" type="submit">Import</button>
-    </form>
   </div>
 </div>
 

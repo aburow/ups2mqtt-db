@@ -73,6 +73,7 @@ class DeviceStore:
                 snmp_community=device.snmp_community,
                 poll_interval=device.poll_interval,
                 name=device.name,
+                location=device.location,
                 debug_logging=device.debug_logging,
                 keep_connection_open=device.keep_connection_open,
                 device_uid=target_uid,
@@ -94,6 +95,11 @@ class DeviceStore:
                     {
                         str(key): {
                             "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                            **(
+                                {"poll_group": str(values.get("poll_group", "")).strip()}
+                                if str(values.get("poll_group", "")).strip()
+                                else {}
+                            ),
                         }
                         for key, values in device.local_sensor_preferences.items()
                         if isinstance(key, str) and isinstance(values, dict)

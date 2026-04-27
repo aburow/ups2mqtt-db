@@ -85,7 +85,7 @@ def test_devices_table_renders_ha_payload_button_for_each_device(tmp_path: Path)
         base_url = f"http://127.0.0.1:{server.server_port}"
         status, body = _fetch(base_url, "/htmx/devices/partials/table")
         assert status == HTTPStatus.OK
-        assert body.count("HA Payload") == 2
+        assert body.count("Data") == 2
         assert (
             'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-a"' in body
         )

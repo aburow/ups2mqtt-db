@@ -30,6 +30,7 @@ _DEVICE_COLUMN_MIGRATIONS: dict[str, str] = {
     "profile_mode": (
         "ALTER TABLE devices ADD COLUMN profile_mode TEXT NOT NULL DEFAULT 'local'"
     ),
+    "location": "ALTER TABLE devices ADD COLUMN location TEXT",
     "local_profile_payload": "ALTER TABLE devices ADD COLUMN local_profile_payload TEXT",
     "local_selected_sensors": (
         "ALTER TABLE devices ADD COLUMN local_selected_sensors TEXT"
@@ -81,6 +82,7 @@ class Database:
                 snmp_community TEXT NOT NULL,
                 poll_interval INTEGER,
                 name TEXT,
+                location TEXT,
                 debug_logging INTEGER NOT NULL DEFAULT 0,
                 keep_connection_open INTEGER NOT NULL DEFAULT 0,
                 discovery_enabled INTEGER NOT NULL DEFAULT 1,
@@ -112,6 +114,12 @@ class Database:
             table="devices",
             column="profile_mode",
             definition="TEXT NOT NULL DEFAULT 'local'",
+        )
+        self._ensure_column(
+            cursor=cursor,
+            table="devices",
+            column="location",
+            definition="TEXT",
         )
         self._ensure_column(
             cursor=cursor,
@@ -476,11 +484,11 @@ class Database:
             """
             INSERT INTO devices (
                 device_uid, id, source, host, port, unit_id, snmp_community,
-                poll_interval, name, debug_logging, keep_connection_open,
+                poll_interval, name, location, debug_logging, keep_connection_open,
                 discovery_enabled, polling_enabled,
                 profile_uid, profile_mode, local_profile_payload, local_selected_sensors, local_sensor_preferences,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(device_uid) DO UPDATE SET
                 id = excluded.id,
                 source = excluded.source,
@@ -490,6 +498,7 @@ class Database:
                 snmp_community = excluded.snmp_community,
                 poll_interval = excluded.poll_interval,
                 name = excluded.name,
+                location = excluded.location,
                 debug_logging = excluded.debug_logging,
                 keep_connection_open = excluded.keep_connection_open,
                 discovery_enabled = excluded.discovery_enabled,
@@ -511,6 +520,7 @@ class Database:
                 device.snmp_community,
                 device.poll_interval,
                 device.name,
+                device.location,
                 1 if device.debug_logging else 0,
                 1 if device.keep_connection_open else 0,
                 1 if device.discovery_enabled else 0,
@@ -592,6 +602,7 @@ class Database:
                     snmp_community=row["snmp_community"],
                     poll_interval=row["poll_interval"],
                     name=row["name"],
+                    location=row["location"],
                     debug_logging=bool(row["debug_logging"]),
                     keep_connection_open=bool(row["keep_connection_open"]),
                     discovery_enabled=bool(row["discovery_enabled"]),

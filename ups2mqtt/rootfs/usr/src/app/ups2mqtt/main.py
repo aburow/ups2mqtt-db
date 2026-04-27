@@ -38,6 +38,7 @@ from .pollers import (
 )
 from .store import DeviceStore
 from .transforms import apply_catalog_transforms
+from .versions import APP_VERSION
 from .web import start_web_server
 
 LOG = logging.getLogger("ups2mqtt")
@@ -253,6 +254,7 @@ async def _device_loop(
         snmp_community=device.snmp_community,
         poll_interval=device.poll_interval,
         name=device.name,
+        location=device.location,
         debug_logging=device.debug_logging,
         keep_connection_open=device.keep_connection_open,
         device_uid=device.device_uid,
@@ -641,6 +643,7 @@ def _runtime_device_with_source(device: DeviceConfig, source: str) -> DeviceConf
         snmp_community=device.snmp_community,
         poll_interval=device.poll_interval,
         name=device.name,
+        location=device.location,
         debug_logging=device.debug_logging,
         keep_connection_open=device.keep_connection_open,
         device_uid=device.device_uid,
@@ -1277,6 +1280,7 @@ async def async_main() -> None:
 
     # Log startup configuration summary
     LOG.info("=== ups2mqtt starting ===")
+    LOG.info("ups2mqtt version: %s", APP_VERSION)
     LOG.info("Configuration summary:")
     LOG.info("  apps_dir: %s", config.apps_dir)
     LOG.info("  poll_interval: %ds", config.poll_interval)

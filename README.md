@@ -64,6 +64,8 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Tail proxy sidecar logs: `make dev-logs SERVICE=caddy`
 - Generate proxy admin password hash: `make proxy-hash-password PASSWORD='your-new-password'`
 - Set proxy admin password end-to-end: `make proxy-set-password PASSWORD='your-new-password'`
+- Lock default profiles (`[default]` in name): `make dev-lock`
+- Unlock default profiles (`[default]` in name): `make dev-unlock`
 
 ## Current Status
 - The core runtime reuses proven code from related UPS apps; some UI/display differences are still expected.
@@ -86,12 +88,21 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - If a deleted ups2mqtt device still appears in HA, remove the device manually in Home Assistant.
 - Home Assistant token is not required for normal operation.
 - Home Assistant token is used during device reinitialization to remove stale entity data for that device.
-- Device list rows include an `HA Payload` modal for read-only preview of currently cached Home Assistant payload data (including empty/not-found states) without publishing MQTT or regenerating discovery.
+- Device list rows include a `Data` modal for read-only preview of currently cached Home Assistant payload data (including empty/not-found states) without publishing MQTT or regenerating discovery.
 
 ## Profiles, Polling, and Runtime Behavior
 - Global Profiles are functional.
 - Local Profiles are work in progress.
-- Import/export exists and can be useful, but it is not thoroughly tested yet.
+- Devices support JSON backup/restore from the Maintenance panel.
+  - JSON backup includes devices, profiles, and profile mappings.
+  - Backup schema is versioned (`ups2mqtt.device_export` v1).
+- CSV is import-only for onboarding from the Maintenance panel.
+  - Use `Download CSV Import Template` for the current headers.
+  - Legacy CSV without a `Location` column is still accepted.
+- Device records include an optional `location` field.
+  - Location is editable in Add/Edit Device forms.
+  - Location is shown on the Devices table.
+  - JSON backup/restore and CSV import preserve location.
 - Recommended usage: create multiple Global Profiles per scenario (for example `SMT-UIO1-temp-humidity`) and assign one per device.
 - Profile sensor selection is now single-toggle: if a sensor is selected it is published to MQTT and discovered by Home Assistant.
 - The previous per-sensor `HA visible` option was removed. Existing stored `ha_visible` values are ignored.

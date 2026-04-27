@@ -28,6 +28,7 @@ from .icon_resolver import resolve_enabled_defaults
 from .log_buffer import LogBuffer
 from .model import DeviceConfig, ProfileConfig
 from .store import DeviceStore
+from .versions import APP_VERSION, BACKUP_SCHEMA_NAME, BACKUP_SCHEMA_VERSION
 
 LOG = logging.getLogger("ups2mqtt.web")
 AUDIT_LOG = logging.getLogger("ups2mqtt.audit")
@@ -42,6 +43,21 @@ APC_MODBUS_DRIVER_KEYS = {
     "apc_modbus_smart",
     "apc_modbus_smt",
 }
+CSV_IMPORT_HEADERS = [
+    "ID",
+    "Source",
+    "Host",
+    "Port",
+    "Unit",
+    "SNMP",
+    "Poll",
+    "Name",
+    "Location",
+    "Debug",
+    "KeepConnectionOpen",
+    "Discovery",
+    "Polling",
+]
 # Legacy cache reference for backward compatibility (now managed by catalog module)
 APC_CATALOG_CACHE: dict[str, dict[str, list[dict[str, str]]]] = {}
 _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED = False
@@ -382,6 +398,7 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
         snmp_community=(data.get("snmp_community", ["public"])[0]).strip() or "public",
         poll_interval=poll_interval,
         name=(data.get("name", [""])[0]).strip() or None,
+        location=(data.get("location", [""])[0]).strip() or None,
         debug_logging=_bool_from_form(data, "debug_logging"),
         keep_connection_open=_bool_from_form(data, "keep_connection_open"),
         device_uid=(data.get("device_uid", [""])[0]).strip(),
@@ -407,6 +424,7 @@ def _clone_device(
         snmp_community=device.snmp_community,
         poll_interval=device.poll_interval,
         name=device.name,
+        location=device.location,
         debug_logging=device.debug_logging if debug_logging is None else debug_logging,
         keep_connection_open=(
             device.keep_connection_open
@@ -453,14 +471,20 @@ def _clone_device(
 
 def _generate_devices_csv(devices: list[DeviceConfig]) -> str:
     """Generate CSV string from a list of devices."""
-    lines = [
-        "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Debug,KeepConnectionOpen,Discovery,Polling"
-    ]
+    lines = [",".join(CSV_IMPORT_HEADERS)]
     for d in devices:
         lines.append(
-            f"{d.id},{d.source},{d.host},{d.port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.discovery_enabled},{d.polling_enabled}"
+            f"{d.id},{d.source},{d.host},{d.port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{(d.location or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.discovery_enabled},{d.polling_enabled}"
         )
     return "\n".join(lines)
+
+
+def _generate_devices_csv_template() -> str:
+    return ",".join(CSV_IMPORT_HEADERS) + "\n"
+
+
+def _is_default_profile_name(name: str) -> bool:
+    return "[default]" in str(name).lower()
 
 
 def _prepare_metrics_presentation(
@@ -1428,6 +1452,15 @@ def start_web_server(
             maintenance=maintenance
         )
 
+    def _sidebar_version_items() -> list[dict[str, str]]:
+        return [
+            {"label": "App", "value": APP_VERSION},
+            {
+                "label": "Backup schema",
+                "value": f"{BACKUP_SCHEMA_NAME} v{BACKUP_SCHEMA_VERSION}",
+            },
+        ]
+
     def _execute_maintenance_action(
         action: str,
         data: dict[str, list[str]],
@@ -1477,25 +1510,62 @@ def start_web_server(
         lines = list(reader)
         if not lines:
             return 0
+        header = [str(item).strip() for item in lines[0]]
+        header_map = {item.lower(): index for index, item in enumerate(header)}
+        has_location_column = "location" in header_map
         count = 0
         for row in lines[1:]:
-            if len(row) < 12:
+            required_cells = 13 if has_location_column else 12
+            if len(row) < required_cells:
                 LOG.warning("Skipping malformed CSV line: %s", row)
                 continue
             try:
+                def _cell(index: int, default: str = "") -> str:
+                    if 0 <= index < len(row):
+                        return str(row[index]).strip()
+                    return default
+
+                def _cell_by_header(name: str, fallback_index: int) -> str:
+                    index = header_map.get(name.lower())
+                    if index is not None:
+                        return _cell(index)
+                    return _cell(fallback_index)
+
                 dev = DeviceConfig(
-                    id=str(row[0]).strip(),
-                    source=str(row[1]).strip(),
-                    host=str(row[2]).strip(),
-                    port=int(row[3] or 502),
-                    unit_id=int(row[4] or 1),
-                    snmp_community=(str(row[5]).strip() or "public"),
-                    poll_interval=int(row[6] or 0) if row[6] else None,
-                    name=(str(row[7]).strip() or None),
-                    debug_logging=str(row[8]).lower() in {"true", "1", "yes"},
-                    keep_connection_open=str(row[9]).lower() in {"true", "1", "yes"},
-                    discovery_enabled=str(row[10]).lower() in {"true", "1", "yes"},
-                    polling_enabled=str(row[11]).lower() in {"true", "1", "yes"},
+                    id=_cell_by_header("ID", 0),
+                    source=_cell_by_header("Source", 1),
+                    host=_cell_by_header("Host", 2),
+                    port=int(_cell_by_header("Port", 3) or 502),
+                    unit_id=int(_cell_by_header("Unit", 4) or 1),
+                    snmp_community=(_cell_by_header("SNMP", 5) or "public"),
+                    poll_interval=(
+                        int(_cell_by_header("Poll", 6) or 0)
+                        if _cell_by_header("Poll", 6)
+                        else None
+                    ),
+                    name=(_cell_by_header("Name", 7) or None),
+                    location=(
+                        _cell_by_header("Location", 8 if has_location_column else -1)
+                        or None
+                    ),
+                    debug_logging=str(
+                        _cell_by_header("Debug", 9 if has_location_column else 8)
+                    ).lower()
+                    in {"true", "1", "yes"},
+                    keep_connection_open=str(
+                        _cell_by_header(
+                            "KeepConnectionOpen", 10 if has_location_column else 9
+                        )
+                    ).lower()
+                    in {"true", "1", "yes"},
+                    discovery_enabled=str(
+                        _cell_by_header("Discovery", 11 if has_location_column else 10)
+                    ).lower()
+                    in {"true", "1", "yes"},
+                    polling_enabled=str(
+                        _cell_by_header("Polling", 12 if has_location_column else 11)
+                    ).lower()
+                    in {"true", "1", "yes"},
                 )
                 store.upsert(dev)
                 count += 1
@@ -1503,6 +1573,607 @@ def start_web_server(
                 LOG.exception("CSV import error on row %r: %s", row, err)
         trigger_reload()
         return count
+
+    def _profile_snapshot_dict(profile: ProfileConfig) -> dict[str, Any]:
+        return {
+            "profile_uid": str(profile.profile_uid),
+            "name": str(profile.name),
+            "driver_key": str(profile.driver_key),
+            "config_payload": (
+                dict(profile.config_payload)
+                if isinstance(profile.config_payload, dict)
+                else {}
+            ),
+            "selected_sensors": [str(item) for item in profile.selected_sensors],
+            "sensor_preferences": (
+                {
+                    str(key): {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                    for key, values in profile.sensor_preferences.items()
+                    if isinstance(key, str) and isinstance(values, dict)
+                }
+                if isinstance(profile.sensor_preferences, dict)
+                else {}
+            ),
+            "comments": str(profile.comments or ""),
+            "is_protected": bool(profile.is_protected),
+        }
+
+    def _device_export_payload(devices: list[DeviceConfig]) -> dict[str, Any]:
+        profiles_by_uid = {
+            item.profile_uid: item for item in _load_profiles() if item.profile_uid
+        }
+        included_profile_uids: set[str] = set()
+        profile_snapshots: list[dict[str, Any]] = []
+        exported_devices: list[dict[str, Any]] = []
+
+        for device in devices:
+            bound_profile = (
+                profiles_by_uid.get(device.profile_uid) if device.profile_uid else None
+            )
+            driver_key = (
+                bound_profile.driver_key
+                if bound_profile is not None
+                else str(device.source or "")
+            )
+            raw_mode = str(device.profile_mode or "").strip().lower()
+            export_mode = raw_mode if raw_mode in {"global", "local", "default"} else ""
+            if export_mode == "":
+                if raw_mode == "local":
+                    export_mode = "local"
+                elif bound_profile is not None and _is_default_profile_name(
+                    bound_profile.name
+                ):
+                    export_mode = "default"
+                elif bound_profile is not None:
+                    export_mode = "global"
+                else:
+                    export_mode = "default"
+
+            profile_uid_value: str | None = None
+            profile_name_value: str | None = None
+            if export_mode == "global":
+                if bound_profile is not None:
+                    profile_uid_value = bound_profile.profile_uid
+                    profile_name_value = bound_profile.name
+                    if bound_profile.profile_uid not in included_profile_uids:
+                        included_profile_uids.add(bound_profile.profile_uid)
+                        profile_snapshots.append(_profile_snapshot_dict(bound_profile))
+            elif export_mode == "local":
+                if bound_profile is not None:
+                    profile_uid_value = bound_profile.profile_uid
+                    profile_name_value = bound_profile.name
+                    if bound_profile.profile_uid not in included_profile_uids:
+                        included_profile_uids.add(bound_profile.profile_uid)
+                        profile_snapshots.append(_profile_snapshot_dict(bound_profile))
+            else:
+                profile_uid_value = None
+                profile_name_value = (
+                    bound_profile.name if bound_profile is not None else None
+                )
+
+            exported_devices.append(
+                {
+                    "device_uid": str(device.device_uid),
+                    "name": str(device.name or ""),
+                    "location": str(device.location or ""),
+                    "driver_key": str(driver_key),
+                    "profile_mode": export_mode,
+                    "profile_uid": profile_uid_value,
+                    "profile_name": profile_name_value,
+                    "config": {
+                        "id": str(device.id),
+                        "host": str(device.host),
+                        "port": int(device.port),
+                        "unit_id": int(device.unit_id),
+                        "snmp_community": str(device.snmp_community),
+                        "poll_interval": (
+                            int(device.poll_interval)
+                            if device.poll_interval is not None
+                            else None
+                        ),
+                        "debug_logging": bool(device.debug_logging),
+                        "keep_connection_open": bool(device.keep_connection_open),
+                        "discovery_enabled": bool(device.discovery_enabled),
+                        "polling_enabled": bool(device.polling_enabled),
+                    },
+                    "local_profile_payload": (
+                        dict(device.local_profile_payload)
+                        if isinstance(device.local_profile_payload, dict)
+                        else None
+                    ),
+                    "local_selected_sensors": (
+                        [str(item) for item in device.local_selected_sensors]
+                        if device.local_selected_sensors is not None
+                        else None
+                    ),
+                    "local_sensor_preferences": (
+                        {
+                            str(key): {
+                                "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                                **(
+                                    {
+                                        "poll_group": str(
+                                            values.get("poll_group", "")
+                                        ).strip()
+                                    }
+                                    if str(values.get("poll_group", "")).strip()
+                                    else {}
+                                ),
+                            }
+                            for key, values in device.local_sensor_preferences.items()
+                            if isinstance(key, str) and isinstance(values, dict)
+                        }
+                        if isinstance(device.local_sensor_preferences, dict)
+                        else None
+                    ),
+                }
+            )
+
+        return {
+            "schema": BACKUP_SCHEMA_NAME,
+            "version": BACKUP_SCHEMA_VERSION,
+            "exported_by": f"ups2mqtt {APP_VERSION}",
+            "exported_at": datetime.now(tz=timezone.utc).isoformat(),
+            "devices": exported_devices,
+            "profiles": profile_snapshots,
+        }
+
+    def _profile_comparable_dict(profile: ProfileConfig) -> dict[str, Any]:
+        snapshot = _profile_snapshot_dict(profile)
+        return {
+            "name": snapshot["name"],
+            "driver_key": snapshot["driver_key"],
+            "config_payload": snapshot["config_payload"],
+            "selected_sensors": snapshot["selected_sensors"],
+            "sensor_preferences": snapshot["sensor_preferences"],
+            "comments": snapshot["comments"],
+            "is_protected": bool(snapshot["is_protected"]),
+        }
+
+    def _device_comparable_dict(device: DeviceConfig) -> dict[str, Any]:
+        return {
+            "device_uid": str(device.device_uid),
+            "id": str(device.id),
+            "source": str(device.source),
+            "host": str(device.host),
+            "port": int(device.port),
+            "unit_id": int(device.unit_id),
+            "snmp_community": str(device.snmp_community),
+            "poll_interval": (
+                int(device.poll_interval) if device.poll_interval is not None else None
+            ),
+            "name": str(device.name or ""),
+            "location": str(device.location or ""),
+            "debug_logging": bool(device.debug_logging),
+            "keep_connection_open": bool(device.keep_connection_open),
+            "discovery_enabled": bool(device.discovery_enabled),
+            "polling_enabled": bool(device.polling_enabled),
+            "profile_uid": str(device.profile_uid or ""),
+            "profile_mode": str(device.profile_mode or ""),
+            "local_profile_payload": (
+                dict(device.local_profile_payload)
+                if isinstance(device.local_profile_payload, dict)
+                else None
+            ),
+            "local_selected_sensors": (
+                [str(item) for item in device.local_selected_sensors]
+                if device.local_selected_sensors is not None
+                else None
+            ),
+            "local_sensor_preferences": (
+                {
+                    str(key): {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                    for key, values in device.local_sensor_preferences.items()
+                    if isinstance(key, str) and isinstance(values, dict)
+                }
+                if isinstance(device.local_sensor_preferences, dict)
+                else None
+            ),
+        }
+
+    def _import_devices_from_json_data(json_data: str) -> int:
+        raw = json.loads(json_data)
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid import format: expected root JSON object")
+        if "schema" not in raw:
+            raise ValueError("Invalid schema: missing 'schema'")
+        schema = str(raw.get("schema", "")).strip()
+        if schema != BACKUP_SCHEMA_NAME:
+            raise ValueError(
+                f"Invalid schema: expected '{BACKUP_SCHEMA_NAME}', got '{schema or '(empty)'}'"
+            )
+        if "version" not in raw:
+            raise ValueError("Unsupported version: missing 'version'")
+        version_raw = raw.get("version")
+        try:
+            version = int(version_raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Unsupported version: {version_raw}") from None
+        if version != BACKUP_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported version: {version} (expected {BACKUP_SCHEMA_VERSION})"
+            )
+        raw_devices = raw.get("devices", [])
+        if not isinstance(raw_devices, list):
+            raise ValueError("Invalid schema: 'devices' must be an array")
+        raw_profiles = raw.get("profiles", [])
+        if not isinstance(raw_profiles, list):
+            raise ValueError("Invalid schema: 'profiles' must be an array")
+
+        db = _profile_db()
+        if db is None or not hasattr(db, "load_profiles") or not hasattr(
+            db, "save_profile"
+        ):
+            raise ValueError("Profile storage is not available")
+
+        existing_profiles = [item for item in db.load_profiles() if item.profile_uid]
+        existing_profiles_by_uid = {item.profile_uid: item for item in existing_profiles}
+        existing_profiles_by_name_driver = {
+            (item.name.lower(), item.driver_key): item for item in existing_profiles
+        }
+
+        imported_profile_snapshots: dict[str, dict[str, Any]] = {}
+        for index, item in enumerate(raw_profiles, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Invalid profile entry at index {index}: expected object")
+            profile_uid = str(item.get("profile_uid", "")).strip()
+            profile_name = str(item.get("name", "")).strip()
+            driver_key = str(item.get("driver_key", "")).strip()
+            config_payload = item.get("config_payload", {})
+            selected_sensors = item.get("selected_sensors", [])
+            sensor_preferences = item.get("sensor_preferences", {})
+            comments = str(item.get("comments", "") or "")
+            is_protected = bool(item.get("is_protected", False))
+            if not profile_uid:
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: missing profile_uid"
+                )
+            if not profile_name or not driver_key:
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: missing name/driver_key"
+                )
+            if not isinstance(config_payload, dict):
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: config_payload must be object"
+                )
+            if not isinstance(selected_sensors, list):
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: selected_sensors must be array"
+                )
+            if not isinstance(sensor_preferences, dict):
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: sensor_preferences must be object"
+                )
+            normalized_snapshot = {
+                "profile_uid": profile_uid,
+                "name": profile_name,
+                "driver_key": driver_key,
+                "config_payload": dict(config_payload),
+                "selected_sensors": [str(value) for value in selected_sensors],
+                "sensor_preferences": {
+                    str(key): {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if isinstance(values, dict)
+                            and str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                    for key, values in sensor_preferences.items()
+                    if isinstance(key, str) and isinstance(values, dict)
+                },
+                "comments": comments,
+                "is_protected": is_protected,
+            }
+            previous = imported_profile_snapshots.get(profile_uid)
+            if previous is not None and previous != normalized_snapshot:
+                raise ValueError(
+                    f"Profile UID conflict within import payload: {profile_uid}"
+                )
+            imported_profile_snapshots[profile_uid] = normalized_snapshot
+
+        resolved_profile_uid_by_import_uid: dict[str, str] = {}
+        profiles_to_create: list[ProfileConfig] = []
+        staged_existing_by_name_driver = dict(existing_profiles_by_name_driver)
+        for import_uid, snapshot in imported_profile_snapshots.items():
+            existing_by_uid = existing_profiles_by_uid.get(import_uid)
+            if existing_by_uid is not None:
+                imported_profile = ProfileConfig(
+                    profile_uid=import_uid,
+                    name=str(snapshot["name"]),
+                    driver_key=str(snapshot["driver_key"]),
+                    config_payload=dict(snapshot["config_payload"]),
+                    selected_sensors=list(snapshot["selected_sensors"]),
+                    sensor_preferences=dict(snapshot["sensor_preferences"]),
+                    comments=str(snapshot["comments"]),
+                    is_protected=bool(snapshot["is_protected"]),
+                )
+                if _profile_comparable_dict(existing_by_uid) != _profile_comparable_dict(
+                    imported_profile
+                ):
+                    raise ValueError(
+                        f"Profile UID conflict for {import_uid}: existing profile content differs"
+                    )
+                resolved_profile_uid_by_import_uid[import_uid] = existing_by_uid.profile_uid
+                continue
+            name_driver_key = (
+                str(snapshot["name"]).lower(),
+                str(snapshot["driver_key"]),
+            )
+            existing_by_name = staged_existing_by_name_driver.get(name_driver_key)
+            if existing_by_name is not None:
+                imported_profile = ProfileConfig(
+                    profile_uid=import_uid,
+                    name=str(snapshot["name"]),
+                    driver_key=str(snapshot["driver_key"]),
+                    config_payload=dict(snapshot["config_payload"]),
+                    selected_sensors=list(snapshot["selected_sensors"]),
+                    sensor_preferences=dict(snapshot["sensor_preferences"]),
+                    comments=str(snapshot["comments"]),
+                    is_protected=bool(snapshot["is_protected"]),
+                )
+                if _profile_comparable_dict(existing_by_name) != _profile_comparable_dict(
+                    imported_profile
+                ):
+                    raise ValueError(
+                        "Profile conflict for "
+                        f"{snapshot['name']} ({snapshot['driver_key']}): existing content differs"
+                    )
+                resolved_profile_uid_by_import_uid[import_uid] = existing_by_name.profile_uid
+                continue
+            created = ProfileConfig(
+                profile_uid=import_uid,
+                name=str(snapshot["name"]),
+                driver_key=str(snapshot["driver_key"]),
+                config_payload=dict(snapshot["config_payload"]),
+                selected_sensors=list(snapshot["selected_sensors"]),
+                sensor_preferences=dict(snapshot["sensor_preferences"]),
+                comments=str(snapshot["comments"]),
+                is_protected=bool(snapshot["is_protected"]),
+            )
+            profiles_to_create.append(created)
+            resolved_profile_uid_by_import_uid[import_uid] = import_uid
+            staged_existing_by_name_driver[(created.name.lower(), created.driver_key)] = (
+                created
+            )
+
+        existing_devices = store.list_devices()
+        existing_devices_by_uid = {
+            item.device_uid: item for item in existing_devices if item.device_uid
+        }
+        existing_uid_by_id = {item.id: item.device_uid for item in existing_devices}
+
+        devices_to_upsert: list[DeviceConfig] = []
+        skipped_equal = 0
+        eligible_drivers = _eligible_profile_drivers()
+        for index, item in enumerate(raw_devices, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Invalid device entry at index {index}: expected object")
+            device_uid = str(item.get("device_uid", "")).strip()
+            if not device_uid:
+                raise ValueError(
+                    f"Invalid device entry at index {index}: missing device_uid"
+                )
+            driver_key = str(item.get("driver_key", "")).strip()
+            if not driver_key:
+                raise ValueError(
+                    f"Invalid device entry at index {index}: missing driver_key"
+                )
+            if driver_key not in eligible_drivers:
+                raise ValueError(
+                    f"Invalid device entry at index {index}: unsupported driver_key {driver_key}"
+                )
+            raw_mode = str(item.get("profile_mode", "")).strip().lower()
+            profile_mode = (
+                raw_mode if raw_mode in {"global", "local", "default"} else "default"
+            )
+            config_payload = item.get("config", {})
+            if not isinstance(config_payload, dict):
+                raise ValueError(
+                    f"Invalid device entry at index {index}: config must be an object"
+                )
+            device_id = str(config_payload.get("id", "")).strip()
+            host = str(config_payload.get("host", "")).strip()
+            if not device_id or not host:
+                raise ValueError(
+                    f"Invalid device entry at index {index}: config.id and config.host are required"
+                )
+            try:
+                port = int(config_payload.get("port", 502))
+                unit_id = int(config_payload.get("unit_id", 1))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Invalid device entry at index {index}: port/unit_id must be numeric"
+                ) from None
+            poll_interval_raw = config_payload.get("poll_interval")
+            poll_interval: int | None
+            if poll_interval_raw is None or str(poll_interval_raw).strip() == "":
+                poll_interval = None
+            else:
+                try:
+                    poll_interval = int(poll_interval_raw)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Invalid device entry at index {index}: poll_interval must be numeric or null"
+                    ) from None
+
+            def _to_bool(value: Any, *, default: bool) -> bool:
+                if value is None:
+                    return default
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, (int, float)):
+                    return bool(value)
+                text = str(value).strip().lower()
+                if text in {"1", "true", "yes", "on"}:
+                    return True
+                if text in {"0", "false", "no", "off"}:
+                    return False
+                return default
+
+            profile_uid_raw = item.get("profile_uid")
+            profile_uid_text = (
+                str(profile_uid_raw).strip() if profile_uid_raw is not None else ""
+            )
+            profile_name_text = str(item.get("profile_name", "")).strip()
+            resolved_profile_uid = ""
+            if profile_mode in {"global", "local"}:
+                if profile_uid_text:
+                    resolved_profile_uid = resolved_profile_uid_by_import_uid.get(
+                        profile_uid_text, ""
+                    )
+                    if not resolved_profile_uid and profile_uid_text in existing_profiles_by_uid:
+                        resolved_profile_uid = profile_uid_text
+                elif profile_name_text:
+                    matched = staged_existing_by_name_driver.get(
+                        (profile_name_text.lower(), driver_key)
+                    )
+                    if matched is not None:
+                        resolved_profile_uid = matched.profile_uid
+                if profile_mode == "global" and not resolved_profile_uid:
+                    raise ValueError(
+                        "Profile reference missing for global device "
+                        f"{device_id}: profile_uid={profile_uid_text or '(none)'}"
+                    )
+                if resolved_profile_uid:
+                    matched_profile = None
+                    for item_profile in profiles_to_create:
+                        if item_profile.profile_uid == resolved_profile_uid:
+                            matched_profile = item_profile
+                            break
+                    if matched_profile is None:
+                        matched_profile = existing_profiles_by_uid.get(resolved_profile_uid)
+                    if (
+                        matched_profile is not None
+                        and str(matched_profile.driver_key) != driver_key
+                    ):
+                        raise ValueError(
+                            f"Driver/profile mismatch for {device_id}: device driver {driver_key} "
+                            f"!= profile driver {matched_profile.driver_key}"
+                        )
+            else:
+                resolved_profile_uid = ""
+
+            local_profile_payload = item.get("local_profile_payload")
+            if local_profile_payload is not None and not isinstance(
+                local_profile_payload, dict
+            ):
+                raise ValueError(
+                    f"Invalid device entry at index {index}: local_profile_payload must be object or null"
+                )
+            local_selected_sensors = item.get("local_selected_sensors")
+            if local_selected_sensors is not None and not isinstance(
+                local_selected_sensors, list
+            ):
+                raise ValueError(
+                    f"Invalid device entry at index {index}: local_selected_sensors must be array or null"
+                )
+            local_sensor_preferences = item.get("local_sensor_preferences")
+            if local_sensor_preferences is not None and not isinstance(
+                local_sensor_preferences, dict
+            ):
+                raise ValueError(
+                    f"Invalid device entry at index {index}: local_sensor_preferences must be object or null"
+                )
+
+            normalized_local_preferences: dict[str, dict[str, Any]] | None = None
+            if isinstance(local_sensor_preferences, dict):
+                normalized_local_preferences = {
+                    str(key): {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if isinstance(values, dict)
+                            and str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                    for key, values in local_sensor_preferences.items()
+                    if isinstance(key, str) and isinstance(values, dict)
+                }
+
+            imported_device = DeviceConfig(
+                id=device_id,
+                source=driver_key,
+                host=host,
+                port=port,
+                unit_id=unit_id,
+                snmp_community=str(config_payload.get("snmp_community", "public") or "public"),
+                poll_interval=poll_interval,
+                name=str(item.get("name", "") or "").strip() or None,
+                location=str(item.get("location", "") or "").strip() or None,
+                debug_logging=_to_bool(config_payload.get("debug_logging"), default=False),
+                keep_connection_open=_to_bool(
+                    config_payload.get("keep_connection_open"), default=False
+                ),
+                device_uid=device_uid,
+                discovery_enabled=_to_bool(
+                    config_payload.get("discovery_enabled"), default=True
+                ),
+                polling_enabled=_to_bool(
+                    config_payload.get("polling_enabled"), default=True
+                ),
+                profile_uid=resolved_profile_uid if profile_mode != "default" else "",
+                profile_mode=profile_mode,
+                local_profile_payload=(
+                    dict(local_profile_payload)
+                    if profile_mode == "local" and isinstance(local_profile_payload, dict)
+                    else None
+                ),
+                local_selected_sensors=(
+                    [str(value) for value in local_selected_sensors]
+                    if profile_mode == "local" and isinstance(local_selected_sensors, list)
+                    else None
+                ),
+                local_sensor_preferences=(
+                    normalized_local_preferences if profile_mode == "local" else None
+                ),
+            )
+
+            existing = existing_devices_by_uid.get(device_uid)
+            if existing is not None:
+                if _device_comparable_dict(existing) == _device_comparable_dict(
+                    imported_device
+                ):
+                    skipped_equal += 1
+                    continue
+                raise ValueError(
+                    f"Device UID conflict for {device_uid}: existing device differs"
+                )
+
+            existing_uid_for_id = existing_uid_by_id.get(device_id)
+            if existing_uid_for_id and existing_uid_for_id != device_uid:
+                raise ValueError(
+                    f"Device ID conflict for {device_id}: already owned by UID {existing_uid_for_id}"
+                )
+            devices_to_upsert.append(imported_device)
+
+        for profile in profiles_to_create:
+            db.save_profile(profile)
+            existing_profiles_by_uid[profile.profile_uid] = profile
+
+        for device in devices_to_upsert:
+            store.upsert(device)
+
+        if profiles_to_create or devices_to_upsert:
+            trigger_reload()
+
+        return len(devices_to_upsert) + skipped_equal
 
     def _hx_trigger_payload(
         *,
@@ -1602,6 +2273,7 @@ def start_web_server(
             "snmp_community": "public",
             "poll_interval": "",
             "name": "",
+            "location": "",
             "debug_logging": False,
             "keep_connection_open": False,
             "discovery_enabled": True,
@@ -1634,6 +2306,7 @@ def start_web_server(
                 str(device.poll_interval) if device.poll_interval is not None else ""
             ),
             "name": device.name or "",
+            "location": device.location or "",
             "debug_logging": bool(device.debug_logging),
             "keep_connection_open": bool(device.keep_connection_open),
             "discovery_enabled": bool(device.discovery_enabled),
@@ -1687,6 +2360,7 @@ def start_web_server(
                 ).strip(),
                 "poll_interval": (data.get("poll_interval", [""])[0]).strip(),
                 "name": (data.get("name", [""])[0]).strip(),
+                "location": (data.get("location", [""])[0]).strip(),
                 "debug_logging": _bool_from_form(data, "debug_logging"),
                 "keep_connection_open": _bool_from_form(data, "keep_connection_open"),
                 "discovery_enabled": _bool_from_form(data, "discovery_enabled"),
@@ -2196,6 +2870,7 @@ def start_web_server(
             or "public",
             poll_interval=poll_interval,
             name=(data.get("name", [""])[0]).strip() or None,
+            location=(data.get("location", [""])[0]).strip() or None,
             debug_logging=_bool_from_form(data, "debug_logging"),
             keep_connection_open=_bool_from_form(data, "keep_connection_open"),
             device_uid=(data.get("device_uid", [""])[0]).strip(),
@@ -2441,8 +3116,41 @@ def start_web_server(
                 payload = templates.get_template("htmx/devices_page.html").render(
                     initial_panel_html=_render_htmx_devices_panel(filters),
                     initial_theme_choice=_normalize_theme(theme_getter()),
+                    sidebar_versions=_sidebar_version_items(),
                 )
                 self._send_html(payload)
+                return True
+
+            if parsed_path.path == "/htmx/maintenance/backup/export":
+                devices = store.list_devices()
+                payload = _device_export_payload(devices)
+                payload_json = json.dumps(payload, indent=2, sort_keys=True).encode(
+                    "utf-8"
+                )
+                timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    f"attachment; filename=ups2mqtt-backup-{timestamp}.json",
+                )
+                self.send_header("Content-Length", str(len(payload_json)))
+                self.end_headers()
+                self.wfile.write(payload_json)
+                return True
+
+            if parsed_path.path == "/htmx/maintenance/import/template.csv":
+                template_csv = _generate_devices_csv_template()
+                payload_csv = template_csv.encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    "attachment; filename=ups2mqtt-import-template.csv",
+                )
+                self.send_header("Content-Length", str(len(payload_csv)))
+                self.end_headers()
+                self.wfile.write(payload_csv)
                 return True
 
             if parsed_path.path == "/htmx/devices/partials/panel/devices":
@@ -2676,11 +3384,11 @@ def start_web_server(
                     )
                 return True
 
-            if parsed_path.path == "/htmx/devices/actions/import_csv":
+            if parsed_path.path == "/htmx/maintenance/import/csv":
                 csv_data = (data.get("csv_file", [""])[0]).strip()
                 if not csv_data:
                     self._send_html(
-                        _render_htmx_devices_table(filters),
+                        _render_htmx_maintenance_panel(),
                         status=HTTPStatus.BAD_REQUEST,
                         headers={
                             "HX-Trigger": _hx_trigger_payload(
@@ -2692,11 +3400,57 @@ def start_web_server(
                     return True
                 imported = _import_devices_from_csv_data(csv_data)
                 self._send_html(
-                    _render_htmx_devices_table(filters),
+                    _render_htmx_maintenance_panel(),
                     headers={
                         "HX-Trigger": _hx_trigger_payload(
+                            refresh_devices=True,
                             toast_level="success",
-                            toast_message=f"Imported {imported} device(s) from CSV",
+                            toast_message=f"Imported {imported} device(s) from CSV (legacy)",
+                        )
+                    },
+                )
+                return True
+
+            if parsed_path.path == "/htmx/maintenance/backup/import":
+                json_data = (data.get("json_file", [""])[0]).strip()
+                if not json_data:
+                    self._send_html(
+                        _render_htmx_maintenance_panel(),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message="No JSON file provided",
+                            )
+                        },
+                    )
+                    return True
+                try:
+                    imported = _import_devices_from_json_data(json_data)
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                ) as err:
+                    self._send_html(
+                        _render_htmx_maintenance_panel(),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message=f"JSON import failed: {err}",
+                            )
+                        },
+                    )
+                    return True
+                self._send_html(
+                    _render_htmx_maintenance_panel(),
+                    headers={
+                        "HX-Trigger": _hx_trigger_payload(
+                            refresh_devices=True,
+                            toast_level="success",
+                            toast_message=f"Imported {imported} device(s) from JSON",
                         )
                     },
                 )
@@ -3699,6 +4453,7 @@ def start_web_server(
                     else ""
                 )
                 form_name = form_device.name or "" if form_device else ""
+                form_location = form_device.location or "" if form_device else ""
                 form_debug_checked = (
                     "checked" if form_device and form_device.debug_logging else ""
                 )
@@ -3737,6 +4492,7 @@ def start_web_server(
           <div><label>SNMP Community<input name="snmp_community" value="{_escape(form_comm)}"/></label></div>
           <div><label>Poll Interval (optional)<input name="poll_interval" value="{_escape(form_poll)}"/></label></div>
           <div><label>Name (optional)<input name="name" value="{_escape(form_name)}"/></label></div>
+          <div><label>Location (optional)<input name="location" value="{_escape(form_location)}"/></label></div>
         </div>
         <p><label><input type="checkbox" name="debug_logging" {form_debug_checked}/> Enable verbose device logs</label></p>
         <p><label><input type="checkbox" name="keep_connection_open" {form_keep_connection_open_checked}/> Keep Modbus connection open</label></p>
@@ -4027,18 +4783,19 @@ def start_web_server(
         <h2>Devices</h2>
         <div style="display: flex; gap: 8px; margin-left: auto;">
           <a href="/?modal=add"><button type="button" class="btn-primary">Add Device</button></a>
-          <button type="button" class="btn-primary" onclick="document.getElementById('exportModal').style.display='flex'">Export</button>
-          <button type="button" class="btn-primary" onclick="document.getElementById('importModal').style.display='flex'">Import</button>
         </div>
       </div>
       <!-- Export Modal -->
       <div id="exportModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; z-index: 30;">
         <div style="background: var(--surface); border-radius: 10px; width: min(600px, 95vw); padding: 24px; color: var(--fg); border: 1px solid var(--border); box-shadow: 0 16px 48px rgba(0,0,0,0.28);">
           <h2 style="margin: 0 0 20px;">Export Devices</h2>
-          <p style="margin: 0 0 20px;">Download all devices as a CSV file.</p>
+          <p style="margin: 0 0 20px;">Download all devices as a structured JSON export file.</p>
           <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <form method="get" action="/export-devices.json" style="margin: 0;">
+              <button type="submit" class="btn-primary" style="padding: 8px 16px; background: var(--tab-active-bg); color: white; border: none; border-radius: 4px; cursor: pointer;">Download JSON</button>
+            </form>
             <form method="get" action="/export-csv" style="margin: 0;">
-              <button type="submit" class="btn-primary" style="padding: 8px 16px; background: var(--tab-active-bg); color: white; border: none; border-radius: 4px; cursor: pointer;">Download CSV</button>
+              <button type="submit" class="btn-primary" style="padding: 8px 16px; background: var(--border); color: var(--fg); border: none; border-radius: 4px; cursor: pointer;">Download CSV (Legacy)</button>
             </form>
             <button onclick="document.getElementById('exportModal').style.display='none'" style="padding: 8px 16px; background: var(--border); color: var(--fg); border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
           </div>
@@ -4048,15 +4805,16 @@ def start_web_server(
       <div id="importModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; z-index: 30;">
         <div style="background: var(--surface); border-radius: 10px; width: min(600px, 95vw); padding: 24px; color: var(--fg); border: 1px solid var(--border); box-shadow: 0 16px 48px rgba(0,0,0,0.28);">
           <h2 style="margin: 0 0 20px;">Import Devices</h2>
-          <p style="margin: 0 0 20px;">Upload a CSV file to import devices. Expected format: ID,Source,Host,Port,Unit,SNMP,Poll,Name,Debug,Discovery,Polling</p>
+          <p style="margin: 0 0 20px;">Upload a JSON export file (schema: {_escape(BACKUP_SCHEMA_NAME)}).</p>
           <form method="post" action="/?framed=1" enctype="multipart/form-data" style="margin: 0;">
-            <input type="file" name="csv_file" accept=".csv" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); margin-bottom: 16px;" required>
-            <input type="hidden" name="action" value="import_csv">
+            <input type="file" name="json_file" accept=".json,application/json" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); margin-bottom: 16px;" required>
+            <input type="hidden" name="action" value="import_json">
             <div style="display: flex; gap: 8px; margin-top: 16px;">
-              <button type="submit" class="btn-primary" style="padding: 8px 16px; background: var(--tab-active-bg); color: white; border: none; border-radius: 4px; cursor: pointer;">Import</button>
+              <button type="submit" class="btn-primary" style="padding: 8px 16px; background: var(--tab-active-bg); color: white; border: none; border-radius: 4px; cursor: pointer;">Import JSON</button>
               <button type="button" onclick="document.getElementById('importModal').style.display='none'" style="padding: 8px 16px; background: var(--border); color: var(--fg); border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
             </div>
           </form>
+          <p style="margin: 16px 0 0; font-size: 12px; color: var(--muted-fg);">Legacy CSV import is still available from the HTMX Devices panel.</p>
         </div>
       </div>
       <form method="get">
@@ -4455,16 +5213,8 @@ def start_web_server(
                 self.end_headers()
                 self.wfile.write(payload_json)
                 return
-            if parsed.path == "/export-csv":
-                devices = store.list_devices()
-                csv_data = _generate_devices_csv(devices)
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/csv; charset=utf-8")
-                self.send_header(
-                    "Content-Disposition", "attachment; filename=devices.csv"
-                )
-                self.end_headers()
-                self.wfile.write(csv_data.encode("utf-8"))
+            if parsed.path in {"/export-csv", "/export-devices.json"}:
+                self.send_error(HTTPStatus.NOT_FOUND)
                 return
             params = parse_qs(parsed.query)
             framed_mode = params.get("framed", [""])[0] == "1"
@@ -4503,10 +5253,7 @@ def start_web_server(
                         if not name:
                             continue
                         value = part.get_payload(decode=True).decode("utf-8")
-                        if name == "csv_file":
-                            data["csv_file"] = [value]
-                        else:
-                            data[name] = [value]
+                        data[name] = [value]
             else:
                 raw = raw_body.decode("utf-8")
                 parsed_data = parse_qs(raw)
@@ -4525,7 +5272,31 @@ def start_web_server(
                         return
                     count = _import_devices_from_csv_data(csv_data)
                     self._redirect(
-                        msg=f"Imported {count} device(s) from CSV.", framed=is_framed
+                        msg=f"Imported {count} device(s) from CSV (legacy).",
+                        framed=is_framed,
+                    )
+                    return
+                if action == "import_json":
+                    json_data = (data.get("json_file", [""])[0]).strip()
+                    if not json_data:
+                        self._redirect(msg="No JSON file provided", framed=is_framed)
+                        return
+                    try:
+                        count = _import_devices_from_json_data(json_data)
+                    except (
+                        json.JSONDecodeError,
+                        ValueError,
+                        TypeError,
+                        KeyError,
+                    ) as err:
+                        self._redirect(
+                            err=f"JSON import failed: {err}",
+                            framed=is_framed,
+                        )
+                        return
+                    self._redirect(
+                        msg=f"Imported {count} device(s) from JSON.",
+                        framed=is_framed,
                     )
                     return
                 if action == "upsert":

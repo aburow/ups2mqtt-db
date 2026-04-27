@@ -82,7 +82,7 @@
               <td><span class="badge {{ row.level_class }}">{{ row.level }}</span></td>
               <td>{{ row.logger }}</td>
               <td>{{ row.device }}</td>
-              <td>{{ row.message }}</td>
+              <td style="word-break: break-word; white-space: pre-wrap;">{{ row.message }}</td>
             </tr>
             {% else %}
             <tr><td colspan="5" class="text-muted p-3">No log entries for current filter.</td></tr>

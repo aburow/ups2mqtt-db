@@ -5,15 +5,11 @@
         <thead>
           <tr>
             <th>ID</th>
+            <th>Name</th>
+            <th>Location</th>
+            <th>Host</th>
             <th>PROFILE</th>
             <th>Mode</th>
-            <th>DRIVER</th>
-            <th>Host</th>
-            <th>Port</th>
-            <th>Unit</th>
-            <th>SNMP Community</th>
-            <th>Poll</th>
-            <th>Name</th>
             <th>Logging</th>
             <th>Keep Conn</th>
             <th>Discovery</th>
@@ -25,7 +21,7 @@
           {% for device in devices %}
             {% include "htmx/device_row.html" %}
           {% else %}
-            <tr><td colspan="15" class="text-muted p-3">No devices configured.</td></tr>
+            <tr><td colspan="11" class="text-muted p-3">No devices configured.</td></tr>
           {% endfor %}
         </tbody>
       </table>

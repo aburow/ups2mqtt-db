@@ -2,6 +2,20 @@
   <td>
     <button class="btn btn-sm btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=edit&id={{ device.id }}')">{{ device.id }}</button>
   </td>
+  <td>{{ device.name or "" }}</td>
+  <td>
+    {% if device.location %}
+      {{ device.location }}
+    {% else %}
+      <span class="text-muted">-</span>
+    {% endif %}
+  </td>
+  <td>
+    {% set url = device.host if device.host.startswith('http') else 'http://' ~ device.host %}
+    <a href="{{ url }}" target="_blank" rel="noopener noreferrer">
+      {{ device.host }}
+    </a>
+  </td>
   <td>
     {% if device.profile_uid and profile_name_by_uid.get(device.profile_uid) %}
       {{ profile_name_by_uid.get(device.profile_uid) }}
@@ -12,18 +26,6 @@
     {% endif %}
   </td>
   <td><span class="badge text-bg-light">{{ (device.profile_mode or "local")|upper }}</span></td>
-  <td>{{ device.source }}</td>
-  <td>
-    {% set url = device.host if device.host.startswith('http') else 'http://' ~ device.host %}
-    <a href="{{ url }}" target="_blank" rel="noopener noreferrer">
-      {{ device.host }}
-    </a>
-  </td>
-  <td>{{ device.port }}</td>
-  <td>{{ device.unit_id }}</td>
-  <td>{{ device.snmp_community }}</td>
-  <td>{{ device.poll_interval or "" }}</td>
-  <td>{{ device.name or "" }}</td>
   <td>
     <button
       class="btn btn-sm {{ 'btn-success' if device.debug_logging else 'btn-outline-secondary' }}"
@@ -89,7 +91,7 @@
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
         @click="modalOpen = true"
-      >HA Payload</button>
+      >Data</button>
       <button
         class="btn btn-sm btn-outline-secondary"
         hx-post="/htmx/devices/actions/reinitialize"

@@ -120,6 +120,7 @@ def _parse_device(item: dict[str, Any]) -> DeviceConfig:
         if item.get("poll_interval") is not None
         else None,
         name=_clean_optional(item.get("name")),
+        location=_clean_optional(item.get("location")),
         debug_logging=bool(item.get("debug_logging", False)),
         keep_connection_open=bool(item.get("keep_connection_open", False)),
         device_uid=str(item.get("device_uid", "")).strip() or str(uuid4()),
@@ -157,6 +158,8 @@ def _device_to_dict(device: DeviceConfig) -> dict[str, Any]:
         payload["poll_interval"] = device.poll_interval
     if device.name:
         payload["name"] = device.name
+    if device.location:
+        payload["location"] = device.location
     if device.debug_logging:
         payload["debug_logging"] = True
     if device.keep_connection_open:
