@@ -10,7 +10,7 @@ services:
     container_name: ups2mqtt
     restart: unless-stopped
     ports:
-      - "8099:8099"
+      - "${UPS2MQTT_WEB_BIND:-127.0.0.1}:${UPS2MQTT_WEB_PORT:-8099}:8099"
     environment:
       UPS2MQTT_MQTT_HOST: ${UPS2MQTT_MQTT_HOST:-}
       UPS2MQTT_MQTT_PORT: ${UPS2MQTT_MQTT_PORT:-}
@@ -29,3 +29,25 @@ services:
       - ../../apc-modbus-ha:/apps/apc-modbus-ha:ro
       - ../../ups-snmp-ha:/apps/ups-snmp-ha:ro
       - ../../cyberpower-modbus-ha:/apps/cyberpower-modbus-ha:ro
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ups2mqtt-caddy
+    restart: unless-stopped
+    depends_on:
+      - ups2mqtt
+    ports:
+      - "${UPS2MQTT_PROXY_HTTP_PORT:-8080}:80"
+      - "${UPS2MQTT_PROXY_HTTPS_PORT:-8443}:443"
+    environment:
+      UPS2MQTT_PROXY_HOSTNAME: ${UPS2MQTT_PROXY_HOSTNAME:-ups2mqtt.local}
+      UPS2MQTT_PROXY_USERNAME: ${UPS2MQTT_PROXY_USERNAME:-admin}
+      UPS2MQTT_PROXY_PASSWORD_HASH: ${UPS2MQTT_PROXY_PASSWORD_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

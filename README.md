@@ -21,13 +21,35 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
    - `UPS2MQTT_MQTT_HOST`
    - `UPS2MQTT_MQTT_PORT` (default `1883`)
    - `UPS2MQTT_MQTT_USERNAME` / `UPS2MQTT_MQTT_PASSWORD` if your broker requires auth
+   - `UPS2MQTT_PROXY_HOSTNAME` (default `ups2mqtt.local`)
+   - `UPS2MQTT_PROXY_USERNAME`
+   - `UPS2MQTT_PROXY_PASSWORD_HASH` (replace example hash)
 3. Edit `standalone/options.json` for runtime options and device definitions (`config` YAML payload).
 4. Start the stack:
    - `make dev-up`
 5. Verify:
    - `make dev-ps`
    - `make dev-logs`
-   - UI: `http://localhost:8099/htmx/devices` (startup page)
+   - Proxy UI HTTPS (Basic Auth): `https://ups2mqtt.local:8443/htmx/devices` (startup page)
+   - Direct local UI (no auth): `http://127.0.0.1:8099/htmx/devices`
+
+## Optional Caddy Reverse Proxy (HTTPS + Basic Auth)
+- Standalone compose includes a lightweight Caddy reverse proxy (`ups2mqtt-caddy`) as the public HTTP/HTTPS entrypoint.
+- Caddy enforces HTTP Basic Auth and proxies to `ups2mqtt:8099` on the internal Docker network.
+- Default standalone ports:
+  - proxy: `UPS2MQTT_PROXY_HTTP_PORT` (default `8080`)
+  - proxy TLS: `UPS2MQTT_PROXY_HTTPS_PORT` (default `8443`)
+  - direct app bind: `UPS2MQTT_WEB_BIND:UPS2MQTT_WEB_PORT` (default `127.0.0.1:8099`)
+- Caddy hostname: `UPS2MQTT_PROXY_HOSTNAME` (default `ups2mqtt.local`)
+- Change proxy admin password end-to-end (recommended):
+  - `make proxy-set-password PASSWORD='your-new-password'`
+- Generate only a password hash with Caddy (optional/manual flow):
+  - `docker run --rm -it caddy:2-alpine caddy hash-password`
+  - or `make proxy-hash-password PASSWORD='your-new-password'`
+- Paste the generated hash into `UPS2MQTT_PROXY_PASSWORD_HASH` in `.env`, replacing each `$` with `$$` for Docker Compose interpolation safety.
+- Caddy TLS mode is `tls internal` for local/self-signed certs.
+- Browsers will warn unless Caddy's local CA is trusted.
+- Caddy stores its local CA and cert assets under the `caddy_data` volume.
 
 ## Common commands
 - Start/build: `make dev-up`
@@ -35,6 +57,8 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Restart service: `make dev-restart`
 - Tail logs: `make dev-logs`
 - Stop stack: `make dev-down`
+- Generate proxy admin password hash: `make proxy-hash-password PASSWORD='your-new-password'`
+- Set proxy admin password end-to-end: `make proxy-set-password PASSWORD='your-new-password'`
 
 ## Current Status
 - The core runtime reuses proven code from related UPS apps; some UI/display differences are still expected.
@@ -127,8 +151,9 @@ flowchart TD
 - When a required mapping is missing, the runtime logs a warning and suppresses that unmapped output.
 
 ## Security
-- The web interface currently has no authentication/authorization.
-- Do not expose the Docker web port to public or untrusted network segments.
+- The app web interface itself has no authentication/authorization.
+- Use the bundled Caddy reverse proxy Basic Auth for any non-local exposure.
+- Keep direct app bind local-only (`UPS2MQTT_WEB_BIND=127.0.0.1`) unless you explicitly need otherwise.
 
 ## Development
 - Project dependencies are managed with `uv` in `ups2mqtt/rootfs/usr/src/app/`.

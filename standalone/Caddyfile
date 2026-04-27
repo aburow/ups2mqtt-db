@@ -1,0 +1,22 @@
+{
+    auto_https disable_redirects
+    default_sni {$UPS2MQTT_PROXY_HOSTNAME:ups2mqtt.local}
+}
+
+(_ups2mqtt_proxy_common) {
+    basic_auth {
+        {$UPS2MQTT_PROXY_USERNAME} {$UPS2MQTT_PROXY_PASSWORD_HASH}
+    }
+
+    reverse_proxy ups2mqtt:8099
+}
+
+{$UPS2MQTT_PROXY_HOSTNAME:ups2mqtt.local} {
+    tls internal
+
+    import _ups2mqtt_proxy_common
+}
+
+:443 {
+    import _ups2mqtt_proxy_common
+}

@@ -5,7 +5,7 @@ ENV_FILE ?= .env
 COMPOSE_FILE ?= standalone/docker-compose.yml
 SERVICE ?= ups2mqtt
 
-.PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime
+.PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -36,3 +36,33 @@ db-cap-dump:
 
 db-cap-prime:
 	cd $(APP_DIR) && python3 -m ups2mqtt.db_snapshot prime --db $(DB_PATH_ABS) --in $(CAP_SNAPSHOT_ABS)
+
+proxy-hash-password:
+	@if [ -z "$(PASSWORD)" ]; then \
+		echo "Usage: make proxy-hash-password PASSWORD='your-new-password'"; \
+		exit 1; \
+	fi
+	@docker run --rm caddy:2-alpine caddy hash-password --plaintext "$(PASSWORD)"
+
+proxy-set-password:
+	@if [ -z "$(PASSWORD)" ]; then \
+		echo "Usage: make proxy-set-password PASSWORD='your-new-password'"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+		echo "Missing env file: $(ENV_FILE)"; \
+		exit 1; \
+	fi
+	@set -eu; \
+	HASH="$$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$(PASSWORD)")"; \
+	ESCAPED_HASH="$$(printf '%s\n' "$$HASH" | sed 's/[$$]/&&/g')"; \
+	TMP_FILE="$$(mktemp)"; \
+	if rg -q '^UPS2MQTT_PROXY_PASSWORD_HASH=' "$(ENV_FILE)"; then \
+		sed "s#^UPS2MQTT_PROXY_PASSWORD_HASH=.*#UPS2MQTT_PROXY_PASSWORD_HASH=$$ESCAPED_HASH#" "$(ENV_FILE)" > "$$TMP_FILE"; \
+	else \
+		cat "$(ENV_FILE)" > "$$TMP_FILE"; \
+		printf '\nUPS2MQTT_PROXY_PASSWORD_HASH=%s\n' "$$ESCAPED_HASH" >> "$$TMP_FILE"; \
+	fi; \
+	mv "$$TMP_FILE" "$(ENV_FILE)"; \
+	docker compose --env-file "$(ENV_FILE)" -f "$(COMPOSE_FILE)" up -d --no-deps --force-recreate caddy >/dev/null; \
+	echo "Updated UPS2MQTT_PROXY_PASSWORD_HASH in $(ENV_FILE) and recreated caddy."
