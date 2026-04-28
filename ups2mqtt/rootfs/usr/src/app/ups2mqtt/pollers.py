@@ -85,6 +85,10 @@ _CYBERPOWER_SNMP_CACHE_LOCK = threading.Lock()
 _CYBERPOWER_SNMP_CACHE: dict[str, _CyberPowerSnmpCache] = {}
 _UPS_MIB_SNMP_CACHE_LOCK = threading.Lock()
 _UPS_MIB_SNMP_CACHE: dict[str, _UpsMibSnmpCache] = {}
+_CATALOG_CACHE_LOCK = threading.Lock()
+_CATALOG_SPECS_CACHE: dict[str, list[dict[str, Any]]] = {}
+_CATALOG_KEYS_CACHE: dict[tuple[str, str, bool], tuple[set[str], set[str]]] = {}
+_CATALOG_ALIAS_CACHE: dict[tuple[str, str, bool], dict[str, str]] = {}
 
 
 def get_metadata_refresh_interval_seconds() -> int:
@@ -111,6 +115,14 @@ def set_idle_reconnect_seconds(seconds: float) -> None:
     global IDLE_RECONNECT_SECONDS
     with _POLL_TIMING_LOCK:
         IDLE_RECONNECT_SECONDS = float(seconds)
+
+
+def clear_catalog_poll_cache() -> None:
+    """Clear cached catalog lookups used by the poll selection path."""
+    with _CATALOG_CACHE_LOCK:
+        _CATALOG_SPECS_CACHE.clear()
+        _CATALOG_KEYS_CACHE.clear()
+        _CATALOG_ALIAS_CACHE.clear()
 
 
 def _decode_registers(
@@ -405,6 +417,36 @@ def _try_block_reads(
                 decoded.add(key)
 
 
+def _block_intersects_descriptors(
+    block: dict[str, Any], descriptors: list[dict[str, Any]]
+) -> bool:
+    start_raw = block.get("start_address")
+    count_raw = block.get("count")
+    if start_raw is None or count_raw is None:
+        return False
+    try:
+        block_start = int(start_raw)
+        block_count = int(count_raw)
+    except (TypeError, ValueError):
+        return False
+    if block_count <= 0:
+        return False
+    block_end = block_start + block_count
+
+    for descriptor in descriptors:
+        try:
+            address = int(descriptor["address"])
+            reg_count = int(descriptor.get("count", 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if reg_count <= 0:
+            continue
+        desc_end = address + reg_count
+        if address < block_end and desc_end > block_start:
+            return True
+    return False
+
+
 def _try_individual_reads(
     session: _EndpointSession,
     device: DeviceConfig,
@@ -491,10 +533,12 @@ def _poll_modbus_sync(
         for item in descriptors
         if str(item.get("poll_group", "slow")) in allowed_groups
     ]
+    # Keep block transport reads group-agnostic, then prune to only blocks that
+    # intersect descriptors required for this cycle.
     register_blocks = [
         item
         for item in register_blocks
-        if str(item.get("poll_group", "slow")) in allowed_groups
+        if _block_intersects_descriptors(item, descriptors)
     ]
     if not descriptors:
         return output
@@ -904,9 +948,20 @@ def _default_ups_mib_cache() -> _UpsMibSnmpCache:
 
 
 def _catalog_sensor_specs(device: DeviceConfig) -> list[dict[str, Any]]:
+    source = str(device.source).strip()
+    if not source:
+        return []
+    with _CATALOG_CACHE_LOCK:
+        cached = _CATALOG_SPECS_CACHE.get(source)
+    if cached is not None:
+        return cached
     repo = get_capability_repository()
     try:
-        return repo.load_catalog_sensor_specs(device.source)
+        loaded = repo.load_catalog_sensor_specs(source)
+        specs = loaded if isinstance(loaded, list) else []
+        with _CATALOG_CACHE_LOCK:
+            _CATALOG_SPECS_CACHE[source] = specs
+        return specs
     except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
         return []
 
@@ -916,11 +971,18 @@ def _catalog_keys_for_transport(
     *,
     transport: str,
 ) -> tuple[set[str], set[str]]:
+    source = str(device.source).strip()
+    enable_extended = bool(getattr(device, "enable_extended_fields", False))
+    cache_key = (source, transport, enable_extended)
+    with _CATALOG_CACHE_LOCK:
+        cached = _CATALOG_KEYS_CACHE.get(cache_key)
+    if cached is not None:
+        enabled_keys, all_keys = cached
+        return set(enabled_keys), set(all_keys)
     specs = _catalog_sensor_specs(device)
     if not specs:
         return set(), set()
 
-    enable_extended = bool(getattr(device, "enable_extended_fields", False))
     all_keys: set[str] = set()
     enabled_keys: set[str] = set()
     for spec in specs:
@@ -943,6 +1005,8 @@ def _catalog_keys_for_transport(
         if tier == "extended" and not enable_extended:
             continue
         enabled_keys.update(names)
+    with _CATALOG_CACHE_LOCK:
+        _CATALOG_KEYS_CACHE[cache_key] = (set(enabled_keys), set(all_keys))
     return enabled_keys, all_keys
 
 
@@ -952,11 +1016,17 @@ def _catalog_alias_to_canonical_map(
     transport: str,
 ) -> dict[str, str]:
     """Build alias->canonical map for tier-enabled catalog fields."""
+    source = str(device.source).strip()
+    enable_extended = bool(getattr(device, "enable_extended_fields", False))
+    cache_key = (source, transport, enable_extended)
+    with _CATALOG_CACHE_LOCK:
+        cached = _CATALOG_ALIAS_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
     specs = _catalog_sensor_specs(device)
     if not specs:
         return {}
 
-    enable_extended = bool(getattr(device, "enable_extended_fields", False))
     out: dict[str, str] = {}
     for spec in specs:
         source = str(spec.get("source", "")).strip().lower()
@@ -976,6 +1046,8 @@ def _catalog_alias_to_canonical_map(
             if not alias_key or alias_key == canonical:
                 continue
             out.setdefault(alias_key, canonical)
+    with _CATALOG_CACHE_LOCK:
+        _CATALOG_ALIAS_CACHE[cache_key] = dict(out)
     return out
 
 

@@ -457,31 +457,18 @@ def get_smart_profile() -> dict[str, Any]:
     # Block reads optimized to cover both normalized and extended tier registers
     modbus_blocks = [
         {
-            "name": "status_words_core",
+            "name": "status_and_battery_load",
             "start_address": 0x0000,
-            "count": 4,  # 0x0000-0x0003 status words for decoded fault/power flags
+            "count": 19,  # 0x0000-0x0012
             "poll_group": "fast",
+            # Consolidates prior core+load blocks to reduce per-cycle request count.
         },
         {
-            "name": "status_battery_load",
-            "start_address": 0x0004,
-            "count": 15,  # 0x0004-0x0012 (covers line_quality through input_frequency)
-            "poll_group": "fast",
-            # Covers normalized: 0x0005-0x0007, 0x000C, 0x0011-0x0012
-            # Also covers extended: 0x0004, 0x0008-0x000B, 0x000D-0x0010
-        },
-        {
-            "name": "configuration_params",
+            "name": "configuration_and_extended_status",
             "start_address": 0x001B,
-            "count": 6,  # 0x001B-0x0020 (transfer points and delays)
+            "count": 17,  # 0x001B-0x002B
             "poll_group": "slow",
-            # Covers extended: 0x001B, 0x001C, 0x001E, 0x001F, 0x0020
-        },
-        {
-            "name": "status_words_extended",
-            "start_address": 0x002A,
-            "count": 2,  # 0x002A-0x002B extended status words
-            "poll_group": "slow",
+            # Consolidates prior slow blocks and tolerates sparse gap reads.
         },
     ]
 

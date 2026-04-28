@@ -30,6 +30,7 @@ from .metrics import MetricsStore
 from .model import DeviceConfig, ProfileConfig
 from .mqtt import MqttPublisher
 from .pollers import (
+    clear_catalog_poll_cache,
     get_idle_reconnect_seconds,
     get_metadata_refresh_interval_seconds,
     poll_device,
@@ -1459,6 +1460,7 @@ async def async_main() -> None:
                         profile_state["source"],
                         len(profile_state["profiles"]),
                     )
+                    clear_catalog_poll_cache()
                     reload_event.set()
                 except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
                     LOG.exception("Capability reload failed: %s", err)
