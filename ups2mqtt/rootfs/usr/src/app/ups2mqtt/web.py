@@ -739,13 +739,10 @@ def start_web_server(
 
     device_filter_keys = (
         "device_filter_id",
-        "device_filter_source",
-        "device_filter_host",
-        "device_filter_port",
-        "device_filter_unit",
-        "device_filter_snmp",
-        "device_filter_poll",
         "device_filter_name",
+        "device_filter_location",
+        "device_filter_host",
+        "device_filter_profile",
     )
 
     def _device_filter_values_from_params(
@@ -760,48 +757,51 @@ def start_web_server(
         data = data or {}
         return {key: (data.get(key, [""])[0]).strip() for key in device_filter_keys}
 
-    def _device_matches_filters(device: DeviceConfig, filters: dict[str, str]) -> bool:
+    def _device_matches_filters(
+        device: DeviceConfig,
+        filters: dict[str, str],
+        profile_name_by_uid: dict[str, str],
+    ) -> bool:
         if filters["device_filter_id"] and filters["device_filter_id"].lower() not in (
             device.id.lower()
         ):
             return False
-        if filters["device_filter_source"] and filters[
-            "device_filter_source"
-        ].lower() not in (device.source.lower()):
+        if filters["device_filter_name"] and filters["device_filter_name"].lower() not in (
+            (device.name or "").lower()
+        ):
+            return False
+        location_text = (device.location or "").strip() or "-"
+        if filters["device_filter_location"] and filters[
+            "device_filter_location"
+        ].lower() not in (location_text.lower()):
             return False
         if filters["device_filter_host"] and filters[
             "device_filter_host"
         ].lower() not in (device.host.lower()):
             return False
-        if filters["device_filter_port"] and filters[
-            "device_filter_port"
-        ].lower() not in (str(device.port).lower()):
-            return False
-        if filters["device_filter_unit"] and filters[
-            "device_filter_unit"
-        ].lower() not in (str(device.unit_id).lower()):
-            return False
-        if filters["device_filter_snmp"] and filters[
-            "device_filter_snmp"
-        ].lower() not in (device.snmp_community.lower()):
-            return False
-        poll_text = str(device.poll_interval or "").lower()
-        if filters["device_filter_poll"] and filters[
-            "device_filter_poll"
-        ].lower() not in (poll_text):
-            return False
-        if filters["device_filter_name"] and filters[
-            "device_filter_name"
-        ].lower() not in ((device.name or "").lower()):
+        profile_text = ""
+        profile_uid = str(device.profile_uid or "").strip()
+        if profile_uid and profile_name_by_uid.get(profile_uid):
+            profile_text = str(profile_name_by_uid.get(profile_uid, ""))
+        elif profile_uid:
+            profile_text = profile_uid
+        else:
+            profile_text = "Legacy Local"
+        if filters["device_filter_profile"] and filters[
+            "device_filter_profile"
+        ].lower() not in (profile_text.lower()):
             return False
         return True
 
     def _filtered_sorted_devices(filters: dict[str, str]) -> list[DeviceConfig]:
+        profile_name_by_uid = {
+            item.profile_uid: item.name for item in _load_profiles() if item.profile_uid
+        }
         return sorted(
             (
                 item
                 for item in store.list_devices()
-                if _device_matches_filters(item, filters)
+                if _device_matches_filters(item, filters, profile_name_by_uid)
             ),
             key=lambda item: item.id.lower(),
         )

@@ -1,6 +1,27 @@
-# ups2mqtt-standalone
+# UPS2MQTT
 
-Standalone Docker Compose deployment for `ups2mqtt`.
+`ups2mqtt` is your fast path to UPS observability and automation.
+
+It delivers live UPS telemetry into MQTT and Home Assistant with a deployment model built for operators: simple Docker Compose runtime, practical web management UI, and optional HTTPS + Basic Auth via Caddy.
+
+What makes it compelling:
+1. Specialized high-fidelity drivers for APC and CyberPower.
+2. Broad compatibility for additional UPS brands/models that implement RFC1628.
+3. Clean MQTT publishing with Home Assistant discovery support.
+4. Profile-based polling and device management designed for real production environments.
+5. Standalone, low-friction architecture that avoids heavyweight platform lock-in.
+
+If your goal is reliable, vendor-flexible UPS monitoring without custom integration work, this is built for that.
+
+## Why Teams Choose UPS2MQTT
+
+- Deploy fast: get from zero to live UPS telemetry in minutes with Docker Compose.
+- Scale confidently: tunable polling, concurrent worker slots, and profile-based control for mixed device fleets.
+- Work across vendors: specialized APC and CyberPower drivers, plus support for UPS models that follow RFC1628.
+- Keep integrations clean: MQTT publishing with Home Assistant discovery and lifecycle-aware cleanup on reinit/remove.
+- Operate with less friction: built-in web UI, JSON backup/restore, CSV onboarding import, and live troubleshooting logs.
+- Secure practical defaults: local bind by default, with optional Caddy HTTPS and Basic Auth for managed access.
+- Reduce custom glue code: purpose-built bridge from UPS telemetry to automation-ready MQTT data.
 
 ## Scope
 This repository is intentionally trimmed for standalone deployment.
@@ -103,6 +124,7 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
   - Location is editable in Add/Edit Device forms.
   - Location is shown on the Devices table.
   - JSON backup/restore and CSV import preserve location.
+- Devices panel filters align to visible table columns: `ID`, `Name`, `Location`, `Host`, and `Profile`.
 - Recommended usage: create multiple Global Profiles per scenario (for example `SMT-UIO1-temp-humidity`) and assign one per device.
 - Profile sensor selection is now single-toggle: if a sensor is selected it is published to MQTT and discovered by Home Assistant.
 - The previous per-sensor `HA visible` option was removed. Existing stored `ha_visible` values are ignored.
@@ -113,52 +135,6 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - The local log buffer is for troubleshooting and does not persist across restarts/reboots.
 - The Logs panel shows current in-memory buffer usage (`Logs: N / 2000`) and supports `Clear logs` for buffer-only reset.
 - HTMX logs clear route is `POST /htmx/logs/actions/clear`; legacy `POST /htmx/devices/actions/logs/clear` remains supported with a one-time DEBUG deprecation signal.
-
-## Polling Flow Diagrams
-```mermaid
-flowchart TD
-  A["device loop start"] --> B["load poll group intervals from profile"]
-  B --> C["init next due per group"]
-  C --> D{"any group due"}
-  D -- "no" --> E["sleep briefly"] --> C
-  D -- "yes" --> F["collect due groups"]
-  F --> G["poll device with due groups"]
-  G --> H["apply derived values and transforms"]
-  H --> I["filter to selected discovery keys"]
-  I --> J["publish state and merge into MQTT cache"]
-  J --> K["advance next due for each due group"]
-  K --> C
-```
-
-```mermaid
-flowchart TD
-  A["fast tick due"] --> B["due groups is fast"]
-  B --> C["poll device with fast group"]
-  C --> D["read only metrics tagged fast"]
-  D --> E["slow metrics are not refreshed in this cycle"]
-  E --> F["MQTT cache keeps prior slow values"]
-```
-
-```mermaid
-flowchart TD
-  A["slow tick due"] --> B["due groups includes slow"]
-  B --> C["poll device with slow or fast plus slow"]
-  C --> D["read metrics tagged slow"]
-  D --> E["if fast also due then fast metrics refresh too"]
-  E --> F["derived fields can use fresh slow raw values"]
-  F --> G["MQTT cache updated with refreshed slow values"]
-```
-
-```mermaid
-flowchart TD
-  A["polled sensor values"] --> E["merge metadata sources"]
-  B["contract resolver metadata"] --> E
-  C["runtime metadata cache"] --> E
-  E --> F{"metadata changed"}
-  F -- "no" --> G["publish state only"]
-  F -- "yes" --> H["publish state then republish discovery"]
-  H --> I["Home Assistant updates device info block"]
-```
 
 ## Human-Readable Mapping Policy
 - Runtime output is now human-readable for mapped status/code fields.
