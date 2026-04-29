@@ -37,6 +37,7 @@ It collects key metrics such as:
 - runtime remaining
 - input/output voltage
 - UPS status (online, on battery, charging)
+... and much more for our vendor specific drivers
 
 and makes them available for:
 - Home Assistant sensors
@@ -47,7 +48,7 @@ and makes them available for:
 
 ## Why use this?
 
-Many UPS systems expose data via USB, SNMP, or vendor-specific tools, but:
+Many UPS systems expose data via SNMP, or vendor-specific tools, but:
 
 - they don’t integrate cleanly with Home Assistant  
 - they lack real-time automation hooks  
@@ -102,7 +103,4 @@ Once connected, you can:
       "runtime": 1240,
       "status": "ONLINE"
     }
-
-
-
 
