@@ -50,7 +50,7 @@
 <div
   id="devices-table-container"
   hx-get="/htmx/devices/partials/table"
-  hx-trigger="load, devices-refresh from:body"
+  hx-trigger="devices-refresh from:body"
   hx-include="#devices-filter-form"
   hx-swap="innerHTML"
   hx-indicator="#global-loading"
