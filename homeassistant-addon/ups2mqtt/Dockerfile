@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
 FROM ${BUILD_FROM}
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
