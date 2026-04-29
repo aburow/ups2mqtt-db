@@ -1,3 +1,32 @@
+<div align="center">
+
+# ⚡ ups2mqtt
+
+<img src="./docs/assets/logo.png" width="120"/>
+
+**UPS telemetry bridge for MQTT and Home Assistant**
+
+Expose UPS metrics (battery, load, runtime, status) via MQTT and integrate seamlessly into Home Assistant.
+
+---
+
+[![GitHub Release](https://img.shields.io/github/v/release/aburow/ups2mqtt-db?label=stable&color=green)](https://github.com/aburow/ups2mqtt-db/releases)
+[![GitHub Issues](https://img.shields.io/github/issues/aburow/ups2mqtt-db)](https://github.com/aburow/ups2mqtt-db/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/aburow/ups2mqtt-db)](https://github.com/aburow/ups2mqtt-db/stargazers)
+[![License](https://img.shields.io/github/license/aburow/ups2mqtt-db)](LICENSE)
+
+---
+
+[📖 Documentation](https://github.com/aburow/ups2mqtt-db#readme) •
+[🐛 Report Bug](https://github.com/aburow/ups2mqtt-db/issues/new?labels=bug) •
+[💡 Request Feature](https://github.com/aburow/ups2mqtt-db/issues/new?labels=enhancement)
+
+---
+
+[![Add Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/aburow/ups2mqtt-db)
+
+</div>
+
 # UPS2MQTT
 
 `ups2mqtt` is your fast path to UPS observability and automation.
