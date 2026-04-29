@@ -704,7 +704,19 @@ def start_web_server(
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
+    web_base_path: str = "/",
 ) -> HTTPServer:
+    def _normalize_base_path(value: str | None) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "/"
+        if not text.startswith("/"):
+            text = f"/{text}"
+        text = text.rstrip("/")
+        return text or "/"
+
+    normalized_base_path = _normalize_base_path(web_base_path)
+
     session_store = SessionStore()
     # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
     templates = Environment(
@@ -3102,6 +3114,32 @@ def start_web_server(
         )
 
     class Handler(BaseHTTPRequestHandler):
+        def _prefixed_path(self, path: str) -> str:
+            if not path.startswith("/"):
+                return path
+            if normalized_base_path == "/":
+                return path
+            return f"{normalized_base_path}{path}"
+
+        def _resolve_app_path(self, request_path: str) -> str:
+            if request_path in {"", "/"}:
+                return "/"
+            if request_path.startswith("/htmx/"):
+                return request_path
+            if "/htmx/" in request_path:
+                return request_path[request_path.index("/htmx/") :]
+            for suffix in (
+                "/metrics.json",
+                "/check-config.json",
+                "/favicon.ico",
+                "/favicon.png",
+            ):
+                if request_path == suffix or request_path.endswith(suffix):
+                    return suffix
+            if request_path.endswith("/"):
+                return "/"
+            return request_path
+
         def _send_html(
             self,
             payload: str,
@@ -3127,6 +3165,7 @@ def start_web_server(
                     initial_panel_html=_render_htmx_devices_panel(filters),
                     initial_theme_choice=_normalize_theme(theme_getter()),
                     sidebar_versions=_sidebar_version_items(),
+                    web_base_path=normalized_base_path,
                 )
                 self._send_html(payload)
                 return True
@@ -4075,7 +4114,8 @@ def start_web_server(
             query = urlencode(params)
             self.send_response(HTTPStatus.SEE_OTHER)
             self.send_header(
-                "Location", "/htmx/devices" + (f"?{query}" if query else "")
+                "Location",
+                self._prefixed_path("/htmx/devices") + (f"?{query}" if query else ""),
             )
             self.end_headers()
 
@@ -5172,10 +5212,11 @@ def start_web_server(
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            parsed = parsed._replace(path=self._resolve_app_path(parsed.path))
             if self._handle_htmx_get(parsed):
                 return
             if parsed.path == "/":
-                location = "/htmx/devices"
+                location = self._prefixed_path("/htmx/devices")
                 if parsed.query:
                     location += f"?{parsed.query}"
                 self.send_response(HTTPStatus.SEE_OTHER)
@@ -5246,6 +5287,7 @@ def start_web_server(
 
             # Extract framed param from request path
             parsed = urlparse(self.path)
+            parsed = parsed._replace(path=self._resolve_app_path(parsed.path))
             params = parse_qs(parsed.query)
             is_framed = params.get("framed", [""])[0] == "1"
 

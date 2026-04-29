@@ -1294,6 +1294,7 @@ async def async_main() -> None:
     LOG.info("  web_enabled: %s", config.web_enabled)
     if config.web_enabled:
         LOG.info("  web_port: %d", config.web_port)
+        LOG.info("  web_base_path: %s", config.web_base_path)
     LOG.info("  ha_url: %s", config.ha_url if config.ha_url else "(not configured)")
     LOG.info(
         "  log_level: %s", logging.getLevelName(logging.getLogger().getEffectiveLevel())
@@ -1394,6 +1395,7 @@ async def async_main() -> None:
         web_server = start_web_server(
             host=config.web_host,
             port=config.web_port,
+            web_base_path=config.web_base_path,
             store=store,
             get_source_names=lambda: sorted(profile_state["profiles"].keys()),
             log_buffer=log_buffer,

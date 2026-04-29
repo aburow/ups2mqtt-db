@@ -1,0 +1,30 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+OPTIONS_PATH="/data/options.json"
+INTERNAL_PATH="/data/ups2mqtt_internal_options.json"
+
+if [[ ! -f "${OPTIONS_PATH}" ]]; then
+  bashio::log.error "Missing ${OPTIONS_PATH}; Supervisor should provide add-on options"
+  exit 1
+fi
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+options_path = Path("/data/options.json")
+out_path = Path("/data/ups2mqtt_internal_options.json")
+
+with options_path.open("r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+if bool(data.get("expose_direct_port", False)):
+    data["web_base_path"] = "/"
+else:
+    data["web_base_path"] = ""
+
+out_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+PY
+
+bashio::log.info "Prepared runtime options at ${INTERNAL_PATH}"

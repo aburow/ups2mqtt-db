@@ -1,0 +1,70 @@
+name: "ups2mqtt"
+version: "0.1.0rc5-ha1"
+slug: "ups2mqtt"
+description: "UPS telemetry bridge for MQTT and Home Assistant"
+url: "https://github.com/aburow/ups2mqtt-db"
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+ingress_entry: "/htmx/devices"
+panel_icon: "mdi:battery-medium"
+panel_title: "ups2mqtt"
+homeassistant_api: true
+hassio_api: false
+services:
+  - mqtt:need
+arch:
+  - amd64
+  - aarch64
+  - armv7
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: "Optional direct web access for troubleshooting"
+map:
+  - addon_config:rw
+  - ssl
+options:
+  mqtt_enabled: true
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_discovery_prefix: homeassistant
+  mqtt_topic_prefix: ups2mqtt
+  poll_interval: 10
+  poll_timeout: 15
+  max_concurrent_polls: 8
+  apps_dir: /data/apps
+  web_enabled: true
+  web_host: 0.0.0.0
+  web_port: 8099
+  expose_direct_port: false
+  log_level: INFO
+  ha_bridge_enabled: false
+  ha_url: ""
+  ha_token: ""
+  config: "devices: []\n"
+schema:
+  mqtt_enabled: bool
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_discovery_prefix: str
+  mqtt_topic_prefix: str
+  poll_interval: int(1,3600)
+  poll_timeout: int(2,3600)
+  max_concurrent_polls: int(1,128)
+  apps_dir: str
+  web_enabled: bool
+  web_host: str
+  web_port: int(1,65535)
+  expose_direct_port: bool
+  log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
+  ha_bridge_enabled: bool
+  ha_url: str?
+  ha_token: str?
+  config: str

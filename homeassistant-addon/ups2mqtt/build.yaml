@@ -1,0 +1,9 @@
+build_from:
+  amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
+  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.22
+  armv7: ghcr.io/home-assistant/armv7-base-python:3.13-alpine3.22
+labels:
+  org.opencontainers.image.title: "ups2mqtt"
+  org.opencontainers.image.description:
+    "UPS telemetry bridge for MQTT and Home Assistant"
+  org.opencontainers.image.source: "https://github.com/aburow/ups2mqtt-db"

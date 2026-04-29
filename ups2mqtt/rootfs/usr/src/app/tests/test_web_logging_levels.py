@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+import http.client
 from pathlib import Path
 import sys
 from urllib.error import HTTPError
@@ -24,6 +25,30 @@ def _fetch(base_url: str, path: str) -> tuple[int, str]:
             return int(response.status), response.read().decode("utf-8")
     except HTTPError as err:
         return int(err.code), err.read().decode("utf-8")
+
+
+def _fetch_raw(base_url: str, path: str) -> tuple[int, dict[str, str], str]:
+    request = Request(f"{base_url}{path}", method="GET")
+    try:
+        with urlopen(request) as response:  # nosec B310
+            return (
+                int(response.status),
+                dict(response.headers.items()),
+                response.read().decode("utf-8"),
+            )
+    except HTTPError as err:
+        return int(err.code), dict(err.headers.items()), err.read().decode("utf-8")
+
+
+def _fetch_no_redirect(port: int, path: str) -> tuple[int, dict[str, str], str]:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        body = response.read().decode("utf-8")
+        return int(response.status), dict(response.getheaders()), body
+    finally:
+        connection.close()
 
 
 def _post(base_url: str, path: str, data: dict[str, str]) -> tuple[int, str]:
@@ -55,6 +80,25 @@ def _start_test_server(tmp_path: Path):
         trigger_republish_discovery=lambda: None,
         get_metrics_snapshot=lambda: {},
         trigger_reload=lambda: None,
+    )
+    return server
+
+
+def _start_test_server_with_base_path(tmp_path: Path, web_base_path: str):
+    db = Database(str(tmp_path / "test.db"))
+    store = DeviceStore([], db)
+    server = start_web_server(
+        host="127.0.0.1",
+        port=0,
+        store=store,
+        get_source_names=lambda: ["cyberpower_modbus_single_phase"],
+        log_buffer=LogBuffer(),
+        get_capability_status=lambda: {},
+        trigger_capability_reload=lambda: None,
+        trigger_republish_discovery=lambda: None,
+        get_metrics_snapshot=lambda: {},
+        trigger_reload=lambda: None,
+        web_base_path=web_base_path,
     )
     return server
 
@@ -131,6 +175,33 @@ def test_csv_import_exception_still_emits_error(
             if record.name == "ups2mqtt.web" and record.levelname == "ERROR"
         ]
         assert any("CSV import error on row" in message for message in error_messages)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_prefixed_ingress_path_resolves_htmx_route(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/api/hassio_ingress/mock/htmx/devices")
+        assert status == HTTPStatus.OK
+        assert "ups2mqtt Admin" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_root_redirect_uses_configured_base_path(tmp_path: Path) -> None:
+    server = _start_test_server_with_base_path(
+        tmp_path, "/api/hassio_ingress/mock"
+    )
+    try:
+        status, headers, _ = _fetch_no_redirect(server.server_port, "/")
+        assert status == HTTPStatus.SEE_OTHER
+        assert headers.get("Location", "").startswith(
+            "/api/hassio_ingress/mock/htmx/devices"
+        )
     finally:
         server.shutdown()
         server.server_close()

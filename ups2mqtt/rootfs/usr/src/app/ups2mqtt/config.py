@@ -47,6 +47,16 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
     return default
 
 
+def _normalize_web_base_path(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "/"
+    if not text.startswith("/"):
+        text = f"/{text}"
+    text = text.rstrip("/")
+    return text or "/"
+
+
 def _resolve_runtime_devices_path() -> str:
     return os.environ.get("UPS2MQTT_RUNTIME_DEVICES_PATH", RUNTIME_DEVICES_PATH)
 
@@ -282,6 +292,9 @@ def load_config(options_path: str | None = None) -> AppConfig:
         web_enabled=bool(raw_options.get("web_enabled", True)),
         web_host=str(raw_options.get("web_host", "0.0.0.0")),
         web_port=int(raw_options.get("web_port", 8099)),
+        web_base_path=_normalize_web_base_path(
+            _env_or_default("UPS2MQTT_WEB_BASE_PATH", raw_options.get("web_base_path", "/"))
+        ),
         devices=devices,
         raw=raw_options,
         ha_url=_clean_optional(

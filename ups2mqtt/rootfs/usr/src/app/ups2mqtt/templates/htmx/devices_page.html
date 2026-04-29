@@ -156,6 +156,66 @@
   </div>
 
   <script>
+    const UPS2MQTT_CONFIGURED_BASE_PATH = '{{ web_base_path | default("/") }}';
+
+    function ups2mqttResolveBasePath() {
+      if (UPS2MQTT_CONFIGURED_BASE_PATH && UPS2MQTT_CONFIGURED_BASE_PATH !== '/') {
+        return UPS2MQTT_CONFIGURED_BASE_PATH;
+      }
+      const marker = '/htmx/';
+      const idx = window.location.pathname.indexOf(marker);
+      if (idx > 0) {
+        return window.location.pathname.slice(0, idx);
+      }
+      return '';
+    }
+
+    const UPS2MQTT_BASE_PATH = ups2mqttResolveBasePath();
+
+    function ups2mqttPath(path) {
+      if (!path || typeof path !== 'string') {
+        return path;
+      }
+      if (!path.startsWith('/') || path.startsWith('//')) {
+        return path;
+      }
+      if (!UPS2MQTT_BASE_PATH) {
+        return path;
+      }
+      if (path === UPS2MQTT_BASE_PATH || path.startsWith(UPS2MQTT_BASE_PATH + '/')) {
+        return path;
+      }
+      return UPS2MQTT_BASE_PATH + path;
+    }
+
+    function ups2mqttRewritePaths(rootNode) {
+      const attrs = ['hx-get', 'hx-post', 'hx-put', 'hx-delete', 'href', 'action', 'src'];
+      const scope = rootNode || document;
+      for (const attr of attrs) {
+        const nodes = scope.querySelectorAll('[' + attr + ']');
+        for (const node of nodes) {
+          const value = node.getAttribute(attr);
+          const rewritten = ups2mqttPath(value || '');
+          if (rewritten !== value) {
+            node.setAttribute(attr, rewritten);
+          }
+        }
+      }
+    }
+
+    if (window.htmx && !window.__ups2mqttHtmxPatched) {
+      const originalAjax = window.htmx.ajax.bind(window.htmx);
+      window.htmx.ajax = (verb, path, context) => originalAjax(verb, ups2mqttPath(path), context);
+      window.__ups2mqttHtmxPatched = true;
+    }
+
+    document.addEventListener('htmx:afterSwap', (event) => {
+      ups2mqttRewritePaths(event.target);
+    });
+    document.addEventListener('DOMContentLoaded', () => {
+      ups2mqttRewritePaths(document);
+    });
+
     function deviceUi() {
       return {
         modalOpen: false,
@@ -171,7 +231,7 @@
         },
         loadPanel(panel) {
           this.activePanel = panel;
-          htmx.ajax('GET', `/htmx/devices/partials/panel/${panel}`, {
+          htmx.ajax('GET', ups2mqttPath(`/htmx/devices/partials/panel/${panel}`), {
             target: '#admin-panel',
             swap: 'innerHTML',
             indicator: '#global-loading'
@@ -179,7 +239,7 @@
         },
         openModal(url) {
           this.modalOpen = true;
-          htmx.ajax('GET', url, {
+          htmx.ajax('GET', ups2mqttPath(url), {
             target: '#device-modal-content',
             swap: 'innerHTML',
             indicator: '#global-loading'
@@ -196,7 +256,7 @@
           this.openConfirm({
             title: 'Delete Device',
             message: 'Delete ' + id + '?',
-            url: '/htmx/devices/actions/delete',
+            url: ups2mqttPath('/htmx/devices/actions/delete'),
             target: '#devices-table-container',
             values: { id: id }
           });
@@ -227,7 +287,7 @@
               }
             }
           }
-          htmx.ajax('POST', cfg.url, {
+          htmx.ajax('POST', ups2mqttPath(cfg.url), {
             target: cfg.target,
             swap: 'innerHTML',
             values: mergedValues,

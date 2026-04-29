@@ -108,6 +108,7 @@ class AppConfig:
     web_port: int
     devices: list[DeviceConfig]
     raw: dict[str, Any]
+    web_base_path: str = "/"
     ha_url: str | None = None
     ha_token: str | None = None
     ha_bridge_enabled: bool = False

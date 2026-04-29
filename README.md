@@ -24,12 +24,13 @@ If your goal is reliable, vendor-flexible UPS monitoring without custom integrat
 - Reduce custom glue code: purpose-built bridge from UPS telemetry to automation-ready MQTT data.
 
 ## Scope
-This repository is intentionally trimmed for standalone deployment.
-It includes runtime code and Compose configuration only, and excludes Home Assistant add-on packaging and unrelated development artifacts.
+This repository is intentionally trimmed to focus on deployable runtime paths.
+It includes standalone Compose deployment and Home Assistant Community App/add-on packaging, while excluding unrelated historical artifacts.
 
 ## Included
 - `standalone/` Docker Compose runtime
 - `ups2mqtt/rootfs/usr/src/app/` application runtime code
+- `homeassistant-addon/ups2mqtt/` Home Assistant Community App/add-on packaging path
 
 ## Prerequisites
 - Docker Engine (with Docker Compose v2)
@@ -93,6 +94,20 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - Development is currently focused on this standalone deployment for convenience.
 - Direction is toward a Home Assistant add-on/app model (not HACS).
 - This standalone instance avoids loading Home Assistant core resources directly and reduces main-loop impact.
+
+## Home Assistant Community App Path
+- Packaging for Home Assistant Community App/add-on deployment now lives under `homeassistant-addon/ups2mqtt/`.
+- Ingress is enabled (`ingress: true`) and targets app port `8099` (`ingress_port: 8099`).
+- Optional direct web port mapping exists as `8099/tcp` and is disabled by default.
+- Runtime uses add-on options from `/data/options.json`, with an internal normalized copy at `/data/ups2mqtt_internal_options.json`.
+- Ingress-aware routing support is built into the web UI/server via `web_base_path` handling.
+
+### Home Assistant Install Notes
+1. Add this repository (or a dedicated mirror of `homeassistant-addon/ups2mqtt/`) to your Home Assistant add-on store source.
+2. Install the `ups2mqtt` add-on and open it from the sidebar using Ingress.
+3. Configure add-on options (MQTT host/credentials, poll settings, and `config` YAML payload).
+4. Keep `expose_direct_port: false` for normal operation. Enable it only for controlled troubleshooting.
+5. If enabling direct port access, use the mapped host port for `8099/tcp`; Ingress remains available.
 
 ## Driver Coverage
 - APC Smart UPS (legacy Modbus and legacy SNMP): supported.
