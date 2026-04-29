@@ -1,14 +1,28 @@
-#!/usr/bin/with-contenv bashio
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
 export UPS2MQTT_OPTIONS_PATH="/data/ups2mqtt_internal_options.json"
-export UPS2MQTT_LOG_LEVEL="$(bashio::config 'log_level')"
+export UPS2MQTT_LOG_LEVEL="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+options = json.loads(Path('/data/options.json').read_text(encoding='utf-8'))
+print(str(options.get('log_level', 'INFO')))
+PY
+)"
 
 # Use ingress prefix when available. For direct-port mode, clear base path.
-if bashio::config.true 'expose_direct_port'; then
+if python3 - <<'PY'
+import json
+from pathlib import Path
+
+options = json.loads(Path('/data/options.json').read_text(encoding='utf-8'))
+raise SystemExit(0 if bool(options.get('expose_direct_port', False)) else 1)
+PY
+then
   export UPS2MQTT_WEB_BASE_PATH="/"
 else
-  if bashio::var.has_value "${SUPERVISOR_INGRESS:-}"; then
+  if [ -n "${SUPERVISOR_INGRESS:-}" ]; then
     export UPS2MQTT_WEB_BASE_PATH="${SUPERVISOR_INGRESS}"
   else
     export UPS2MQTT_WEB_BASE_PATH=""
