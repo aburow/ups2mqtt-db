@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import inspect
 import logging
 import shlex
@@ -704,7 +705,16 @@ def _snmp_get_sync_v1arch(host: str, community: str, oid: str) -> str | None:
             return text if text else None
         return None
 
-    return asyncio.run(_run())
+    # Fallback path may be invoked from async call chains (e.g. metadata refresh
+    # during multi_source polling). asyncio.run() cannot execute inside an already
+    # running event loop, so offload to a worker thread in that case.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_run())
+    return concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(
+        lambda: asyncio.run(_run())
+    ).result()
 
 
 def _snmp_get_first(host: str, community: str, oids: list[str]) -> str | None:
