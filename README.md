@@ -97,6 +97,7 @@ It includes standalone Compose deployment and Home Assistant Community App/add-o
 
 ## Home Assistant Community App Path
 - Packaging for Home Assistant Community App/add-on deployment now lives under `homeassistant-addon/ups2mqtt/`.
+- Repository root includes `repository.yaml` so Home Assistant can validate this Git URL as an app/add-on repository.
 - Ingress is enabled (`ingress: true`) and targets app port `8099` (`ingress_port: 8099`).
 - Optional direct web port mapping exists as `8099/tcp` and is disabled by default.
 - Runtime uses add-on options from `/data/options.json`, with an internal normalized copy at `/data/ups2mqtt_internal_options.json`.
