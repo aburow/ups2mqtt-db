@@ -13,3 +13,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .tools/
+
+# Local scratch script
+gogogo
