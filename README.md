@@ -95,6 +95,39 @@ Once connected, you can:
 
 ---
 
+## Compatibility
+
+`ups2mqtt` is designed for mixed UPS environments and supports multiple deployment models.
+
+### Supported UPS / Protocol Coverage
+- APC Smart-UPS (legacy Modbus + legacy SNMP): supported
+- APC SMT series: supported
+- CyberPower Modbus devices: supported
+- RFC1628 UPS-MIB devices: broadly compatible (model-specific behavior may vary)
+- APC PDU: limited support
+
+### Runtime / Platform
+- Python runtime: 3.13+
+- Standalone deployment: Docker Compose (included in this repository)
+- Home Assistant Community App: supported via Ingress-enabled add-on path (`homeassistant-addon/ups2mqtt/`)
+
+### Home Assistant / MQTT
+- MQTT discovery: supported (tested with Home Assistant + Mosquitto)
+- Home Assistant token: optional, only needed for stale-entity cleanup flows
+- Ingress UI: supported in add-on mode
+- Direct web port (add-on): optional troubleshooting mode
+
+### Architecture Support (Home Assistant Add-on)
+- `amd64`
+- `aarch64`
+- `armv7`
+
+### Notes
+- Compatibility depends on UPS firmware behavior, MIB/register implementation fidelity, and network quality.
+- For unsupported or partially supported models, telemetry coverage can be incomplete even when connectivity succeeds.
+
+---
+
 ## Example MQTT payload
 
     {
@@ -103,4 +136,3 @@ Once connected, you can:
       "runtime": 1240,
       "status": "ONLINE"
     }
-

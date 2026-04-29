@@ -1,5 +1,5 @@
 name: "ups2mqtt"
-version: "0.1.0rc5-ha8"
+version: "0.90.0-ha1"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
