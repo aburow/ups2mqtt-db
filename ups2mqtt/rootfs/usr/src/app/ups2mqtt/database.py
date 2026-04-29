@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import sqlite3
 import threading
@@ -59,11 +60,43 @@ class Database:
     def _get_conn(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
         if not hasattr(self._local, "conn"):
-            self._local.conn = sqlite3.connect(
-                self.db_path, check_same_thread=False, timeout=30.0
-            )
+            self._local.conn = sqlite3.connect(self.db_path, timeout=30.0)
             self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn.execute("PRAGMA busy_timeout=30000")
+            self._local.conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn.execute("PRAGMA foreign_keys=ON")
+            self._local.tx_depth = 0
         return self._local.conn
+
+    def _tx_depth(self) -> int:
+        return int(getattr(self._local, "tx_depth", 0))
+
+    def _set_tx_depth(self, value: int) -> None:
+        self._local.tx_depth = max(0, int(value))
+
+    def _maybe_commit(self, conn: sqlite3.Connection) -> None:
+        if self._tx_depth() == 0:
+            conn.commit()
+
+    @contextmanager
+    def transaction(self):
+        """Open a transaction boundary for batching writes."""
+        conn = self._get_conn()
+        depth = self._tx_depth()
+        if depth == 0:
+            conn.execute("BEGIN IMMEDIATE")
+        self._set_tx_depth(depth + 1)
+        try:
+            yield
+            depth_after = self._tx_depth() - 1
+            self._set_tx_depth(depth_after)
+            if depth_after == 0:
+                conn.commit()
+        except Exception:
+            self._set_tx_depth(0)
+            conn.rollback()
+            raise
 
     def _init_db(self) -> None:
         """Initialize database schema."""
@@ -144,6 +177,12 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_devices_id ON devices(id)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_devices_profile_uid ON devices(profile_uid)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_devices_source_host ON devices(source, host)
+        """)
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS profiles (
@@ -181,6 +220,9 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_profiles_driver_key ON profiles(driver_key)
+        """)
 
         self._init_capability_schema(cursor)
 
@@ -189,7 +231,7 @@ class Database:
             cursor.execute("UPDATE profiles SET is_protected = 0")
         else:
             self._mark_default_profiles_protected(cursor)
-        conn.commit()
+        self._maybe_commit(conn)
 
     @staticmethod
     def _init_capability_schema(cursor: sqlite3.Cursor) -> None:
@@ -540,7 +582,7 @@ class Database:
                 else None,
             ),
         )
-        conn.commit()
+        self._maybe_commit(conn)
 
     def load_devices(self) -> list[DeviceConfig]:
         """Load all devices from database."""
@@ -646,7 +688,7 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM devices WHERE device_uid = ?", (device_uid,))
         deleted = cursor.rowcount > 0
-        conn.commit()
+        self._maybe_commit(conn)
         return deleted
 
     def cleanup_state(self, valid_device_uids: set[str]) -> dict[str, int]:
@@ -669,7 +711,7 @@ class Database:
             cursor.execute("DELETE FROM devices")
         devices_removed = max(0, int(cursor.rowcount))
 
-        conn.commit()
+        self._maybe_commit(conn)
         return {
             "devices_removed": devices_removed,
         }
@@ -714,7 +756,12 @@ class Database:
                 else None,
             ),
         )
-        conn.commit()
+        self._maybe_commit(conn)
+
+    def save_profiles_bulk(self, profiles: list[ProfileConfig]) -> None:
+        """Save or update many profiles."""
+        for profile in profiles:
+            self.save_profile(profile)
 
     def load_profiles(self) -> list[ProfileConfig]:
         """Load all profiles from database."""
@@ -765,8 +812,13 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM profiles WHERE profile_uid = ?", (profile_uid,))
         deleted = cursor.rowcount > 0
-        conn.commit()
+        self._maybe_commit(conn)
         return deleted
+
+    def save_devices_bulk(self, devices: list[DeviceConfig]) -> None:
+        """Save or update many devices."""
+        for device in devices:
+            self.save_device(device)
 
     def close(self) -> None:
         """Close database connections."""

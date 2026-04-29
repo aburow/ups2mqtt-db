@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import html
 import json
 import logging
@@ -1514,63 +1515,66 @@ def start_web_server(
         header_map = {item.lower(): index for index, item in enumerate(header)}
         has_location_column = "location" in header_map
         count = 0
-        for row in lines[1:]:
-            required_cells = 13 if has_location_column else 12
-            if len(row) < required_cells:
-                LOG.warning("Skipping malformed CSV line: %s", row)
-                continue
-            try:
-                def _cell(index: int, default: str = "") -> str:
-                    if 0 <= index < len(row):
-                        return str(row[index]).strip()
-                    return default
+        db = _profile_db()
+        tx = db.transaction() if db is not None else nullcontext()
+        with tx:
+            for row in lines[1:]:
+                required_cells = 13 if has_location_column else 12
+                if len(row) < required_cells:
+                    LOG.warning("Skipping malformed CSV line: %s", row)
+                    continue
+                try:
+                    def _cell(index: int, default: str = "") -> str:
+                        if 0 <= index < len(row):
+                            return str(row[index]).strip()
+                        return default
 
-                def _cell_by_header(name: str, fallback_index: int) -> str:
-                    index = header_map.get(name.lower())
-                    if index is not None:
-                        return _cell(index)
-                    return _cell(fallback_index)
+                    def _cell_by_header(name: str, fallback_index: int) -> str:
+                        index = header_map.get(name.lower())
+                        if index is not None:
+                            return _cell(index)
+                        return _cell(fallback_index)
 
-                dev = DeviceConfig(
-                    id=_cell_by_header("ID", 0),
-                    source=_cell_by_header("Source", 1),
-                    host=_cell_by_header("Host", 2),
-                    port=int(_cell_by_header("Port", 3) or 502),
-                    unit_id=int(_cell_by_header("Unit", 4) or 1),
-                    snmp_community=(_cell_by_header("SNMP", 5) or "public"),
-                    poll_interval=(
-                        int(_cell_by_header("Poll", 6) or 0)
-                        if _cell_by_header("Poll", 6)
-                        else None
-                    ),
-                    name=(_cell_by_header("Name", 7) or None),
-                    location=(
-                        _cell_by_header("Location", 8 if has_location_column else -1)
-                        or None
-                    ),
-                    debug_logging=str(
-                        _cell_by_header("Debug", 9 if has_location_column else 8)
-                    ).lower()
-                    in {"true", "1", "yes"},
-                    keep_connection_open=str(
-                        _cell_by_header(
-                            "KeepConnectionOpen", 10 if has_location_column else 9
-                        )
-                    ).lower()
-                    in {"true", "1", "yes"},
-                    discovery_enabled=str(
-                        _cell_by_header("Discovery", 11 if has_location_column else 10)
-                    ).lower()
-                    in {"true", "1", "yes"},
-                    polling_enabled=str(
-                        _cell_by_header("Polling", 12 if has_location_column else 11)
-                    ).lower()
-                    in {"true", "1", "yes"},
-                )
-                store.upsert(dev)
-                count += 1
-            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-                LOG.exception("CSV import error on row %r: %s", row, err)
+                    dev = DeviceConfig(
+                        id=_cell_by_header("ID", 0),
+                        source=_cell_by_header("Source", 1),
+                        host=_cell_by_header("Host", 2),
+                        port=int(_cell_by_header("Port", 3) or 502),
+                        unit_id=int(_cell_by_header("Unit", 4) or 1),
+                        snmp_community=(_cell_by_header("SNMP", 5) or "public"),
+                        poll_interval=(
+                            int(_cell_by_header("Poll", 6) or 0)
+                            if _cell_by_header("Poll", 6)
+                            else None
+                        ),
+                        name=(_cell_by_header("Name", 7) or None),
+                        location=(
+                            _cell_by_header("Location", 8 if has_location_column else -1)
+                            or None
+                        ),
+                        debug_logging=str(
+                            _cell_by_header("Debug", 9 if has_location_column else 8)
+                        ).lower()
+                        in {"true", "1", "yes"},
+                        keep_connection_open=str(
+                            _cell_by_header(
+                                "KeepConnectionOpen", 10 if has_location_column else 9
+                            )
+                        ).lower()
+                        in {"true", "1", "yes"},
+                        discovery_enabled=str(
+                            _cell_by_header("Discovery", 11 if has_location_column else 10)
+                        ).lower()
+                        in {"true", "1", "yes"},
+                        polling_enabled=str(
+                            _cell_by_header("Polling", 12 if has_location_column else 11)
+                        ).lower()
+                        in {"true", "1", "yes"},
+                    )
+                    store.upsert(dev)
+                    count += 1
+                except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                    LOG.exception("CSV import error on row %r: %s", row, err)
         trigger_reload()
         return count
 
@@ -2163,12 +2167,18 @@ def start_web_server(
                 )
             devices_to_upsert.append(imported_device)
 
-        for profile in profiles_to_create:
-            db.save_profile(profile)
-            existing_profiles_by_uid[profile.profile_uid] = profile
+        with db.transaction():
+            if profiles_to_create and hasattr(db, "save_profiles_bulk"):
+                db.save_profiles_bulk(profiles_to_create)
+                for profile in profiles_to_create:
+                    existing_profiles_by_uid[profile.profile_uid] = profile
+            else:
+                for profile in profiles_to_create:
+                    db.save_profile(profile)
+                    existing_profiles_by_uid[profile.profile_uid] = profile
 
-        for device in devices_to_upsert:
-            store.upsert(device)
+            for device in devices_to_upsert:
+                store.upsert(device)
 
         if profiles_to_create or devices_to_upsert:
             trigger_reload()

@@ -130,8 +130,12 @@ It includes runtime code and Compose configuration only, and excludes Home Assis
 - The previous per-sensor `HA visible` option was removed. Existing stored `ha_visible` values are ignored.
 - The app currently has 8 polling slots and uses a simple semaphore to share polling resources.
 - The polling model is tunable for larger workloads compared with fixed Home Assistant add-on defaults.
-- Ignore slow/fast poll settings for now; that concept is not fully wired through and will change.
-- `Keep Conn` improves TCP/Modbus efficiency when the NMC keepalive is configured (around 300 seconds).
+- Slow/fast poll groups are active and drive cycle scheduling.
+- Modbus polling is block-first, with cycle-aware block selection:
+  - fast cycles read only blocks intersecting fast-group descriptors
+  - slow cycles read only blocks intersecting slow-group descriptors
+  - individual register reads remain a fallback path only
+- `Keep Conn` (`keep_connection_open`) is environment-dependent; on low-latency LANs it may provide little benefit, while higher-latency or less stable links may benefit more.
 - The local log buffer is for troubleshooting and does not persist across restarts/reboots.
 - The Logs panel shows current in-memory buffer usage (`Logs: N / 2000`) and supports `Clear logs` for buffer-only reset.
 - HTMX logs clear route is `POST /htmx/logs/actions/clear`; legacy `POST /htmx/devices/actions/logs/clear` remains supported with a one-time DEBUG deprecation signal.
