@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 github.com/aburow
+# SPDX-License-Identifier: GPL-3.0-only
+
+aiohttp==3.13.4
+Jinja2==3.1.6
+paho-mqtt==2.1.0
+pymodbus==3.8.6
+pysnmp==7.1.21
+PyYAML==6.0.2

@@ -12,7 +12,7 @@ This directory contains Home Assistant Community App/add-on packaging for `ups2m
 ## Local structure
 
 - `config.yaml`: add-on metadata/options/schema
-- `build.yaml`: architecture build mapping
 - `Dockerfile`: add-on image build
+- `app/`: bundled ups2mqtt runtime code copied for add-on build context
 - `rootfs/etc/cont-init.d/10-ups2mqtt-options`: prepares runtime options
 - `rootfs/etc/services.d/ups2mqtt/run`: starts runtime with ingress-aware env

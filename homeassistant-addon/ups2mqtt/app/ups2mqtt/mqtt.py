@@ -1,0 +1,534 @@
+# SPDX-FileCopyrightText: 2026 github.com/aburow
+# SPDX-License-Identifier: GPL-3.0-only
+
+from __future__ import annotations
+
+import json
+import logging
+from time import monotonic
+from typing import Any
+
+import paho.mqtt.client as mqtt
+
+from .icon_resolver import (
+    resolve_device_info,
+    resolve_enabled_defaults,
+    resolve_icon,
+)
+from .capability_repository import get_capability_repository
+from .model import AppConfig, DeviceConfig
+from . import pollers
+
+LOG = logging.getLogger("ups2mqtt.mqtt")
+HA_ID_NAMESPACE = "ups2mqtt"
+LEGACY_HA_ID_NAMESPACE = "ups_unified"
+BRIDGE_UNIQUE_ID = f"{HA_ID_NAMESPACE}_bridge"
+LEGACY_BRIDGE_UNIQUE_ID = f"{LEGACY_HA_ID_NAMESPACE}_bridge"
+
+
+def _friendly_name(key: str) -> str:
+    normalized = key.strip()
+    for suffix in ("_snmp", "_modbus"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
+    return normalized.replace("_", " ").strip().title()
+
+
+def _infer_units(key: str) -> tuple[str | None, str | None, str | None]:
+    lower = key.lower()
+    if lower.endswith("_out_of_range"):
+        return None, None, None
+    if "temperature" in lower or lower.endswith("_temp"):
+        return "temperature", "°C", "measurement"
+    if "humidity" in lower:
+        return "humidity", "%", "measurement"
+    if "voltage" in lower:
+        return "voltage", "V", "measurement"
+    if "current" in lower or lower.endswith("_amps"):
+        return "current", "A", "measurement"
+    if "frequency" in lower:
+        return "frequency", "Hz", "measurement"
+    if "energy" in lower:
+        return "energy", "kWh", "total_increasing"
+    if "runtime" in lower or "seconds" in lower:
+        return "duration", "min", "measurement"
+    if "load" in lower or "charge" in lower or lower.endswith("_percent"):
+        return None, "%", "measurement"
+    if "power_factor" in lower:
+        return "power_factor", None, "measurement"
+    if "power" in lower:
+        return "power", "W", "measurement"
+    return None, None, None
+
+
+def _infer_from_declared_unit(
+    declared_unit: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    unit = _string_or_none(declared_unit)
+    if unit is None:
+        return None, None, None
+    if unit == "°C":
+        return "temperature", unit, "measurement"
+    if unit == "%":
+        return None, unit, "measurement"
+    if unit == "V":
+        return "voltage", unit, "measurement"
+    if unit == "A":
+        return "current", unit, "measurement"
+    if unit == "Hz":
+        return "frequency", unit, "measurement"
+    if unit in {"Wh", "kWh"}:
+        return "energy", unit, "total_increasing"
+    if unit == "W":
+        return "power", unit, "measurement"
+    return None, unit, None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _source_fallback_device_info(source: str) -> tuple[str, str]:
+    normalized = source.strip().lower()
+    source_map: dict[str, tuple[str, str]] = {
+        "apc_modbus_smart": ("APC", "Smart UPS"),
+        "apc_modbus_smt": ("APC", "SMT UPS"),
+        "apc_modbus_rack_pdu": ("APC", "Rack PDU"),
+        "cyberpower_modbus_single_phase": ("CyberPower", "Single Phase UPS"),
+        "cyberpower_modbus_three_phase": ("CyberPower", "Three Phase UPS"),
+        "ups_snmp_apc_mib": ("APC", "SNMP UPS"),
+        "ups_snmp_ups_mib": ("UPS", "SNMP UPS"),
+    }
+    if normalized in source_map:
+        return source_map[normalized]
+    if normalized.startswith("apc_modbus"):
+        return ("APC", source.replace("_", " ").strip().title())
+    if normalized.startswith("cyberpower_modbus"):
+        return ("CyberPower", source.replace("_", " ").strip().title())
+    if normalized.startswith("ups_snmp"):
+        return ("UPS", source.replace("_", " ").strip().title())
+    return ("ups2mqtt", source)
+
+
+class MqttPublisher:
+    def __init__(self, config: AppConfig):
+        self._config = config
+        self._client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id="ups2mqtt_mqtt"
+        )
+        self._bridge_availability_topic = (
+            f"{self._config.mqtt_topic_prefix}/bridge/availability"
+        )
+        if config.mqtt_username:
+            self._client.username_pw_set(
+                config.mqtt_username, config.mqtt_password or ""
+            )
+        self._client.will_set(
+            self._bridge_availability_topic, payload="offline", qos=1, retain=True
+        )
+        self._connected = False
+        self._last_connect_attempt = 0.0
+        self._device_metadata: dict[str, dict[str, str]] = {}
+        self._device_state_cache: dict[str, dict[str, Any]] = {}
+        self._sensor_meta_cache: dict[str, dict[str, dict[str, str]]] = {}
+
+    def get_cached_ha_payload_preview(self, device: DeviceConfig) -> dict[str, Any]:
+        """Return a read-only snapshot of cached HA-facing payload data for a device."""
+        identity = device.device_uid or device.id
+        cached_state = self._device_state_cache.get(identity, {})
+        cached_metadata = self._device_metadata.get(identity, {})
+        entities = sorted(
+            key for key in cached_state.keys() if isinstance(key, str) and key != "_meta"
+        )
+        return {
+            "identity": identity,
+            "topics": {
+                "state_topic": f"{self._config.mqtt_topic_prefix}/{device.id}/state",
+                "availability_topic": f"{self._config.mqtt_topic_prefix}/{device.id}/availability",
+                "discovery_prefix": self._config.mqtt_discovery_prefix,
+            },
+            "cached_metadata": dict(cached_metadata),
+            "cached_state": dict(cached_state),
+            "entities": [
+                {
+                    "key": key,
+                    "unique_id": f"{HA_ID_NAMESPACE}_{identity}_{key}",
+                    "discovery_topic": (
+                        f"{self._config.mqtt_discovery_prefix}/sensor/"
+                        f"{HA_ID_NAMESPACE}_{identity}_{key}/config"
+                    ),
+                }
+                for key in entities
+            ],
+        }
+
+    def _sensor_metadata_for_source(
+        self, source: str
+    ) -> dict[str, dict[str, str]]:
+        cached = self._sensor_meta_cache.get(source)
+        if cached is not None:
+            return cached
+        out: dict[str, dict[str, str]] = {}
+        try:
+            rows = get_capability_repository().load_catalog_sensor_rows(source)
+        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.debug("Catalog sensor metadata lookup failed for %s: %s", source, err)
+            rows = []
+        for row in rows:
+            key = _string_or_none(row.get("key"))
+            if key is None:
+                continue
+            out[key] = {
+                "unit": str(row.get("unit", "")),
+            }
+        self._sensor_meta_cache[source] = out
+        return out
+
+    def _extract_device_metadata(self, values: dict[str, Any]) -> dict[str, str]:
+        def pick(*keys: str) -> str | None:
+            for key in keys:
+                if key in values:
+                    text = _string_or_none(values.get(key))
+                    if text:
+                        return text
+            return None
+
+        metadata: dict[str, str] = {}
+        manufacturer = pick("manufacturer", "mfr", "vendor")
+        if manufacturer:
+            metadata["manufacturer"] = manufacturer
+        model = pick("model", "model_name")
+        if model:
+            metadata["model"] = model
+        sw_version = pick("sw_version", "software_version", "firmware", "fw_version")
+        if sw_version:
+            metadata["sw_version"] = sw_version
+        hw_version = pick("hw_version", "hardware_version")
+        if hw_version:
+            metadata["hw_version"] = hw_version
+        serial_number = pick("serial_number", "serial", "sn")
+        if serial_number:
+            metadata["serial_number"] = serial_number
+        configuration_url = pick("configuration_url", "http_url")
+        if configuration_url:
+            metadata["configuration_url"] = configuration_url
+        return metadata
+
+    def _build_device_payload(
+        self, device: DeviceConfig, identity: str
+    ) -> dict[str, Any]:
+        fallback_manufacturer, fallback_model = _source_fallback_device_info(
+            device.source
+        )
+        info: dict[str, Any] = {
+            "identifiers": [f"{HA_ID_NAMESPACE}_{identity}"],
+            "name": device.name or device.id,
+            "manufacturer": fallback_manufacturer,
+            "model": fallback_model,
+            "via_device": BRIDGE_UNIQUE_ID,
+            # HA Device Info field for linking to device web UI.
+            "configuration_url": f"http://{device.host}/",
+        }
+        cached = self._device_metadata.get(identity, {})
+        if cached.get("manufacturer"):
+            info["manufacturer"] = cached["manufacturer"]
+        if cached.get("model"):
+            info["model"] = cached["model"]
+        for key in ("sw_version", "hw_version", "serial_number"):
+            if cached.get(key):
+                info[key] = cached[key]
+        if cached.get("configuration_url"):
+            info["configuration_url"] = cached["configuration_url"]
+        return info
+
+    def connect(self) -> None:
+        if not self._config.mqtt_enabled:
+            LOG.info("MQTT disabled by configuration")
+            return
+        self._attempt_connect(force=True)
+
+    def close(self) -> None:
+        if self._connected:
+            self._client.loop_stop()
+            self._client.disconnect()
+            self._connected = False
+
+    def ensure_connected(self) -> bool:
+        return self._attempt_connect()
+
+    def sync_bridge_discovery_visibility(self) -> bool:
+        """Apply current bridge visibility setting by publishing or clearing discovery."""
+        if not self._attempt_connect():
+            return False
+        return self._publish_bridge_discovery()
+
+    def _attempt_connect(self, *, force: bool = False) -> bool:
+        if not self._config.mqtt_enabled:
+            return False
+        now = monotonic()
+        if not force and now - self._last_connect_attempt < 5:
+            return self._connected
+        self._last_connect_attempt = now
+        try:
+            if self._connected:
+                return True
+            self._client.connect(
+                self._config.mqtt_host, self._config.mqtt_port, keepalive=30
+            )
+            self._client.loop_start()
+            self._connected = True
+            self._client.publish(
+                self._bridge_availability_topic, payload="online", qos=1, retain=True
+            )
+            self._publish_bridge_discovery()
+            LOG.info(
+                "MQTT connected to %s:%s",
+                self._config.mqtt_host,
+                self._config.mqtt_port,
+            )
+        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            self._connected = False
+            LOG.warning(
+                "MQTT connect failed to %s:%s: %s",
+                self._config.mqtt_host,
+                self._config.mqtt_port,
+                err,
+            )
+        return self._connected
+
+    def _publish_bridge_discovery(self) -> bool:
+        """Publish discovery message for the bridge itself."""
+        unique_id = BRIDGE_UNIQUE_ID
+        config_topic = f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+        legacy_config_topic = (
+            f"{self._config.mqtt_discovery_prefix}/sensor/{LEGACY_BRIDGE_UNIQUE_ID}/config"
+        )
+        if not bool(self._config.ha_bridge_enabled):
+            # Clear retained discovery for current and legacy bridge topics.
+            self._client.publish(config_topic, payload="", qos=1, retain=True)
+            self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
+            return True
+        # Always clear legacy bridge discovery when publishing the new namespace.
+        self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
+        payload: dict[str, Any] = {
+            "name": "ups2mqtt Bridge",
+            "unique_id": unique_id,
+            "state_topic": self._bridge_availability_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "icon": "mdi:bridge",
+            "device": {
+                "identifiers": [unique_id],
+                "name": "ups2mqtt Bridge",
+                "manufacturer": "ups2mqtt",
+                "model": "MQTT Bridge",
+            },
+        }
+        payload_json = json.dumps(payload)
+        self._client.publish(config_topic, payload=payload_json, qos=1, retain=True)
+        return True
+
+    def publish_discovery(
+        self,
+        device: DeviceConfig,
+        keys: list[str],
+        *,
+        authoritative_keys: bool = True,
+    ) -> bool:
+        if not self._attempt_connect():
+            return False
+        if not device.discovery_enabled:
+            return False
+        state_topic = f"{self._config.mqtt_topic_prefix}/{device.id}/state"
+        availability_topic = (
+            f"{self._config.mqtt_topic_prefix}/{device.id}/availability"
+        )
+        identity = device.device_uid or device.id
+        device_info = self._build_device_payload(device, identity)
+
+        enabled_defaults = resolve_enabled_defaults(
+            device.source,
+            keys,
+            self._config.apps_dir,
+            authoritative=authoritative_keys,
+        )
+        sensor_meta = self._sensor_metadata_for_source(device.source)
+
+        for key in keys:
+            unique_id = f"{HA_ID_NAMESPACE}_{identity}_{key}"
+            config_topic = (
+                f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+            )
+            legacy_config_topic = (
+                f"{self._config.mqtt_discovery_prefix}/sensor/"
+                f"{LEGACY_HA_ID_NAMESPACE}_{identity}_{key}/config"
+            )
+            # Clear legacy retained discovery to avoid namespace duplication.
+            self._client.publish(legacy_config_topic, payload="", qos=1, retain=True)
+            declared = sensor_meta.get(key, {})
+            declared_unit = _string_or_none(declared.get("unit"))
+            if declared_unit is not None or key in sensor_meta:
+                device_class, unit, state_class = _infer_from_declared_unit(
+                    declared_unit
+                )
+            else:
+                device_class, unit, state_class = _infer_units(key)
+            payload: dict[str, Any] = {
+                "name": _friendly_name(key),
+                "unique_id": unique_id,
+                "state_topic": state_topic,
+                "value_template": "{{ value_json." + key + " }}",
+                "availability": [
+                    {
+                        "topic": self._bridge_availability_topic,
+                        "payload_available": "online",
+                        "payload_not_available": "offline",
+                    },
+                    {
+                        "topic": availability_topic,
+                        "payload_available": "online",
+                        "payload_not_available": "offline",
+                    },
+                ],
+                "device": device_info,
+            }
+            if unit:
+                payload["unit_of_measurement"] = unit
+            if device_class:
+                payload["device_class"] = device_class
+            if state_class:
+                payload["state_class"] = state_class
+            # Resolve icon from the device source's external app
+            icon = resolve_icon(device.source, key, self._config.apps_dir)
+            if icon:
+                payload["icon"] = icon
+            # Resolve default-enabled state from the device source's external app
+            enabled = bool(enabled_defaults.get(key, True))
+            LOG.debug(
+                "Metric %s for %s: enabled_by_default=%s", key, device.source, enabled
+            )
+            if not enabled:
+                payload["enabled_by_default"] = False
+            payload["json_attributes_topic"] = state_topic
+            payload["json_attributes_template"] = (
+                '{{ {"host": value_json._meta.host, "port": value_json._meta.port, '
+                '"unit_id": value_json._meta.unit_id, "source": value_json._meta.source} | tojson }}'
+            )
+            payload_json = json.dumps(payload)
+            self._client.publish(config_topic, payload=payload_json, qos=1, retain=True)
+
+        LOG.debug(
+            "Publishing availability for %s: topic=%s, payload=online",
+            device.id,
+            availability_topic,
+        )
+        self._client.publish(availability_topic, payload="online", qos=1, retain=True)
+        return True
+
+    def clear_discovery(self, device: DeviceConfig, keys: list[str]) -> bool:
+        if not self._attempt_connect():
+            return False
+        identity = device.device_uid or device.id
+        for key in keys:
+            for namespace in (HA_ID_NAMESPACE, LEGACY_HA_ID_NAMESPACE):
+                unique_id = f"{namespace}_{identity}_{key}"
+                config_topic = (
+                    f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+                )
+                self._client.publish(config_topic, payload="", qos=1, retain=True)
+        return True
+
+    def clear_legacy_discovery(self, device_id: str, keys: list[str]) -> bool:
+        if not self._attempt_connect():
+            return False
+        for key in keys:
+            unique_id = f"ups_unified_{device_id}_{key}"
+            config_topic = (
+                f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+            )
+            self._client.publish(config_topic, payload="", qos=1, retain=True)
+        return True
+
+    def publish_state(
+        self,
+        device: DeviceConfig,
+        values: dict[str, Any],
+        *,
+        discovery_keys: list[str] | None = None,
+    ) -> bool:
+        if not self._attempt_connect():
+            return False
+
+        identity = device.device_uid or device.id
+
+        # Extract metadata from current poll values
+        extracted = self._extract_device_metadata(values)
+        from_contract = resolve_device_info(
+            device.source, values, self._config.apps_dir
+        )
+
+        # Get runtime metadata from independent cache (populated separately from sensor polls)
+        # This allows device identity to be available even when metadata sensors are not enabled
+        from_runtime_cache = pollers.get_runtime_metadata(device)
+
+        # Merge all metadata sources (runtime cache takes precedence over poll values)
+        merged = dict(extracted)
+        merged.update(from_contract)
+        merged.update(from_runtime_cache)
+
+        previous = self._device_metadata.get(identity, {})
+        metadata_changed = merged != previous
+        if metadata_changed:
+            self._device_metadata[identity] = merged
+
+        state_topic = f"{self._config.mqtt_topic_prefix}/{device.id}/state"
+        previous_state = self._device_state_cache.get(identity, {})
+        payload = dict(previous_state)
+        payload.update(values)
+        self._device_state_cache[identity] = dict(payload)
+        payload["_meta"] = {
+            "host": device.host,
+            "port": device.port,
+            "unit_id": device.unit_id,
+            "source": device.source,
+        }
+        LOG.debug(
+            "Publishing state for %s: topic=%s, identity=%s, keys=%s",
+            device.id,
+            state_topic,
+            identity,
+            list(payload.keys())[:10],
+        )
+        self._client.publish(
+            state_topic,
+            payload=json.dumps(payload, separators=(",", ":")),
+            qos=1,
+            retain=True,
+        )
+
+        # Republish discovery when identifying metadata changes so HA Device Info updates.
+        if metadata_changed and device.discovery_enabled:
+            try:
+                # Evaluate enabled-by-default against the full profile key set, not the current payload subset, to avoid false "all metrics disabled" warnings during partial discovery republish.
+                republish_keys = sorted(set(discovery_keys or values.keys()))
+                self.publish_discovery(
+                    device,
+                    republish_keys,
+                    authoritative_keys=bool(discovery_keys),
+                )
+            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                LOG.debug("Discovery republish on metadata change failed: %s", err)
+        return True
+
+    def publish_unavailable(self, device: DeviceConfig) -> bool:
+        if not self._attempt_connect():
+            return False
+        availability_topic = (
+            f"{self._config.mqtt_topic_prefix}/{device.id}/availability"
+        )
+        self._client.publish(availability_topic, payload="offline", qos=1, retain=True)
+        return True

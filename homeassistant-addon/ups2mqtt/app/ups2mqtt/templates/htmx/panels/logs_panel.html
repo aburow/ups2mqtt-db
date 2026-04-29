@@ -1,0 +1,95 @@
+<div id="logs-panel" class="d-flex flex-column gap-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div class="d-flex flex-column">
+      <h2 class="h5 m-0">Logs</h2>
+      <small class="text-muted">Logs: {{ log_count }} / {{ log_capacity }}</small>
+    </div>
+    <div class="d-flex gap-2">
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        hx-get="/htmx/devices/partials/panel/logs"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >Refresh</button>
+      <button
+        class="btn btn-sm btn-outline-danger"
+        hx-post="/htmx/logs/actions/clear"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+      >Clear logs</button>
+    </div>
+  </div>
+
+  <form
+    class="card card-body p-2"
+    hx-get="/htmx/devices/partials/panel/logs"
+    hx-target="#admin-panel"
+    hx-swap="innerHTML"
+    hx-indicator="#global-loading"
+  >
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Level</label>
+        <select class="form-select form-select-sm" name="log_level">
+          <option value="" {% if not filters.log_level %}selected{% endif %}>Any</option>
+          <option value="DEBUG" {% if filters.log_level == 'DEBUG' %}selected{% endif %}>DEBUG</option>
+          <option value="INFO" {% if filters.log_level == 'INFO' %}selected{% endif %}>INFO</option>
+          <option value="WARNING" {% if filters.log_level == 'WARNING' %}selected{% endif %}>WARNING</option>
+          <option value="ERROR" {% if filters.log_level == 'ERROR' %}selected{% endif %}>ERROR</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Device</label>
+        <input class="form-control form-control-sm" name="log_device" value="{{ filters.log_device }}"/>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small mb-1">Logger</label>
+        <input class="form-control form-control-sm" name="log_logger" value="{{ filters.log_logger }}"/>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small mb-1">Contains</label>
+        <input class="form-control form-control-sm" name="log_contains" value="{{ filters.log_contains }}"/>
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label small mb-1">Limit</label>
+        <input class="form-control form-control-sm" name="log_limit" value="{{ filters.log_limit }}"/>
+      </div>
+      <div class="col-6 col-md-1">
+        <button type="submit" class="btn btn-sm btn-primary w-100">Apply</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>{{ timezone_label }} Time</th>
+              <th>Level</th>
+              <th>Logger</th>
+              <th>Device</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td><code>{{ row.ts }}</code></td>
+              <td><span class="badge {{ row.level_class }}">{{ row.level }}</span></td>
+              <td>{{ row.logger }}</td>
+              <td>{{ row.device }}</td>
+              <td style="word-break: break-word; white-space: pre-wrap;">{{ row.message }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted p-3">No log entries for current filter.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

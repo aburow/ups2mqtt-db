@@ -1,0 +1,100 @@
+<div id="profiles-panel" class="d-flex flex-column gap-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2 class="h5 m-0">Profiles</h2>
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      hx-get="/htmx/devices/partials/panel/profiles"
+      hx-target="#admin-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+    >Refresh</button>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Driver</th>
+              <th>Sensors</th>
+              <th>Usage</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for profile in profiles %}
+            <tr>
+              <td>
+                {{ profile.name }}
+                {% if profile.is_protected %}
+                <span class="badge text-bg-secondary ms-1">Protected</span>
+                {% endif %}
+              </td>
+              <td><code>{{ profile.driver_key }}</code></td>
+              <td>{{ profile.sensor_count }}</td>
+              <td>
+                <span class="small text-muted">Used by {{ profile.usage_count }} devices</span>
+              </td>
+              <td class="d-flex gap-2">
+                <button
+                  class="btn btn-sm btn-outline-primary"
+                  hx-get="/htmx/profiles/actions/copy"
+                  hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
+                  hx-target="#profile-form-container"
+                  hx-swap="innerHTML"
+                  hx-indicator="#global-loading"
+                >Copy</button>
+                {% if profile.is_protected %}
+                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Edit</button>
+                <button class="btn btn-sm btn-outline-danger" type="button" disabled>Delete</button>
+                {% else %}
+                <button
+                  class="btn btn-sm btn-outline-secondary"
+                  hx-get="/htmx/profiles/actions/edit"
+                  hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
+                  hx-target="#profile-form-container"
+                  hx-swap="innerHTML"
+                  hx-indicator="#global-loading"
+                >Edit</button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-warning"
+                  {% if profile.usage_count == 0 %}disabled{% endif %}
+                  @click='openConfirm({
+                    title: "Reinitialize Affected Devices",
+                    message: {{ (
+                      "This will reinitialize all affected devices for profile '" ~ profile.name ~ "'. "
+                      ~ "Affected devices: " ~ (profile.usage_count | string) ~ ". "
+                      ~ ("Examples: " ~ (profile.affected_device_ids[:5] | join(", ")) ~ ". " if profile.affected_device_ids else "")
+                      ~ "Impact: MQTT discovery/state availability may briefly change, and Home Assistant discovery/default-enabled state may be recalculated for those devices."
+                    ) | tojson }},
+                    url: "/htmx/profiles/actions/reinitialize",
+                    target: "#admin-panel",
+                    values: { profile_uid: "{{ profile.profile_uid }}" }
+                  })'
+                >Reinitialize affected devices</button>
+                <button
+                  class="btn btn-sm btn-outline-danger"
+                  hx-post="/htmx/profiles/actions/delete"
+                  hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
+                  hx-target="#admin-panel"
+                  hx-swap="innerHTML"
+                  hx-confirm="Delete profile {{ profile.name }}?"
+                  hx-indicator="#global-loading"
+                >Delete</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted p-3">No profiles configured.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="profile-form-container">{{ form_html | safe }}</div>
+</div>

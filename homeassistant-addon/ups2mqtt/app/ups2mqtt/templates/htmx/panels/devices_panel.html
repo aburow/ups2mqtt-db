@@ -1,0 +1,57 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 m-0">Devices</h2>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=add')">Add Device</button>
+  </div>
+</div>
+
+<form
+  id="devices-filter-form"
+  class="card mb-3"
+  hx-get="/htmx/devices/partials/table"
+  hx-target="#devices-table-container"
+  hx-swap="innerHTML"
+  hx-indicator="#global-loading"
+>
+  <div class="card-body py-2">
+    <div class="row g-2">
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">ID</label>
+        <input class="form-control form-control-sm" name="device_filter_id" value="{{ filters.device_filter_id }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Name</label>
+        <input class="form-control form-control-sm" name="device_filter_name" value="{{ filters.device_filter_name }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Location</label>
+        <input class="form-control form-control-sm" name="device_filter_location" value="{{ filters.device_filter_location }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Host</label>
+        <input class="form-control form-control-sm" name="device_filter_host" value="{{ filters.device_filter_host }}" />
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Profile</label>
+        <input class="form-control form-control-sm" name="device_filter_profile" value="{{ filters.device_filter_profile }}" />
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-2">
+      <button class="btn btn-sm btn-primary" type="submit">Apply Filters</button>
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        type="button"
+        @click="$el.form.reset(); htmx.ajax('GET','/htmx/devices/partials/table',{target:'#devices-table-container',swap:'innerHTML',indicator:'#global-loading'})"
+      >Clear</button>
+    </div>
+  </div>
+</form>
+
+<div
+  id="devices-table-container"
+  hx-get="/htmx/devices/partials/table"
+  hx-trigger="load, devices-refresh from:body"
+  hx-include="#devices-filter-form"
+  hx-swap="innerHTML"
+  hx-indicator="#global-loading"
+>{{ devices_table_html | safe }}</div>

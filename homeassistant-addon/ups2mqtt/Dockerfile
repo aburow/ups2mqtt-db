@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
+ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -13,8 +13,8 @@ RUN apk add --no-cache \
 
 RUN pip3 install --no-cache-dir uv
 
-COPY ups2mqtt/rootfs/usr/src/app /usr/src/app
-COPY homeassistant-addon/ups2mqtt/rootfs /
+COPY app /usr/src/app
+COPY rootfs /
 
 RUN chmod a+x /etc/services.d/ups2mqtt/run /etc/cont-init.d/10-ups2mqtt-options
 
