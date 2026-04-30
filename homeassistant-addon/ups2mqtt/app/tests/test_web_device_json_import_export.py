@@ -776,3 +776,34 @@ def test_csv_import_supports_location_column(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_csv_import_multipart_cp1252_payload_does_not_crash(tmp_path: Path) -> None:
+    server, _db, _store = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        boundary = "----ups2mqtt-test-boundary"
+        csv_bytes = (
+            b"\x95 ID,Source,Host,Port,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\r\n"
+            b"legacy-3,apc_modbus_smt,127.0.0.3,502,1,public,,Legacy Three,Lab,false,false,true,true\r\n"
+        )
+        multipart_body = (
+            (
+                f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="csv_file"; filename="devices.csv"\r\n'
+                "Content-Type: text/csv\r\n\r\n"
+            ).encode("ascii")
+            + csv_bytes
+            + f"\r\n--{boundary}--\r\n".encode("ascii")
+        )
+        request = Request(
+            f"{base_url}/htmx/maintenance/import/csv",
+            data=multipart_body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urlopen(request) as response:  # nosec B310
+            assert int(response.status) == HTTPStatus.OK
+    finally:
+        server.shutdown()
+        server.server_close()

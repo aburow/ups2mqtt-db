@@ -117,6 +117,15 @@ def _bool_from_form(data: dict[str, list[str]], key: str) -> bool:
     return value in {"1", "true", "on", "yes"}
 
 
+def _decode_http_text(raw: bytes) -> str:
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def _is_bitfield_sensor_key(sensor_key: str) -> bool:
     """Return True when a sensor key is a raw bitfield register marker."""
     return sensor_key.strip().lower().endswith("_bf")
@@ -4107,15 +4116,18 @@ def start_web_server(
                     b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + raw_body
                 )
                 data = {}
-                for part in message.get_payload():
+                payload = message.get_payload()
+                parts = payload if isinstance(payload, list) else [message]
+                for part in parts:
                     if part.get_content_disposition() == "form-data":
                         name = part.get_param("name", header="content-disposition")
                         if not name:
                             continue
-                        value = part.get_payload(decode=True).decode("utf-8")
+                        part_bytes = part.get_payload(decode=True) or b""
+                        value = _decode_http_text(part_bytes)
                         data[name] = [value]
             else:
-                raw = raw_body.decode("utf-8")
+                raw = _decode_http_text(raw_body)
                 parsed_data = parse_qs(raw)
                 data = parsed_data
 

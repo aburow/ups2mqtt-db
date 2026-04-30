@@ -706,7 +706,7 @@ def _resolve_runtime_profile(
     capability_profiles: dict[str, Any],
     profile_bindings: dict[str, ProfileConfig],
     apps_dir: str | None = None,
-) -> tuple[str, dict[str, Any], list[str], dict[str, bool], str]:
+) -> tuple[str, dict[str, Any], list[str], str]:
     runtime_source = device.source
     binding = profile_bindings.get(device.profile_uid) if device.profile_uid else None
     profile_mode = str(device.profile_mode).lower()
@@ -734,7 +734,7 @@ def _resolve_runtime_profile(
             device.id,
             runtime_source,
         )
-        return runtime_source, {}, [], {}, f"{runtime_source}|missing"
+        return runtime_source, {}, [], f"{runtime_source}|missing"
 
     effective_profile = deepcopy(base_profile)
     if binding is not None:
