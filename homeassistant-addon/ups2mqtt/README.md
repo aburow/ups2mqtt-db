@@ -8,6 +8,7 @@ This directory contains Home Assistant Community App/add-on packaging for `ups2m
 - Optional direct port mapping (`8099/tcp`) for troubleshooting
 - Uses add-on options as configuration source (`/data/options.json`)
 - Persists runtime state in `/data`
+- HTMX-only web UI surface (legacy non-HTMX page/action routes removed)
 
 ## Local structure
 

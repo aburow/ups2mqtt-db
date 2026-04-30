@@ -607,6 +607,28 @@ def test_sidebar_versions_block_shows_app_and_backup_versions(tmp_path: Path) ->
         server.server_close()
 
 
+def test_legacy_non_htmx_get_route_returns_not_found(tmp_path: Path) -> None:
+    server, _db, _store = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, _headers = _fetch(base_url, "/legacy-devices")
+        assert status == HTTPStatus.NOT_FOUND
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_legacy_non_htmx_post_action_returns_not_found(tmp_path: Path) -> None:
+    server, _db, _store = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, _headers = _post(base_url, "/", {"action": "toggle_debug", "id": "dev-1"})
+        assert status == HTTPStatus.NOT_FOUND
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_devices_table_includes_location_column_and_dash_for_empty_location(
     tmp_path: Path,
 ) -> None:
