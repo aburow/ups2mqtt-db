@@ -649,7 +649,7 @@ def _poll_modbus_sync(
     return output
 
 
-def _snmp_get_sync(host: str, community: str, oid: str) -> str | None:
+def _snmp_get_sync(host: str, community: str, oid: str, *, port: int = 161) -> str | None:
     try:
         from pysnmp.hlapi import (  # type: ignore[attr-defined]
             CommunityData,
@@ -664,7 +664,7 @@ def _snmp_get_sync(host: str, community: str, oid: str) -> str | None:
         iterator = getCmd(
             SnmpEngine(),
             CommunityData(community, mpModel=1),
-            UdpTransportTarget((host, 161), timeout=2, retries=0),
+            UdpTransportTarget((host, port), timeout=2, retries=0),
             ContextData(),
             ObjectType(ObjectIdentity(oid)),
         )
@@ -676,10 +676,12 @@ def _snmp_get_sync(host: str, community: str, oid: str) -> str | None:
             return text if text else None
         return None
     except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-        return _snmp_get_sync_v1arch(host, community, oid)
+        return _snmp_get_sync_v1arch(host, community, oid, port=port)
 
 
-def _snmp_get_sync_v1arch(host: str, community: str, oid: str) -> str | None:
+def _snmp_get_sync_v1arch(
+    host: str, community: str, oid: str, *, port: int = 161
+) -> str | None:
     from pysnmp.hlapi.v1arch.asyncio import (  # type: ignore[attr-defined]
         CommunityData,
         ObjectIdentity,
@@ -690,7 +692,7 @@ def _snmp_get_sync_v1arch(host: str, community: str, oid: str) -> str | None:
     )
 
     async def _run() -> str | None:
-        target = await UdpTransportTarget.create((host, 161), timeout=2, retries=0)
+        target = await UdpTransportTarget.create((host, port), timeout=2, retries=0)
         dispatcher = SnmpDispatcher()
         error_indication, error_status, _error_index, var_binds = await get_cmd(
             dispatcher,
@@ -717,9 +719,11 @@ def _snmp_get_sync_v1arch(host: str, community: str, oid: str) -> str | None:
     ).result()
 
 
-def _snmp_get_first(host: str, community: str, oids: list[str]) -> str | None:
+def _snmp_get_first(
+    host: str, community: str, oids: list[str], *, port: int = 161
+) -> str | None:
     for oid in oids:
-        raw = _snmp_get_sync(host, community, oid)
+        raw = _snmp_get_sync(host, community, oid, port=port)
         if raw is not None:
             return raw
     return None
@@ -860,22 +864,33 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
     metadata = {
         "manufacturer": "APC",
     }
-    model = _snmp_get_first(device.host, device.snmp_community, model_oids)
+    model = _snmp_get_first(
+        device.host, device.snmp_community, model_oids, port=device.port
+    )
     if model:
         metadata["model"] = model
-    location = _snmp_get_first(device.host, device.snmp_community, location_oids)
+    location = _snmp_get_first(
+        device.host, device.snmp_community, location_oids, port=device.port
+    )
     if location:
         metadata["location"] = location
-    serial = _snmp_get_first(device.host, device.snmp_community, serial_oids)
+    serial = _snmp_get_first(
+        device.host, device.snmp_community, serial_oids, port=device.port
+    )
     if serial:
         metadata["serial_number"] = serial
-    firmware = _snmp_get_first(device.host, device.snmp_community, firmware_oids)
+    firmware = _snmp_get_first(
+        device.host, device.snmp_community, firmware_oids, port=device.port
+    )
     if firmware:
         metadata["firmware_version"] = firmware
         metadata["firmware"] = firmware
         metadata["sw_version"] = firmware  # HA device block standard field
     firmware_date = _snmp_get_first(
-        device.host, device.snmp_community, firmware_date_oids
+        device.host,
+        device.snmp_community,
+        firmware_date_oids,
+        port=device.port,
     )
     if firmware_date:
         metadata["firmware_date"] = firmware_date
@@ -1199,7 +1214,9 @@ def _maybe_refresh_cyberpower_snmp_metadata(
 
     # Poll each OID dynamically
     for canonical_key, oid in oid_map.items():
-        value = _snmp_get_sync(device.host, device.snmp_community, oid)
+        value = _snmp_get_sync(
+            device.host, device.snmp_community, oid, port=device.port
+        )
         if value:
             metadata[canonical_key] = value
             # Legacy compatibility aliases
@@ -1240,22 +1257,31 @@ def _maybe_refresh_ups_mib_snmp_metadata(device: DeviceConfig) -> _UpsMibSnmpCac
     metadata: dict[str, str] = {}
 
     manufacturer = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_MANUFACTURER
+        device.host,
+        device.snmp_community,
+        UPS_MIB_OID_MANUFACTURER,
+        port=device.port,
     )
     if manufacturer:
         metadata["manufacturer"] = manufacturer
 
-    model = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_MODEL)
+    model = _snmp_get_sync(
+        device.host, device.snmp_community, UPS_MIB_OID_MODEL, port=device.port
+    )
     if model:
         metadata["model"] = model
 
-    firmware = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE)
+    firmware = _snmp_get_sync(
+        device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE, port=device.port
+    )
     if firmware:
         metadata["firmware"] = firmware
         metadata["firmware_version"] = firmware
         metadata["sw_version"] = firmware
 
-    name = _snmp_get_sync(device.host, device.snmp_community, UPS_MIB_OID_NAME)
+    name = _snmp_get_sync(
+        device.host, device.snmp_community, UPS_MIB_OID_NAME, port=device.port
+    )
     if name:
         metadata["name"] = name
 
@@ -1304,7 +1330,7 @@ def _first_detected_probe_oid(
     parser,
 ) -> str | None:
     for oid in oids:
-        raw = _snmp_get_sync(device.host, device.snmp_community, oid)
+        raw = _snmp_get_sync(device.host, device.snmp_community, oid, port=device.port)
         if parser(raw) is not None:
             return oid
     return None
@@ -1371,7 +1397,7 @@ def _merge_apc_external_probe_data(
         )
 
     for key, oid, parser in mapping:
-        raw = _snmp_get_sync(device.host, device.snmp_community, oid)
+        raw = _snmp_get_sync(device.host, device.snmp_community, oid, port=device.port)
         parsed = parser(raw)
         if parsed is None:
             continue
@@ -1467,7 +1493,9 @@ def _poll_snmp_sync(
         elif "oid" in spec:
             candidates = [str(spec["oid"])]
         for oid in candidates:
-            raw = _snmp_get_sync(device.host, device.snmp_community, oid)
+            raw = _snmp_get_sync(
+                device.host, device.snmp_community, oid, port=device.port
+            )
             if raw is None:
                 continue
             out[str(key)] = _coerce_snmp_value(raw, spec)
