@@ -455,6 +455,24 @@ async def _reconcile_device_tasks(
     ha_url: str | None = None,
     ha_token: str | None = None,
 ) -> None:
+    def _clear_stale_discovery_keys(
+        runtime_device: DeviceConfig,
+        device_id: str,
+        keys_to_clear: list[str],
+        reason_label: str,
+    ) -> None:
+        if not keys_to_clear:
+            return
+        LOG.debug(
+            "Discovery for %s: removing %d %s keys: %s",
+            device_id,
+            len(keys_to_clear),
+            reason_label,
+            _format_key_list(keys_to_clear, max_display=10),
+        )
+        mqtt.clear_discovery(runtime_device, keys_to_clear)
+        mqtt.clear_legacy_discovery(device_id, keys_to_clear)
+
     desired = {device.device_uid: device for device in store.list_devices()}
 
     for uid, (existing_device, existing_runtime_signature, task) in list(
@@ -538,25 +556,19 @@ async def _reconcile_device_tasks(
         current = set(keys)
         previous = discovery_registry.get(uid, set())
         removed = sorted(previous - current)
-        if removed:
-            LOG.debug(
-                "Discovery for %s: removing %d stale keys: %s",
-                device.id,
-                len(removed),
-                _format_key_list(removed, max_display=10),
-            )
-            mqtt.clear_discovery(runtime_device, removed)
-            mqtt.clear_legacy_discovery(device.id, removed)
+        _clear_stale_discovery_keys(
+            runtime_device=runtime_device,
+            device_id=device.id,
+            keys_to_clear=removed,
+            reason_label="stale",
+        )
         stale_historical = sorted(set(historical_keys) - current)
-        if stale_historical:
-            LOG.debug(
-                "Discovery for %s: removing %d stale historical keys: %s",
-                device.id,
-                len(stale_historical),
-                _format_key_list(stale_historical, max_display=10),
-            )
-            mqtt.clear_discovery(runtime_device, stale_historical)
-            mqtt.clear_legacy_discovery(device.id, stale_historical)
+        _clear_stale_discovery_keys(
+            runtime_device=runtime_device,
+            device_id=device.id,
+            keys_to_clear=stale_historical,
+            reason_label="stale historical",
+        )
 
         if not device.discovery_enabled:
             if previous:

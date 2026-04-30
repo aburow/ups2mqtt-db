@@ -5,7 +5,7 @@ ENV_FILE ?= .env
 COMPOSE_FILE ?= standalone/docker-compose.yml
 SERVICE ?= ups2mqtt
 
-.PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock
+.PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -95,3 +95,12 @@ dev-unlock:
 		fi; \
 	fi; \
 	docker compose --env-file "$(ENV_FILE)" -f "$(COMPOSE_FILE)" run --rm --no-deps "$(SERVICE)" python3 -c "import sqlite3; db='$(DB_PATH_CONTAINER)'; conn=sqlite3.connect(db); cur=conn.cursor(); cur.execute(\"UPDATE profiles SET is_protected = 0 WHERE lower(name) LIKE '%[default]%' AND is_protected != 0\"); changed=cur.rowcount; conn.commit(); conn.close(); print(f'Unlocked {changed} profile(s) matching [default] in {db}')"
+
+runtime-sync:
+	./scripts/sync_runtime_tree.sh
+
+runtime-check:
+	./scripts/check_runtime_tree_sync.sh
+
+release-check: runtime-check
+	@echo "Release checks passed"

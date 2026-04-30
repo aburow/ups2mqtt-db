@@ -58,10 +58,8 @@ CSV_IMPORT_HEADERS = [
     "Discovery",
     "Polling",
 ]
-# Legacy cache reference for backward compatibility (now managed by catalog module)
+# Cache reference managed by catalog module.
 APC_CATALOG_CACHE: dict[str, dict[str, list[dict[str, str]]]] = {}
-_LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED = False
-_LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOCK = threading.Lock()
 
 
 def _escape(value: str) -> str:
@@ -3419,7 +3417,7 @@ def start_web_server(
                         "HX-Trigger": _hx_trigger_payload(
                             refresh_devices=True,
                             toast_level="success",
-                            toast_message=f"Imported {imported} device(s) from CSV (legacy)",
+                            toast_message=f"Imported {imported} device(s) from CSV",
                         )
                     },
                 )
@@ -3932,19 +3930,7 @@ def start_web_server(
                 )
                 return True
 
-            if parsed_path.path in {
-                "/htmx/logs/actions/clear",
-                "/htmx/devices/actions/logs/clear",
-            }:
-                if parsed_path.path == "/htmx/devices/actions/logs/clear":
-                    global _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED
-                    if not _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED:
-                        with _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOCK:
-                            if not _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED:
-                                LOG.debug(
-                                    "Deprecated route used: /htmx/devices/actions/logs/clear -> use /htmx/logs/actions/clear"
-                                )
-                                _LEGACY_LOGS_CLEAR_ROUTE_DEPRECATION_LOGGED = True
+            if parsed_path.path == "/htmx/logs/actions/clear":
                 log_buffer.clear()
                 LOG.debug("Cleared in-memory log buffer")
                 self._send_html(
