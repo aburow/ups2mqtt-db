@@ -16,6 +16,7 @@ class DeviceConfig:
     source: str
     host: str
     port: int = 502
+    snmp_port: int = 161
     unit_id: int = 1
     snmp_community: str = "public"
     poll_interval: int | None = None
@@ -38,6 +39,7 @@ class DeviceConfig:
     ) -> tuple[
         str,
         str,
+        int,
         int,
         int,
         str,
@@ -71,6 +73,7 @@ class DeviceConfig:
             self.source,
             self.host,
             self.port,
+            self.snmp_port,
             self.unit_id,
             self.snmp_community,
             self.poll_interval,

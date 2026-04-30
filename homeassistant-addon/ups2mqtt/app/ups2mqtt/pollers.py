@@ -772,7 +772,7 @@ def _parse_frequency_hz(raw: str | None) -> float | None:
 
 
 def _apc_cache_key(device: DeviceConfig) -> str:
-    return f"{device.source}|{device.host}|{device.snmp_community}"
+    return f"{device.source}|{device.host}|{device.snmp_port}|{device.snmp_community}"
 
 
 def _default_apc_cache() -> _ApcSnmpCache:
@@ -807,7 +807,10 @@ def get_runtime_metadata(device: DeviceConfig) -> dict[str, str]:
                 if "firmware_version" in metadata and "sw_version" not in metadata:
                     metadata["sw_version"] = metadata["firmware_version"]
     elif device.source.startswith("cyberpower_modbus"):
-        key = f"{device.source}|{device.host}|{device.snmp_community}"
+        key = (
+            f"{device.source}|{device.host}|{device.snmp_port}|"
+            f"{device.snmp_community}"
+        )
         with _CYBERPOWER_SNMP_CACHE_LOCK:
             cache = _CYBERPOWER_SNMP_CACHE.get(key)
             if cache:
@@ -865,22 +868,22 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
         "manufacturer": "APC",
     }
     model = _snmp_get_first(
-        device.host, device.snmp_community, model_oids, port=device.port
+        device.host, device.snmp_community, model_oids, port=device.snmp_port
     )
     if model:
         metadata["model"] = model
     location = _snmp_get_first(
-        device.host, device.snmp_community, location_oids, port=device.port
+        device.host, device.snmp_community, location_oids, port=device.snmp_port
     )
     if location:
         metadata["location"] = location
     serial = _snmp_get_first(
-        device.host, device.snmp_community, serial_oids, port=device.port
+        device.host, device.snmp_community, serial_oids, port=device.snmp_port
     )
     if serial:
         metadata["serial_number"] = serial
     firmware = _snmp_get_first(
-        device.host, device.snmp_community, firmware_oids, port=device.port
+        device.host, device.snmp_community, firmware_oids, port=device.snmp_port
     )
     if firmware:
         metadata["firmware_version"] = firmware
@@ -890,7 +893,7 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
         device.host,
         device.snmp_community,
         firmware_date_oids,
-        port=device.port,
+        port=device.snmp_port,
     )
     if firmware_date:
         metadata["firmware_date"] = firmware_date
@@ -957,7 +960,7 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
 
 
 def _cyberpower_cache_key(device: DeviceConfig) -> str:
-    return f"{device.source}|{device.host}|{device.snmp_community}"
+    return f"{device.source}|{device.host}|{device.snmp_port}|{device.snmp_community}"
 
 
 def _default_cyberpower_cache() -> _CyberPowerSnmpCache:
@@ -965,7 +968,7 @@ def _default_cyberpower_cache() -> _CyberPowerSnmpCache:
 
 
 def _ups_mib_cache_key(device: DeviceConfig) -> str:
-    return f"{device.source}|{device.host}|{device.snmp_community}"
+    return f"{device.source}|{device.host}|{device.snmp_port}|{device.snmp_community}"
 
 
 def _default_ups_mib_cache() -> _UpsMibSnmpCache:
@@ -1215,7 +1218,7 @@ def _maybe_refresh_cyberpower_snmp_metadata(
     # Poll each OID dynamically
     for canonical_key, oid in oid_map.items():
         value = _snmp_get_sync(
-            device.host, device.snmp_community, oid, port=device.port
+            device.host, device.snmp_community, oid, port=device.snmp_port
         )
         if value:
             metadata[canonical_key] = value
@@ -1260,19 +1263,19 @@ def _maybe_refresh_ups_mib_snmp_metadata(device: DeviceConfig) -> _UpsMibSnmpCac
         device.host,
         device.snmp_community,
         UPS_MIB_OID_MANUFACTURER,
-        port=device.port,
+        port=device.snmp_port,
     )
     if manufacturer:
         metadata["manufacturer"] = manufacturer
 
     model = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_MODEL, port=device.port
+        device.host, device.snmp_community, UPS_MIB_OID_MODEL, port=device.snmp_port
     )
     if model:
         metadata["model"] = model
 
     firmware = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE, port=device.port
+        device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE, port=device.snmp_port
     )
     if firmware:
         metadata["firmware"] = firmware
@@ -1280,7 +1283,7 @@ def _maybe_refresh_ups_mib_snmp_metadata(device: DeviceConfig) -> _UpsMibSnmpCac
         metadata["sw_version"] = firmware
 
     name = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_NAME, port=device.port
+        device.host, device.snmp_community, UPS_MIB_OID_NAME, port=device.snmp_port
     )
     if name:
         metadata["name"] = name
@@ -1330,7 +1333,9 @@ def _first_detected_probe_oid(
     parser,
 ) -> str | None:
     for oid in oids:
-        raw = _snmp_get_sync(device.host, device.snmp_community, oid, port=device.port)
+        raw = _snmp_get_sync(
+            device.host, device.snmp_community, oid, port=device.snmp_port
+        )
         if parser(raw) is not None:
             return oid
     return None
@@ -1397,7 +1402,9 @@ def _merge_apc_external_probe_data(
         )
 
     for key, oid, parser in mapping:
-        raw = _snmp_get_sync(device.host, device.snmp_community, oid, port=device.port)
+        raw = _snmp_get_sync(
+            device.host, device.snmp_community, oid, port=device.snmp_port
+        )
         parsed = parser(raw)
         if parsed is None:
             continue
@@ -1494,7 +1501,7 @@ def _poll_snmp_sync(
             candidates = [str(spec["oid"])]
         for oid in candidates:
             raw = _snmp_get_sync(
-                device.host, device.snmp_community, oid, port=device.port
+                device.host, device.snmp_community, oid, port=device.snmp_port
             )
             if raw is None:
                 continue

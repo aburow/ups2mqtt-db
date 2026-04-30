@@ -69,6 +69,7 @@ class DeviceStore:
                 source=device.source,
                 host=device.host,
                 port=device.port,
+                snmp_port=device.snmp_port,
                 unit_id=device.unit_id,
                 snmp_community=device.snmp_community,
                 poll_interval=device.poll_interval,

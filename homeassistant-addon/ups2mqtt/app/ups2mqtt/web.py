@@ -346,6 +346,7 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
     host = _validate_host((data.get("host", [""])[0]).strip())
 
     port = _validate_port(_int_or_default((data.get("port", [""])[0]), 502))
+    snmp_port = _validate_port(_int_or_default((data.get("snmp_port", [""])[0]), 161))
     unit_id = _validate_unit_id(_int_or_default((data.get("unit_id", [""])[0]), 1))
 
     poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
@@ -361,6 +362,7 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
         source=source,
         host=host,
         port=port,
+        snmp_port=snmp_port,
         unit_id=unit_id,
         snmp_community=(data.get("snmp_community", ["public"])[0]).strip() or "public",
         poll_interval=poll_interval,
@@ -387,6 +389,7 @@ def _clone_device(
         source=device.source,
         host=device.host,
         port=device.port,
+        snmp_port=device.snmp_port,
         unit_id=device.unit_id,
         snmp_community=device.snmp_community,
         poll_interval=device.poll_interval,
@@ -1517,6 +1520,7 @@ def start_web_server(
                         source=_cell_by_header("Source", 1),
                         host=_cell_by_header("Host", 2),
                         port=int(_cell_by_header("Port", 3) or 502),
+                        snmp_port=int(_cell_by_header("SNMPPort", -1) or 161),
                         unit_id=int(_cell_by_header("Unit", 4) or 1),
                         snmp_community=(_cell_by_header("SNMP", 5) or "public"),
                         poll_interval=(
@@ -2093,6 +2097,7 @@ def start_web_server(
                 source=driver_key,
                 host=host,
                 port=port,
+                snmp_port=int(config_payload.get("snmp_port", 161) or 161),
                 unit_id=unit_id,
                 snmp_community=str(config_payload.get("snmp_community", "public") or "public"),
                 poll_interval=poll_interval,
@@ -2256,6 +2261,7 @@ def start_web_server(
             "profile_mode": "global" if default_profile_uid else "local",
             "host": "",
             "port": "502",
+            "snmp_port": "161",
             "unit_id": "1",
             "snmp_community": "public",
             "poll_interval": "",
@@ -2287,6 +2293,7 @@ def start_web_server(
             ),
             "host": device.host,
             "port": str(device.port),
+            "snmp_port": str(device.snmp_port),
             "unit_id": str(device.unit_id),
             "snmp_community": device.snmp_community,
             "poll_interval": (
@@ -2341,6 +2348,9 @@ def start_web_server(
                 or "local",
                 "host": (data.get("host", [""])[0]).strip(),
                 "port": (data.get("port", [str(values["port"])])[0]).strip(),
+                "snmp_port": (
+                    data.get("snmp_port", [str(values["snmp_port"])])[0]
+                ).strip(),
                 "unit_id": (data.get("unit_id", [str(values["unit_id"])])[0]).strip(),
                 "snmp_community": (
                     data.get("snmp_community", [str(values["snmp_community"])])[0]
@@ -2677,6 +2687,9 @@ def start_web_server(
         device_id = _validate_device_id((data.get("id", [""])[0]).strip())
         host = _validate_host((data.get("host", [""])[0]).strip())
         port = _validate_port(_int_or_default((data.get("port", [""])[0]), 502))
+        snmp_port = _validate_port(
+            _int_or_default((data.get("snmp_port", [""])[0]), 161)
+        )
         unit_id = _validate_unit_id(_int_or_default((data.get("unit_id", [""])[0]), 1))
         poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
         poll_interval: int | None = None
@@ -2852,6 +2865,7 @@ def start_web_server(
             source=source,
             host=host,
             port=port,
+            snmp_port=snmp_port,
             unit_id=unit_id,
             snmp_community=(data.get("snmp_community", ["public"])[0]).strip()
             or "public",

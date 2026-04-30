@@ -124,6 +124,7 @@ def _parse_device(item: dict[str, Any]) -> DeviceConfig:
         source=source,
         host=host,
         port=int(item.get("port", default_port)),
+        snmp_port=int(item.get("snmp_port", 161)),
         unit_id=int(item.get("unit_id", 1)),
         snmp_community=str(item.get("snmp_community", "public")),
         poll_interval=int(item["poll_interval"])
@@ -161,6 +162,7 @@ def _device_to_dict(device: DeviceConfig) -> dict[str, Any]:
         "source": device.source,
         "host": device.host,
         "port": device.port,
+        "snmp_port": device.snmp_port,
         "unit_id": device.unit_id,
         "snmp_community": device.snmp_community,
     }
