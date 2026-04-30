@@ -3114,12 +3114,19 @@ def start_web_server(
         )
 
     class Handler(BaseHTTPRequestHandler):
+        def _request_base_path(self) -> str:
+            ingress_path = (self.headers.get("X-Ingress-Path") or "").strip()
+            if ingress_path:
+                return _normalize_base_path(ingress_path)
+            return normalized_base_path
+
         def _prefixed_path(self, path: str) -> str:
             if not path.startswith("/"):
                 return path
-            if normalized_base_path == "/":
+            base_path = self._request_base_path()
+            if base_path == "/":
                 return path
-            return f"{normalized_base_path}{path}"
+            return f"{base_path}{path}"
 
         def _resolve_app_path(self, request_path: str) -> str:
             if request_path in {"", "/"}:
@@ -3165,7 +3172,7 @@ def start_web_server(
                     initial_panel_html=_render_htmx_devices_panel(filters),
                     initial_theme_choice=_normalize_theme(theme_getter()),
                     sidebar_versions=_sidebar_version_items(),
-                    web_base_path=normalized_base_path,
+                    web_base_path=self._request_base_path(),
                 )
                 self._send_html(payload)
                 return True

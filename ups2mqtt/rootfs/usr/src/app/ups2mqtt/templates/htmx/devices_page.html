@@ -236,6 +236,13 @@
     if (window.htmx && !window.__ups2mqttHtmxPatched) {
       const originalAjax = window.htmx.ajax.bind(window.htmx);
       window.htmx.ajax = (verb, path, context) => originalAjax(verb, ups2mqttPath(path), context);
+      document.body.addEventListener('htmx:configRequest', (event) => {
+        const detail = event && event.detail ? event.detail : null;
+        if (!detail || typeof detail.path !== 'string') {
+          return;
+        }
+        detail.path = ups2mqttPath(detail.path);
+      });
       window.__ups2mqttHtmxPatched = true;
     }
 
