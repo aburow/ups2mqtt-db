@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
 from copy import deepcopy
 import json
 import logging
@@ -489,6 +490,32 @@ async def _device_loop(
             )
 
 
+def _round_robin_devices_by_source(devices: list[DeviceConfig]) -> list[DeviceConfig]:
+    """Interleave devices by source to avoid startup/dispatch source clumping."""
+    by_source: dict[str, deque[DeviceConfig]] = defaultdict(deque)
+    source_order: list[str] = []
+    for device in devices:
+        source = str(device.source or "")
+        if source not in by_source:
+            source_order.append(source)
+        by_source[source].append(device)
+
+    if len(source_order) <= 1:
+        return devices
+
+    interleaved: list[DeviceConfig] = []
+    active_sources = deque(source_order)
+    while active_sources:
+        source = active_sources.popleft()
+        queue = by_source.get(source)
+        if not queue:
+            continue
+        interleaved.append(queue.popleft())
+        if queue:
+            active_sources.append(source)
+    return interleaved
+
+
 async def _reconcile_device_tasks(
     profiles: dict[str, Any],
     profile_bindings: dict[str, ProfileConfig],
@@ -523,7 +550,8 @@ async def _reconcile_device_tasks(
         mqtt.clear_discovery(runtime_device, keys_to_clear)
         mqtt.clear_legacy_discovery(device_id, keys_to_clear)
 
-    desired = {device.device_uid: device for device in store.list_devices()}
+    ordered_devices = _round_robin_devices_by_source(store.list_devices())
+    desired = {device.device_uid: device for device in ordered_devices}
 
     for uid, (existing_device, existing_runtime_signature, task) in list(
         running.items()
