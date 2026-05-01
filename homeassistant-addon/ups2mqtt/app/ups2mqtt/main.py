@@ -120,9 +120,11 @@ def _compute_adaptive_type_caps(
     slots = max(1, int(total_slots))
     device_metrics = dict(metrics_snapshot.get("devices", {}))
     weights: dict[str, float] = {}
+    pressure_debug: dict[str, float] = {}
     for source in sources:
         identities = source_to_devices[source]
         durations: list[float] = []
+        intervals_s: list[float] = []
         failures = 0
         starts = 0
         for identity in identities:
@@ -132,10 +134,22 @@ def _compute_adaptive_type_caps(
                 durations.append(avg_ms)
             failures += int(metric.get("polls_failed") or 0)
             starts += int(metric.get("polls_started") or 0)
+        for device, _runtime_signature, _task in running.values():
+            if str(device.source or "") != source:
+                continue
+            interval = int(device.poll_interval or 10)
+            intervals_s.append(float(max(1, interval)))
         mean_ms = (sum(durations) / len(durations)) if durations else 1000.0
+        target_ms = (
+            (sum(intervals_s) / len(intervals_s)) * 1000.0 if intervals_s else 10000.0
+        )
         fail_rate = (failures / starts) if starts > 0 else 0.0
         health = max(0.2, 1.0 - min(0.8, fail_rate))
-        weights[source] = (1.0 / max(1.0, mean_ms)) * health
+        # Pressure captures cadence stress. >1 means observed cycle time exceeds target
+        # interval and needs more scheduling share; <1 means healthy cadence.
+        pressure = max(0.25, min(4.0, mean_ms / max(100.0, target_ms)))
+        pressure_debug[source] = pressure
+        weights[source] = (0.5 + pressure) * health
 
     cap: dict[str, int] = {source: 1 for source in sources}
     remaining = max(0, slots - len(sources))
@@ -166,6 +180,8 @@ def _compute_adaptive_type_caps(
             adjusted[source] = previous + 1
         elif target < previous:
             adjusted[source] = max(1, previous - 1)
+    if adjusted:
+        LOG.debug("Adaptive cap pressure by source: %s", pressure_debug)
     return adjusted
 
 
@@ -616,9 +632,12 @@ async def _device_loop(
             metrics.record_failure(identity, (monotonic() - started) * 1000, str(err))
         next_base = monotonic()
         for group in due_groups:
-            next_due[group] = next_base + float(
-                group_intervals.get(group, base_interval)
-            )
+            interval = float(group_intervals.get(group, base_interval))
+            due = float(next_due.get(group, next_base + interval))
+            # Preserve fixed-rate cadence rather than drifting to now+interval.
+            while due <= next_base:
+                due += interval
+            next_due[group] = due
 
 
 def _round_robin_devices_by_source(devices: list[DeviceConfig]) -> list[DeviceConfig]:
