@@ -243,6 +243,13 @@ async def _device_loop(
     metrics: MetricsStore,
     apps_dir: str | None = None,
 ) -> None:
+    perf_sample_every = 20
+    perf_cycles = 0
+    perf_total_s = 0.0
+    perf_wait_s = 0.0
+    perf_poll_s = 0.0
+    perf_publish_s = 0.0
+
     base_interval = device.poll_interval or default_interval
     base_interval = max(1, int(base_interval))
     group_intervals = poll_group_intervals(profile, base_interval)
@@ -337,12 +344,18 @@ async def _device_loop(
                 ",".join(due_groups),
                 len(allowed_keys),
             )
+            wait_started = monotonic()
+            poll_started = 0.0
             async with global_poll_semaphore:
                 async with endpoint_semaphore:
+                    poll_started = monotonic()
                     values = await asyncio.wait_for(
                         poll_device(runtime_device, profile, set(due_groups)),
                         timeout=max(2, poll_timeout),
                     )
+            wait_elapsed = max(0.0, poll_started - wait_started)
+            poll_elapsed = max(0.0, monotonic() - poll_started)
+            publish_elapsed = 0.0
             if values:
                 # Derive bit-flag sensor values from raw polled registers using catalog
                 # metadata. Uses cached raw values from slow polls when not freshly polled.
@@ -389,11 +402,13 @@ async def _device_loop(
                         _format_key_list(list(not_polled), max_display=10),
                     )
 
+                publish_started = monotonic()
                 published = mqtt.publish_state(
                     runtime_device,
                     mqtt_values,
                     discovery_keys=discovery_keys,
                 )
+                publish_elapsed = max(0.0, monotonic() - publish_started)
                 if published:
                     LOG.info(
                         "Published %d values for %s (polled=%d, filtered=%d)",
@@ -420,6 +435,27 @@ async def _device_loop(
             else:
                 LOG.warning("No values read for %s", device.id)
                 metrics.record_success(identity, (monotonic() - started) * 1000, 0)
+            cycle_elapsed = max(0.0, monotonic() - started)
+            perf_cycles += 1
+            perf_total_s += cycle_elapsed
+            perf_wait_s += wait_elapsed
+            perf_poll_s += poll_elapsed
+            perf_publish_s += publish_elapsed
+            if perf_cycles >= perf_sample_every:
+                LOG.info(
+                    "Perf sample [%s] cycles=%d avg_total=%.3fs avg_wait=%.3fs avg_poll=%.3fs avg_publish=%.3fs",
+                    device.id,
+                    perf_cycles,
+                    perf_total_s / perf_cycles,
+                    perf_wait_s / perf_cycles,
+                    perf_poll_s / perf_cycles,
+                    perf_publish_s / perf_cycles,
+                )
+                perf_cycles = 0
+                perf_total_s = 0.0
+                perf_wait_s = 0.0
+                perf_poll_s = 0.0
+                perf_publish_s = 0.0
             LOG.info(
                 "Polling cycle completed for %s in %.2fs",
                 device.id,
