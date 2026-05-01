@@ -59,7 +59,11 @@ class MetricsStore:
             self.polls_in_flight += 1
 
     def record_success(
-        self, device_id: str, duration_ms: float, values_count: int
+        self,
+        device_id: str,
+        duration_ms: float,
+        values_count: int,
+        warning: str = "",
     ) -> None:
         with self._lock:
             metric = self._ensure(device_id)
@@ -75,6 +79,8 @@ class MetricsStore:
                 metric.max_duration_ms = duration_ms
             metric.last_duration_ms = duration_ms
             metric.last_status = "success"
+            if warning:
+                metric.last_error = warning[:500]
             metric.last_success_utc = _utc_now()
             metric.last_update_utc = _utc_now()
             self.polls_in_flight -= 1

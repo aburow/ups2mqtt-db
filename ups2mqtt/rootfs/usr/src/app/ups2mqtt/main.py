@@ -353,6 +353,11 @@ async def _device_loop(
                         poll_device(runtime_device, profile, set(due_groups)),
                         timeout=max(2, poll_timeout),
                     )
+            warning_text = ""
+            if isinstance(values, dict):
+                warning_raw = values.pop("__poll_warning__", "")
+                if warning_raw:
+                    warning_text = str(warning_raw)
             wait_elapsed = max(0.0, poll_started - wait_started)
             poll_elapsed = max(0.0, monotonic() - poll_started)
             publish_elapsed = 0.0
@@ -430,11 +435,19 @@ async def _device_loop(
                     mqtt_values,
                 )
                 metrics.record_success(
-                    identity, (monotonic() - started) * 1000, len(values)
+                    identity,
+                    (monotonic() - started) * 1000,
+                    len(values),
+                    warning=warning_text,
                 )
             else:
                 LOG.warning("No values read for %s", device.id)
-                metrics.record_success(identity, (monotonic() - started) * 1000, 0)
+                metrics.record_success(
+                    identity,
+                    (monotonic() - started) * 1000,
+                    0,
+                    warning=warning_text,
+                )
             cycle_elapsed = max(0.0, monotonic() - started)
             perf_cycles += 1
             perf_total_s += cycle_elapsed

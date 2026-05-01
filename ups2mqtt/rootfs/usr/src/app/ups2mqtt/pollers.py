@@ -454,8 +454,20 @@ def _try_individual_reads(
     descriptors: list[dict[str, Any]],
     output: dict[str, Any],
     decoded: set[str],
-) -> None:
+) -> str | None:
+    # Fail fast within one polling cycle when a device starts returning repeated
+    # timeout/exception responses on individual fallback reads.
+    max_failures_per_cycle = 3
+    failures = 0
+
     for descriptor in descriptors:
+        if failures >= max_failures_per_cycle:
+            warning = (
+                f"Aborted remaining individual Modbus reads after {failures} failures in this cycle"
+            )
+            LOG.warning("[%s] %s", device.id, warning)
+            return warning
+
         key = str(descriptor["key"])
         if key in decoded:
             continue
@@ -470,6 +482,7 @@ def _try_individual_reads(
             _mark_io(session)
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             if not _async_connection_error_like(err):
+                failures += 1
                 continue
             recreate_for_socket_error = (
                 "broken pipe" in str(err).lower() or "reset" in str(err).lower()
@@ -488,6 +501,7 @@ def _try_individual_reads(
                     recreate_client=True,
                 )
             if not reconnected:
+                failures += 1
                 continue
             try:
                 result = _read_holding_registers(
@@ -498,9 +512,11 @@ def _try_individual_reads(
                 )
                 _mark_io(session)
             except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                failures += 1
                 continue
 
         if result is None or _is_error_response(result):
+            failures += 1
             continue
 
         regs = list(getattr(result, "registers", []) or [])
@@ -508,6 +524,8 @@ def _try_individual_reads(
         if value is not None:
             output[key] = value
             decoded.add(key)
+
+    return None
 
 
 def _poll_modbus_sync(
@@ -585,7 +603,9 @@ def _poll_modbus_sync(
         block_reads_elapsed = time.monotonic() - block_reads_started
 
         individual_reads_started = time.monotonic()
-        _try_individual_reads(session, device, descriptors, output, decoded)
+        cycle_warning = _try_individual_reads(
+            session, device, descriptors, output, decoded
+        )
         individual_reads_elapsed = time.monotonic() - individual_reads_started
 
         if not device.keep_connection_open:
@@ -627,6 +647,9 @@ def _poll_modbus_sync(
         cache = _maybe_refresh_cyberpower_snmp_metadata(device, snmp_oid_map)
         snmp_metadata_elapsed = time.monotonic() - snmp_metadata_started
         _merge_cyberpower_device_metadata(output, cache.metadata)
+
+    if cycle_warning:
+        output["__poll_warning__"] = cycle_warning
 
     LOG.info(
         "[%s] Poll timing breakdown: total=%.3fs, lock_wait=%.3fs, modbus=%.3fs, "
