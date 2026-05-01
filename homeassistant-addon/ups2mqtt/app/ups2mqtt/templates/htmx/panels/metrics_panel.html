@@ -41,7 +41,19 @@
       <div class="small">
         Polls in-flight: <strong>{{ backpressure.polls_in_flight }}</strong>
         <span class="mx-2">|</span>
-        Semaphore available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ max_concurrent_polls }}
+        Semaphore available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}
+        {% if backpressure.adaptive_concurrency %}
+        <span class="mx-2">|</span>
+        Adaptive: <strong>{{ "on" if backpressure.adaptive_concurrency.adaptive_enabled else "off" }}</strong>
+        <span class="mx-2">|</span>
+        Bounds: <strong>{{ backpressure.adaptive_concurrency.configured_min }}-{{ backpressure.adaptive_concurrency.configured_max }}</strong>
+        <span class="mx-2">|</span>
+        Adjustments: <strong>{{ backpressure.adaptive_concurrency.adjustments }}</strong>
+        {% endif %}
+        {% if backpressure.wait_pressure %}
+        <span class="mx-2">|</span>
+        Wait p50/p95: <strong>{{ "%.1f"|format(backpressure.wait_pressure.p50_wait_ms or 0) }} / {{ "%.1f"|format(backpressure.wait_pressure.p95_wait_ms or 0) }} ms</strong>
+        {% endif %}
       </div>
     </div>
   </div>

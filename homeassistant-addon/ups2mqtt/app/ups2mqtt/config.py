@@ -276,6 +276,53 @@ def load_config(options_path: str | None = None) -> AppConfig:
         _env_or_default("UPS2MQTT_HA_BRIDGE_ENABLED", raw_ha_bridge_enabled),
         default=False,
     )
+    max_concurrent_polls = max(1, int(raw_options.get("max_concurrent_polls", 8)))
+    adaptive_concurrency_enabled = _coerce_bool(
+        _env_or_default(
+            "UPS2MQTT_ADAPTIVE_CONCURRENCY_ENABLED",
+            raw_options.get("adaptive_concurrency_enabled", False),
+        ),
+        default=False,
+    )
+    adaptive_concurrency_min = max(
+        1,
+        int(
+            _env_or_default(
+                "UPS2MQTT_ADAPTIVE_CONCURRENCY_MIN",
+                raw_options.get("adaptive_concurrency_min", max_concurrent_polls),
+            )
+        ),
+    )
+    adaptive_concurrency_max = max(
+        adaptive_concurrency_min,
+        int(
+            _env_or_default(
+                "UPS2MQTT_ADAPTIVE_CONCURRENCY_MAX",
+                raw_options.get(
+                    "adaptive_concurrency_max",
+                    max(max_concurrent_polls, adaptive_concurrency_min),
+                ),
+            )
+        ),
+    )
+    adaptive_concurrency_window_seconds = max(
+        10,
+        int(
+            _env_or_default(
+                "UPS2MQTT_ADAPTIVE_CONCURRENCY_WINDOW_SECONDS",
+                raw_options.get("adaptive_concurrency_window_seconds", 60),
+            )
+        ),
+    )
+    adaptive_concurrency_target_p95_wait_ms = max(
+        0,
+        int(
+            _env_or_default(
+                "UPS2MQTT_ADAPTIVE_CONCURRENCY_TARGET_P95_WAIT_MS",
+                raw_options.get("adaptive_concurrency_target_p95_wait_ms", 1000),
+            )
+        ),
+    )
 
     return AppConfig(
         mqtt_enabled=bool(raw_options.get("mqtt_enabled", True)),
@@ -289,7 +336,12 @@ def load_config(options_path: str | None = None) -> AppConfig:
         mqtt_topic_prefix=str(raw_options.get("mqtt_topic_prefix", "ups2mqtt")),
         poll_interval=max(1, int(raw_options.get("poll_interval", 10))),
         poll_timeout=max(2, int(raw_options.get("poll_timeout", 15))),
-        max_concurrent_polls=max(1, int(raw_options.get("max_concurrent_polls", 8))),
+        max_concurrent_polls=max_concurrent_polls,
+        adaptive_concurrency_enabled=adaptive_concurrency_enabled,
+        adaptive_concurrency_min=adaptive_concurrency_min,
+        adaptive_concurrency_max=adaptive_concurrency_max,
+        adaptive_concurrency_window_seconds=adaptive_concurrency_window_seconds,
+        adaptive_concurrency_target_p95_wait_ms=adaptive_concurrency_target_p95_wait_ms,
         apps_dir=str(raw_options.get("apps_dir", "/data/apps")),
         web_enabled=bool(raw_options.get("web_enabled", True)),
         web_host=str(raw_options.get("web_host", "0.0.0.0")),

@@ -16,3 +16,7 @@ __pycache__/
 
 # Local scratch script
 gogogo
+
+# Local diagnostics
+quickcap.pcap
+ups2mqtt-backup-*-format.json

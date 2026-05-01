@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from time import monotonic
+from typing import Any
 
 from .database import Database
 
@@ -46,12 +48,13 @@ class DeviceMetrics:
 class MetricsStore:
     def __init__(
         self,
-        global_poll_semaphore: asyncio.Semaphore | None = None,
+        global_poll_semaphore: asyncio.Semaphore | Any | None = None,
         db: Database | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._devices: dict[str, DeviceMetrics] = {}
         self._last_start_monotonic: dict[str, float] = {}
+        self._wait_samples: deque[tuple[float, float]] = deque(maxlen=10000)
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -60,6 +63,38 @@ class MetricsStore:
         if device_id not in self._devices:
             self._devices[device_id] = DeviceMetrics()
         return self._devices[device_id]
+
+    def _record_wait_sample_locked(self, wait_ms: float | None) -> None:
+        if wait_ms is None:
+            return
+        self._wait_samples.append((monotonic(), max(0.0, float(wait_ms))))
+
+    def _wait_pressure_locked(self, window_seconds: int) -> dict[str, float | int]:
+        cutoff = monotonic() - max(1, int(window_seconds))
+        while self._wait_samples and self._wait_samples[0][0] < cutoff:
+            self._wait_samples.popleft()
+        values = sorted(wait_ms for _sample_time, wait_ms in self._wait_samples)
+        if not values:
+            return {
+                "samples": 0,
+                "window_seconds": int(window_seconds),
+                "p50_wait_ms": 0.0,
+                "p95_wait_ms": 0.0,
+                "max_wait_ms": 0.0,
+            }
+        p50_index = min(len(values) - 1, int((len(values) - 1) * 0.50))
+        p95_index = min(len(values) - 1, int((len(values) - 1) * 0.95))
+        return {
+            "samples": len(values),
+            "window_seconds": int(window_seconds),
+            "p50_wait_ms": float(values[p50_index]),
+            "p95_wait_ms": float(values[p95_index]),
+            "max_wait_ms": float(values[-1]),
+        }
+
+    def wait_pressure(self, window_seconds: int) -> dict[str, float | int]:
+        with self._lock:
+            return self._wait_pressure_locked(window_seconds)
 
     def record_start(self, device_id: str) -> None:
         now_monotonic = monotonic()
@@ -121,6 +156,7 @@ class MetricsStore:
                 metric.last_error = warning[:500]
             metric.last_success_utc = _utc_now()
             metric.last_update_utc = _utc_now()
+            self._record_wait_sample_locked(wait_ms)
             self.polls_in_flight -= 1
 
     def record_timeout(
@@ -143,6 +179,7 @@ class MetricsStore:
             metric.last_status = "timeout"
             metric.last_error = f"Timeout after {timeout_s}s"[:500]
             metric.last_update_utc = _utc_now()
+            self._record_wait_sample_locked(wait_ms)
             self.polls_in_flight -= 1
 
     def record_failure(
@@ -164,6 +201,7 @@ class MetricsStore:
             metric.last_status = "error"
             metric.last_error = error[:500]
             metric.last_update_utc = _utc_now()
+            self._record_wait_sample_locked(wait_ms)
             self.polls_in_flight -= 1
 
     def rename(self, old_id: str, new_id: str) -> None:
@@ -201,6 +239,7 @@ class MetricsStore:
                 device_id: asdict(metric) for device_id, metric in self._devices.items()
             }
             polls_in_flight = self.polls_in_flight
+            wait_pressure = self._wait_pressure_locked(60)
         totals = {
             "devices": len(devices),
             "polls_started": sum(
@@ -216,11 +255,19 @@ class MetricsStore:
         }
         # Backpressure metrics
         semaphore_available = 0
+        adaptive_concurrency: dict[str, Any] = {}
         if self.global_poll_semaphore is not None:
-            semaphore_available = self.global_poll_semaphore._value
+            snapshot = getattr(self.global_poll_semaphore, "snapshot", None)
+            if callable(snapshot):
+                adaptive_concurrency = dict(snapshot())
+                semaphore_available = int(adaptive_concurrency.get("available", 0))
+            else:
+                semaphore_available = self.global_poll_semaphore._value
         backpressure = {
             "polls_in_flight": polls_in_flight,
             "semaphore_available": semaphore_available,
+            "wait_pressure": wait_pressure,
+            "adaptive_concurrency": adaptive_concurrency,
         }
         return {
             "generated_at_utc": _utc_now(),

@@ -105,6 +105,11 @@ class AppConfig:
     poll_interval: int
     poll_timeout: int
     max_concurrent_polls: int
+    adaptive_concurrency_enabled: bool
+    adaptive_concurrency_min: int
+    adaptive_concurrency_max: int
+    adaptive_concurrency_window_seconds: int
+    adaptive_concurrency_target_p95_wait_ms: int
     apps_dir: str
     web_enabled: bool
     web_host: str

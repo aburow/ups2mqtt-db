@@ -234,6 +234,19 @@ def _is_error_response(result: Any) -> bool:
     return False
 
 
+def _modbus_error_text(result: Any) -> str:
+    """Best-effort extraction of Modbus exception details for debug logs."""
+    try:
+        if result is None:
+            return "none"
+        if hasattr(result, "exception_code"):
+            code = getattr(result, "exception_code")
+            return f"exception_code={code}"
+        return str(result)
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        return "unknown"
+
+
 def _mark_io(session: _EndpointSession) -> None:
     session.last_io_monotonic = time.monotonic()
 
@@ -365,11 +378,21 @@ def _try_block_reads(
         if count <= 0:
             continue
 
+        block_name = str(block.get("name", f"{start}:{count}"))
         result = None
         try:
             result = _read_holding_registers(session, start, count, device.unit_id)
             _mark_io(session)
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.info(
+                "[%s] Block read failed name=%s start=%d count=%d err=%s: %s",
+                device.id,
+                block_name,
+                start,
+                count,
+                type(err).__name__,
+                err,
+            )
             if not _async_connection_error_like(err):
                 continue
             recreate_for_socket_error = (
@@ -394,14 +417,44 @@ def _try_block_reads(
                 result = _read_holding_registers(session, start, count, device.unit_id)
                 _mark_io(session)
             except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                LOG.info(
+                    "[%s] Block read retry failed name=%s start=%d count=%d",
+                    device.id,
+                    block_name,
+                    start,
+                    count,
+                )
                 continue
 
         if result is None or _is_error_response(result):
+            LOG.info(
+                "[%s] Block read error-response name=%s start=%d count=%d detail=%s",
+                device.id,
+                block_name,
+                start,
+                count,
+                _modbus_error_text(result),
+            )
             continue
 
         regs = list(getattr(result, "registers", []) or [])
         if not regs:
+            LOG.info(
+                "[%s] Block read empty name=%s start=%d count=%d",
+                device.id,
+                block_name,
+                start,
+                count,
+            )
             continue
+        LOG.debug(
+            "[%s] Block read ok name=%s start=%d count=%d result_len=%d",
+            device.id,
+            block_name,
+            start,
+            count,
+            len(regs),
+        )
 
         for descriptor in descriptors:
             key = str(descriptor["key"])
@@ -481,6 +534,15 @@ def _try_individual_reads(
             )
             _mark_io(session)
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.info(
+                "[%s] Single read failed key=%s address=%d count=%d err=%s: %s",
+                device.id,
+                key,
+                address,
+                reg_count,
+                type(err).__name__,
+                err,
+            )
             if not _async_connection_error_like(err):
                 failures += 1
                 continue
@@ -512,14 +574,37 @@ def _try_individual_reads(
                 )
                 _mark_io(session)
             except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                LOG.info(
+                    "[%s] Single read retry failed key=%s address=%d count=%d",
+                    device.id,
+                    key,
+                    address,
+                    reg_count,
+                )
                 failures += 1
                 continue
 
         if result is None or _is_error_response(result):
+            LOG.info(
+                "[%s] Single read error-response key=%s address=%d count=%d detail=%s",
+                device.id,
+                key,
+                address,
+                reg_count,
+                _modbus_error_text(result),
+            )
             failures += 1
             continue
 
         regs = list(getattr(result, "registers", []) or [])
+        LOG.debug(
+            "[%s] Single read ok key=%s address=%d count=%d result_len=%d",
+            device.id,
+            key,
+            address,
+            reg_count,
+            len(regs),
+        )
         value = _decode_registers(regs, descriptor)
         if value is not None:
             output[key] = value

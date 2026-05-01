@@ -24,6 +24,7 @@ from .capabilities import (
     source_keys,
 )
 from .config import load_config, load_runtime_settings, save_runtime_settings
+from .concurrency import AdjustableConcurrencyLimiter
 from .database import Database
 from .ha_api import apply_entity_default_states, delete_device_entities
 from .ha_api import delete_stale_ups_entities
@@ -200,6 +201,89 @@ def _compute_adaptive_type_caps(
     if adjusted:
         LOG.debug("Adaptive cap pressure by source: %s", pressure_debug)
     return adjusted
+
+
+async def _run_adaptive_concurrency_controller(
+    *,
+    limiter: AdjustableConcurrencyLimiter,
+    metrics: MetricsStore,
+    window_seconds: int,
+    target_p95_wait_ms: int,
+) -> None:
+    low_wait_ms = max(100.0, float(target_p95_wait_ms) * 0.10)
+    idle_windows = 0
+    check_interval = max(5.0, min(10.0, float(window_seconds) / 3.0))
+    min_samples = 20
+
+    while True:
+        await asyncio.sleep(check_interval)
+        pressure = metrics.wait_pressure(window_seconds)
+        samples = int(pressure.get("samples", 0))
+        if samples < min_samples:
+            continue
+        snapshot = limiter.snapshot()
+        current_limit = int(snapshot.get("current_limit", 1))
+        max_limit = int(snapshot.get("configured_max", current_limit))
+        min_limit = int(snapshot.get("configured_min", current_limit))
+        available = int(snapshot.get("available", 0))
+        p95_wait_ms = float(pressure.get("p95_wait_ms", 0.0))
+        p50_wait_ms = float(pressure.get("p50_wait_ms", 0.0))
+
+        if p95_wait_ms > float(target_p95_wait_ms) and available == 0:
+            step = max(4, int(current_limit * 0.10 + 0.999))
+            new_limit = min(max_limit, current_limit + step)
+            idle_windows = 0
+            if new_limit > current_limit:
+                applied = await limiter.set_limit(
+                    new_limit,
+                    reason=(
+                        f"p95_wait_ms={p95_wait_ms:.1f} "
+                        f"p50_wait_ms={p50_wait_ms:.1f} samples={samples}"
+                    ),
+                )
+                LOG.info(
+                    "Adaptive concurrency increased: %d -> %d "
+                    "(p95_wait=%.1fms p50_wait=%.1fms samples=%d)",
+                    current_limit,
+                    applied,
+                    p95_wait_ms,
+                    p50_wait_ms,
+                    samples,
+                )
+            continue
+
+        idle_ratio = available / max(1, current_limit)
+        if (
+            p95_wait_ms <= low_wait_ms
+            and idle_ratio >= 0.25
+            and current_limit > min_limit
+        ):
+            idle_windows += 1
+        else:
+            idle_windows = 0
+        if idle_windows < 3:
+            continue
+        step = max(1, int(current_limit * 0.05))
+        new_limit = max(min_limit, current_limit - step)
+        idle_windows = 0
+        if new_limit < current_limit:
+            applied = await limiter.set_limit(
+                new_limit,
+                reason=(
+                    f"low_wait p95_wait_ms={p95_wait_ms:.1f} "
+                    f"available={available} samples={samples}"
+                ),
+            )
+            LOG.info(
+                "Adaptive concurrency decreased: %d -> %d "
+                "(p95_wait=%.1fms available=%d/%d samples=%d)",
+                current_limit,
+                applied,
+                p95_wait_ms,
+                available,
+                current_limit,
+                samples,
+            )
 
 
 def _apply_catalog_derived_values(
@@ -392,7 +476,7 @@ async def _device_loop(
     mqtt: MqttPublisher,
     default_interval: int,
     poll_timeout: int,
-    global_poll_semaphore: asyncio.Semaphore,
+    global_poll_semaphore: AdjustableConcurrencyLimiter,
     endpoint_semaphores: dict[str, asyncio.Semaphore],
     metrics: MetricsStore,
     type_limiter: AdaptiveTypeLimiter | None = None,
@@ -717,7 +801,7 @@ async def _reconcile_device_tasks(
     mqtt: MqttPublisher,
     default_interval: int,
     poll_timeout: int,
-    global_poll_semaphore: asyncio.Semaphore,
+    global_poll_semaphore: AdjustableConcurrencyLimiter,
     endpoint_semaphores: dict[str, asyncio.Semaphore],
     metrics: MetricsStore,
     discovery_registry: dict[str, set[str]],
@@ -1574,6 +1658,14 @@ async def async_main() -> None:
     LOG.info("  poll_interval: %ds", config.poll_interval)
     LOG.info("  poll_timeout: %ds", config.poll_timeout)
     LOG.info("  max_concurrent_polls: %d", config.max_concurrent_polls)
+    LOG.info(
+        "  adaptive_concurrency: enabled=%s min=%d max=%d window=%ds target_p95_wait=%dms",
+        config.adaptive_concurrency_enabled,
+        config.adaptive_concurrency_min,
+        config.adaptive_concurrency_max,
+        config.adaptive_concurrency_window_seconds,
+        config.adaptive_concurrency_target_p95_wait_ms,
+    )
     LOG.info("  mqtt_enabled: %s", config.mqtt_enabled)
     if config.mqtt_enabled:
         LOG.info("  mqtt_host: %s", config.mqtt_host)
@@ -1630,7 +1722,20 @@ async def async_main() -> None:
 
     store = DeviceStore(devices_to_use, db)
     loop = asyncio.get_running_loop()
-    global_poll_semaphore = asyncio.Semaphore(config.max_concurrent_polls)
+    global_poll_semaphore = AdjustableConcurrencyLimiter(
+        config.max_concurrent_polls,
+        min_limit=(
+            config.adaptive_concurrency_min
+            if config.adaptive_concurrency_enabled
+            else config.max_concurrent_polls
+        ),
+        max_limit=(
+            config.adaptive_concurrency_max
+            if config.adaptive_concurrency_enabled
+            else config.max_concurrent_polls
+        ),
+        adaptive_enabled=config.adaptive_concurrency_enabled,
+    )
     metrics = MetricsStore(global_poll_semaphore=global_poll_semaphore, db=db)
     type_limiter: AdaptiveTypeLimiter | None = None
 
@@ -1691,6 +1796,7 @@ async def async_main() -> None:
                 "source": str(profile_state.get("source", "unknown")),
                 "profile_count": len(profile_state.get("profiles", {})),
                 "max_concurrent_polls": config.max_concurrent_polls,
+                "adaptive_concurrency": global_poll_semaphore.snapshot(),
                 "apps_dir": config.apps_dir,
             },
             get_capability_profiles=lambda: profile_state.get("profiles", {}),
@@ -1723,6 +1829,17 @@ async def async_main() -> None:
         )
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}
+    adaptive_concurrency_task: asyncio.Task | None = None
+    if config.adaptive_concurrency_enabled:
+        adaptive_concurrency_task = asyncio.create_task(
+            _run_adaptive_concurrency_controller(
+                limiter=global_poll_semaphore,
+                metrics=metrics,
+                window_seconds=config.adaptive_concurrency_window_seconds,
+                target_p95_wait_ms=config.adaptive_concurrency_target_p95_wait_ms,
+            )
+        )
+        LOG.info("Adaptive global concurrency controller started")
     discovery_registry: dict[str, set[str]] = {}
     try:
         profile_bindings = {
@@ -1899,6 +2016,8 @@ async def async_main() -> None:
                 )
             await asyncio.sleep(1)
     finally:
+        if adaptive_concurrency_task is not None:
+            adaptive_concurrency_task.cancel()
         for device, _runtime_signature, task in running.values():
             task.cancel()
             mqtt.publish_unavailable(device)

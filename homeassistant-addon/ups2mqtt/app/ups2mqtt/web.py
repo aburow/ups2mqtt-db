@@ -591,6 +591,12 @@ def _prepare_metrics_presentation(
         "semaphore_available": int(
             metrics.get("backpressure", {}).get("semaphore_available", 0)
         ),
+        "wait_pressure": dict(
+            metrics.get("backpressure", {}).get("wait_pressure", {})
+        ),
+        "adaptive_concurrency": dict(
+            metrics.get("backpressure", {}).get("adaptive_concurrency", {})
+        ),
     }
 
     return {
@@ -672,7 +678,7 @@ def _prepare_logs_presentation(
 
 def _prepare_maintenance_presentation(
     *,
-    capability_status: dict[str, str | int],
+    capability_status: dict[str, Any],
     current_runtime_log_level: str,
 ) -> dict[str, object]:
     return {
@@ -691,7 +697,7 @@ def start_web_server(
     store: DeviceStore,
     get_source_names: Callable[[], list[str]],
     log_buffer: LogBuffer,
-    get_capability_status: Callable[[], dict[str, str | int]],
+    get_capability_status: Callable[[], dict[str, Any]],
     trigger_capability_reload: Callable[[], None],
     trigger_republish_discovery: Callable[[], None],
     get_metrics_snapshot: Callable[[], dict],

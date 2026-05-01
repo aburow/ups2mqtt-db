@@ -1,5 +1,5 @@
 name: "ups2mqtt"
-version: "0.90.0-ha17"
+version: "0.90.0-ha18"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
@@ -37,6 +37,11 @@ options:
   poll_interval: 10
   poll_timeout: 15
   max_concurrent_polls: 8
+  adaptive_concurrency_enabled: false
+  adaptive_concurrency_min: 8
+  adaptive_concurrency_max: 128
+  adaptive_concurrency_window_seconds: 60
+  adaptive_concurrency_target_p95_wait_ms: 1000
   apps_dir: /data/apps
   web_enabled: true
   web_host: 0.0.0.0
@@ -58,6 +63,11 @@ schema:
   poll_interval: int(1,3600)
   poll_timeout: int(2,3600)
   max_concurrent_polls: int(1,128)
+  adaptive_concurrency_enabled: bool
+  adaptive_concurrency_min: int(1,128)
+  adaptive_concurrency_max: int(1,128)
+  adaptive_concurrency_window_seconds: int(10,3600)
+  adaptive_concurrency_target_p95_wait_ms: int(0,60000)
   apps_dir: str
   web_enabled: bool
   web_host: str
