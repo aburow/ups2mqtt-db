@@ -3184,6 +3184,14 @@ def start_web_server(
             ingress_path = (self.headers.get("X-Ingress-Path") or "").strip()
             if ingress_path:
                 return _normalize_base_path(ingress_path)
+            request_path = urlparse(self.path).path
+            if normalized_base_path != "/" and (
+                request_path == normalized_base_path
+                or request_path.startswith(f"{normalized_base_path}/")
+            ):
+                return normalized_base_path
+            if normalized_base_path.startswith("/api/hassio_ingress/"):
+                return "/"
             return normalized_base_path
 
         def _prefixed_path(self, path: str) -> str:

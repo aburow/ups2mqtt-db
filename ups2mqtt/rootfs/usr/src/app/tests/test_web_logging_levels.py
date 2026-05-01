@@ -192,16 +192,37 @@ def test_prefixed_ingress_path_resolves_htmx_route(tmp_path: Path) -> None:
         server.server_close()
 
 
-def test_root_redirect_uses_configured_base_path(tmp_path: Path) -> None:
+def test_root_redirect_without_ingress_request_uses_direct_path(tmp_path: Path) -> None:
     server = _start_test_server_with_base_path(
         tmp_path, "/api/hassio_ingress/mock"
     )
     try:
         status, headers, _ = _fetch_no_redirect(server.server_port, "/")
         assert status == HTTPStatus.SEE_OTHER
-        assert headers.get("Location", "").startswith(
+        assert headers.get("Location", "") == "/htmx/devices"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_root_redirect_with_ingress_header_uses_ingress_path(tmp_path: Path) -> None:
+    server = _start_test_server_with_base_path(
+        tmp_path, "/api/hassio_ingress/mock"
+    )
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    try:
+        connection.request(
+            "GET",
+            "/",
+            headers={"X-Ingress-Path": "/api/hassio_ingress/mock"},
+        )
+        response = connection.getresponse()
+        response.read()
+        assert response.status == HTTPStatus.SEE_OTHER
+        assert response.getheader("Location", "").startswith(
             "/api/hassio_ingress/mock/htmx/devices"
         )
     finally:
+        connection.close()
         server.shutdown()
         server.server_close()

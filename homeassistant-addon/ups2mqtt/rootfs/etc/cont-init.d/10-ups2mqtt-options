@@ -19,10 +19,9 @@ out_path = Path("/data/ups2mqtt_internal_options.json")
 with options_path.open("r", encoding="utf-8") as fh:
     data = json.load(fh)
 
-if bool(data.get("expose_direct_port", False)):
-    data["web_base_path"] = "/"
-else:
-    data["web_base_path"] = ""
+# The service runner supplies the ingress base path through
+# UPS2MQTT_WEB_BASE_PATH. Direct requests are detected per request.
+data["web_base_path"] = ""
 
 out_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 PY

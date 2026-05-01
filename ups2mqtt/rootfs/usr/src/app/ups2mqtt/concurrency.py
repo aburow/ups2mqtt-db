@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 
 class _LimiterWaiter:
-    granted = False
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.granted = False
 
 
 class AdjustableConcurrencyLimiter:
@@ -32,6 +35,8 @@ class AdjustableConcurrencyLimiter:
         self._max_limit = maximum
         self._adaptive_enabled = bool(adaptive_enabled)
         self._in_flight = 0
+        self._in_flight_by_source: dict[str, int] = defaultdict(int)
+        self._grants_by_source: dict[str, int] = defaultdict(int)
         self._waiters: dict[str, deque[object]] = defaultdict(deque)
         self._source_order: deque[str] = deque()
         self._last_granted_source = ""
@@ -40,14 +45,58 @@ class AdjustableConcurrencyLimiter:
         self._lock = threading.Lock()
         self._cond = asyncio.Condition()
 
+    def _active_source_count_locked(self) -> int:
+        sources = set(self._waiters)
+        sources.update(
+            source for source, count in self._in_flight_by_source.items() if count > 0
+        )
+        return max(1, len(sources))
+
+    def _fair_source_limit_locked(self) -> int:
+        return max(1, int(math.ceil(self._limit / self._active_source_count_locked())))
+
+    def _select_source_locked(self) -> str | None:
+        if not self._source_order:
+            return None
+
+        fair_limit = self._fair_source_limit_locked()
+        skipped: deque[str] = deque()
+        fallback: str | None = None
+        while self._source_order:
+            source = self._source_order.popleft()
+            queue = self._waiters.get(source)
+            if not queue:
+                self._waiters.pop(source, None)
+                continue
+            if fallback is None:
+                fallback = source
+            if (
+                len(self._source_order) + len(skipped) > 0
+                and source == self._last_granted_source
+            ):
+                skipped.append(source)
+                continue
+            if self._in_flight_by_source.get(source, 0) < fair_limit:
+                self._source_order.extendleft(reversed(skipped))
+                return source
+            skipped.append(source)
+
+        self._source_order.extend(skipped)
+        if fallback is None:
+            return None
+        # Work-conserving fallback: if every queued source is at its current fair
+        # share, use available global capacity instead of leaving it idle.
+        try:
+            self._source_order.remove(fallback)
+        except ValueError:
+            return None
+        return fallback
+
     def _grant_waiters_locked(self) -> None:
         while self._in_flight < self._limit and self._source_order:
-            if (
-                len(self._source_order) > 1
-                and self._source_order[0] == self._last_granted_source
-            ):
-                self._source_order.rotate(-1)
-            source = self._source_order.popleft()
+            source = self._select_source_locked()
+            if source is None:
+                break
             queue = self._waiters.get(source)
             if not queue:
                 self._waiters.pop(source, None)
@@ -55,6 +104,8 @@ class AdjustableConcurrencyLimiter:
             waiter = queue.popleft()
             setattr(waiter, "granted", True)
             self._in_flight += 1
+            self._in_flight_by_source[source] += 1
+            self._grants_by_source[source] += 1
             self._last_granted_source = source
             if queue:
                 self._source_order.append(source)
@@ -63,7 +114,7 @@ class AdjustableConcurrencyLimiter:
 
     async def acquire(self, source: str = "") -> None:
         source_key = str(source or "unknown")
-        waiter = _LimiterWaiter()
+        waiter = _LimiterWaiter(source_key)
         async with self._cond:
             with self._lock:
                 if not self._waiters[source_key]:
@@ -79,6 +130,10 @@ class AdjustableConcurrencyLimiter:
                     if bool(getattr(waiter, "granted", False)):
                         if self._in_flight > 0:
                             self._in_flight -= 1
+                        if self._in_flight_by_source[source_key] > 0:
+                            self._in_flight_by_source[source_key] -= 1
+                        if self._in_flight_by_source[source_key] <= 0:
+                            self._in_flight_by_source.pop(source_key, None)
                     else:
                         queue = self._waiters.get(source_key)
                         if queue is not None:
@@ -95,11 +150,16 @@ class AdjustableConcurrencyLimiter:
                 self._cond.notify_all()
                 raise
 
-    async def release(self) -> None:
+    async def release(self, source: str = "") -> None:
+        source_key = str(source or "unknown")
         async with self._cond:
             with self._lock:
                 if self._in_flight > 0:
                     self._in_flight -= 1
+                if self._in_flight_by_source[source_key] > 0:
+                    self._in_flight_by_source[source_key] -= 1
+                if self._in_flight_by_source[source_key] <= 0:
+                    self._in_flight_by_source.pop(source_key, None)
                 self._grant_waiters_locked()
             self._cond.notify_all()
 
@@ -109,7 +169,7 @@ class AdjustableConcurrencyLimiter:
         try:
             yield
         finally:
-            await self.release()
+            await self.release(source)
 
     async def __aenter__(self) -> AdjustableConcurrencyLimiter:
         await self.acquire()
@@ -146,6 +206,16 @@ class AdjustableConcurrencyLimiter:
                 for source, queue in sorted(self._waiters.items())
                 if len(queue) > 0
             }
+            in_flight_by_source = {
+                source: count
+                for source, count in sorted(self._in_flight_by_source.items())
+                if count > 0
+            }
+            grants_by_source = {
+                source: count
+                for source, count in sorted(self._grants_by_source.items())
+                if count > 0
+            }
             return {
                 "adaptive_enabled": self._adaptive_enabled,
                 "current_limit": int(self._limit),
@@ -155,6 +225,9 @@ class AdjustableConcurrencyLimiter:
                 "available": int(available),
                 "queued": int(sum(queued_by_source.values())),
                 "queued_by_source": queued_by_source,
+                "in_flight_by_source": in_flight_by_source,
+                "grants_by_source": grants_by_source,
+                "fair_source_limit": int(self._fair_source_limit_locked()),
                 "adjustments": int(self._adjustments),
                 "last_adjustment": self._last_adjustment,
             }

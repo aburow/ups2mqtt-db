@@ -11,22 +11,12 @@ print(str(options.get('log_level', 'INFO')))
 PY
 )"
 
-# Use ingress prefix when available. For direct-port mode, clear base path.
-if python3 - <<'PY'
-import json
-from pathlib import Path
-
-options = json.loads(Path('/data/options.json').read_text(encoding='utf-8'))
-raise SystemExit(0 if bool(options.get('expose_direct_port', False)) else 1)
-PY
-then
-  export UPS2MQTT_WEB_BASE_PATH="/"
+# Keep the Supervisor ingress prefix available for HA panel requests. The web
+# handler detects direct-port requests and serves them from /.
+if [ -n "${SUPERVISOR_INGRESS:-}" ]; then
+  export UPS2MQTT_WEB_BASE_PATH="${SUPERVISOR_INGRESS}"
 else
-  if [ -n "${SUPERVISOR_INGRESS:-}" ]; then
-    export UPS2MQTT_WEB_BASE_PATH="${SUPERVISOR_INGRESS}"
-  else
-    export UPS2MQTT_WEB_BASE_PATH=""
-  fi
+  export UPS2MQTT_WEB_BASE_PATH=""
 fi
 
 cd /usr/src/app
