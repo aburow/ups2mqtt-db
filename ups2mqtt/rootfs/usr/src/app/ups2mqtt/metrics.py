@@ -64,6 +64,12 @@ class SourceMetrics:
     queued: int = 0
 
 
+@dataclass(slots=True)
+class ActivePoll:
+    source: str
+    state: str = "queued"
+
+
 class MetricsStore:
     def __init__(
         self,
@@ -79,6 +85,7 @@ class MetricsStore:
         self._source_wait_samples: dict[str, deque[tuple[float, float]]] = {}
         self._source_endpoint_wait_samples: dict[str, deque[tuple[float, float]]] = {}
         self._source_queue_started: dict[str, deque[float]] = {}
+        self._active_polls_by_device: dict[str, deque[ActivePoll]] = {}
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -178,11 +185,36 @@ class MetricsStore:
             metric.last_status = "running"
             metric.last_update_utc = _utc_now()
             self.polls_in_flight += 1
+            self._active_polls_by_device.setdefault(device_id, deque()).append(
+                ActivePoll(source=source_key)
+            )
             source_metric.polls_queued += 1
             source_metric.queued += 1
             self._source_queue_started.setdefault(source_key, deque()).append(
                 now_monotonic
             )
+
+    def _consume_active_poll_locked(self, device_id: str) -> ActivePoll | None:
+        active = self._active_polls_by_device.get(device_id)
+        if not active:
+            return None
+        poll = active.popleft()
+        if not active:
+            self._active_polls_by_device.pop(device_id, None)
+        if self.polls_in_flight > 0:
+            self.polls_in_flight -= 1
+        return poll
+
+    def _discard_active_polls_locked(self, device_id: str) -> None:
+        active = self._active_polls_by_device.pop(device_id, deque())
+        for poll in active:
+            if self.polls_in_flight > 0:
+                self.polls_in_flight -= 1
+            source_metric = self._ensure_source(poll.source)
+            if poll.state == "active" and source_metric.active > 0:
+                source_metric.active -= 1
+            elif source_metric.queued > 0:
+                source_metric.queued -= 1
 
     def record_dequeue(
         self,
@@ -194,6 +226,14 @@ class MetricsStore:
         source_key = str(source or self._device_sources.get(device_id) or "unknown")
         now_monotonic = monotonic()
         with self._lock:
+            active_poll: ActivePoll | None = None
+            for poll in self._active_polls_by_device.get(device_id, ()):
+                if poll.source == source_key and poll.state == "queued":
+                    active_poll = poll
+                    poll.state = "active"
+                    break
+            if active_poll is None:
+                return
             source_metric = self._ensure_source(source_key)
             source_metric.polls_dequeued += 1
             source_metric.active += 1
@@ -248,8 +288,9 @@ class MetricsStore:
         failed: bool = False,
         timed_out: bool = False,
         wait_ms: float | None = None,
+        source: str | None = None,
     ) -> None:
-        source_key = self._device_sources.get(device_id, "unknown")
+        source_key = source or self._device_sources.get(device_id, "unknown")
         source_metric = self._ensure_source(source_key)
         source_metric.polls_completed += 1
         if failed:
@@ -278,6 +319,9 @@ class MetricsStore:
         publish_ms: float | None = None,
     ) -> None:
         with self._lock:
+            poll = self._consume_active_poll_locked(device_id)
+            if poll is None:
+                return
             metric = self._ensure(device_id)
             metric.polls_succeeded += 1
             metric.total_duration_ms += max(0.0, duration_ms)
@@ -299,8 +343,11 @@ class MetricsStore:
             metric.last_success_utc = _utc_now()
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
-            self._record_source_complete_locked(device_id, wait_ms=wait_ms)
-            self.polls_in_flight -= 1
+            self._record_source_complete_locked(
+                device_id,
+                wait_ms=wait_ms,
+                source=poll.source,
+            )
 
     def record_timeout(
         self,
@@ -312,6 +359,9 @@ class MetricsStore:
         publish_ms: float | None = None,
     ) -> None:
         with self._lock:
+            poll = self._consume_active_poll_locked(device_id)
+            if poll is None:
+                return
             metric = self._ensure(device_id)
             metric.polls_failed += 1
             metric.polls_timed_out += 1
@@ -328,8 +378,8 @@ class MetricsStore:
                 failed=True,
                 timed_out=True,
                 wait_ms=wait_ms,
+                source=poll.source,
             )
-            self.polls_in_flight -= 1
 
     def record_failure(
         self,
@@ -341,6 +391,9 @@ class MetricsStore:
         publish_ms: float | None = None,
     ) -> None:
         with self._lock:
+            poll = self._consume_active_poll_locked(device_id)
+            if poll is None:
+                return
             metric = self._ensure(device_id)
             metric.polls_failed += 1
             metric.last_duration_ms = duration_ms
@@ -355,8 +408,8 @@ class MetricsStore:
                 device_id,
                 failed=True,
                 wait_ms=wait_ms,
+                source=poll.source,
             )
-            self.polls_in_flight -= 1
 
     def rename(self, old_id: str, new_id: str) -> None:
         """Move accumulated metrics from old_id to new_id, dropping old_id."""
@@ -365,6 +418,9 @@ class MetricsStore:
                 self._devices[new_id] = self._devices.pop(old_id)
                 if old_id in self._device_sources:
                     self._device_sources[new_id] = self._device_sources.pop(old_id)
+                if old_id in self._active_polls_by_device:
+                    existing = self._active_polls_by_device.setdefault(new_id, deque())
+                    existing.extend(self._active_polls_by_device.pop(old_id))
 
     def drop(self, device_id: str) -> None:
         """Remove metrics for a device that no longer exists."""
@@ -372,6 +428,7 @@ class MetricsStore:
             self._devices.pop(device_id, None)
             self._last_start_monotonic.pop(device_id, None)
             self._device_sources.pop(device_id, None)
+            self._discard_active_polls_locked(device_id)
 
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
@@ -384,6 +441,7 @@ class MetricsStore:
             self._source_wait_samples.clear()
             self._source_endpoint_wait_samples.clear()
             self._source_queue_started.clear()
+            self._active_polls_by_device.clear()
             self.polls_in_flight = 0
 
     def prune_unknown(self, valid_ids: set[str]) -> int:
@@ -396,6 +454,7 @@ class MetricsStore:
                 self._devices.pop(device_id, None)
                 self._last_start_monotonic.pop(device_id, None)
                 self._device_sources.pop(device_id, None)
+                self._discard_active_polls_locked(device_id)
             return len(stale_ids)
 
     def snapshot(self) -> dict:
