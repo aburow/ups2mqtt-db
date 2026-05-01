@@ -118,6 +118,7 @@ def _compute_adaptive_type_caps(
         return {}
 
     slots = max(1, int(total_slots))
+    min_per_type = 10
     device_metrics = dict(metrics_snapshot.get("devices", {}))
     weights: dict[str, float] = {}
     pressure_debug: dict[str, float] = {}
@@ -151,22 +152,38 @@ def _compute_adaptive_type_caps(
         pressure_debug[source] = pressure
         weights[source] = (0.5 + pressure) * health
 
-    cap: dict[str, int] = {source: 1 for source in sources}
-    remaining = max(0, slots - len(sources))
+    base_floor: dict[str, int] = {}
+    for source in sources:
+        demand = len(source_to_devices[source])
+        base_floor[source] = min(demand, min_per_type)
+
+    # If there is enough capacity, enforce min floor per active type.
+    floor_total = sum(base_floor.values())
+    if floor_total <= slots:
+        cap: dict[str, int] = dict(base_floor)
+        remaining = slots - floor_total
+    else:
+        # Capacity too small for the target floor; degrade gracefully.
+        cap = {source: 1 for source in sources}
+        remaining = max(0, slots - len(sources))
     if remaining > 0:
         weight_total = sum(weights.values()) or float(len(sources))
         fractions: dict[str, float] = {}
         for source in sources:
             add = remaining * (weights[source] / weight_total)
             whole = int(add)
-            cap[source] += whole
+            cap[source] = min(
+                len(source_to_devices[source]),
+                cap[source] + whole,
+            )
             fractions[source] = add - whole
-        leftover = slots - sum(cap.values())
+        leftover = max(0, slots - sum(cap.values()))
         for source in sorted(sources, key=lambda item: fractions[item], reverse=True):
             if leftover <= 0:
                 break
-            cap[source] += 1
-            leftover -= 1
+            if cap[source] < len(source_to_devices[source]):
+                cap[source] += 1
+                leftover -= 1
 
     for source in list(cap):
         cap[source] = min(cap[source], len(source_to_devices[source]))
