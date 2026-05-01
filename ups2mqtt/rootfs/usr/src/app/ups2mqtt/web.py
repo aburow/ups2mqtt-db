@@ -48,6 +48,7 @@ CSV_IMPORT_HEADERS = [
     "Source",
     "Host",
     "Port",
+    "SNMPPort",
     "Unit",
     "SNMP",
     "Poll",
@@ -444,7 +445,7 @@ def _generate_devices_csv(devices: list[DeviceConfig]) -> str:
     lines = [",".join(CSV_IMPORT_HEADERS)]
     for d in devices:
         lines.append(
-            f"{d.id},{d.source},{d.host},{d.port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{(d.location or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.discovery_enabled},{d.polling_enabled}"
+            f"{d.id},{d.source},{d.host},{d.port},{d.snmp_port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{(d.location or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.discovery_enabled},{d.polling_enabled}"
         )
     return "\n".join(lines)
 
@@ -1475,6 +1476,22 @@ def start_web_server(
                 ),
                 "",
             )
+        if action == "remove_all_devices":
+            removed = 0
+            for device in list(store.list_devices()):
+                if store.delete_by_uid(device.device_uid):
+                    removed += 1
+                    if trigger_metrics_drop:
+                        identity = device.device_uid or device.id
+                        trigger_metrics_drop(identity)
+                        if identity != device.id:
+                            trigger_metrics_drop(device.id)
+            trigger_reload()
+            AUDIT_LOG.info(
+                "maintenance action=remove_all_devices status=success removed=%d",
+                removed,
+            )
+            return True, f"Removed {removed} device(s)", ""
         if action == "set_log_level":
             level_name = data.get("runtime_log_level", [""])[0].strip().upper()
             if level_name not in set(RUNTIME_LOG_LEVELS):
@@ -1656,6 +1673,7 @@ def start_web_server(
                         "id": str(device.id),
                         "host": str(device.host),
                         "port": int(device.port),
+                        "snmp_port": int(device.snmp_port),
                         "unit_id": int(device.unit_id),
                         "snmp_community": str(device.snmp_community),
                         "poll_interval": (
@@ -1729,6 +1747,7 @@ def start_web_server(
             "source": str(device.source),
             "host": str(device.host),
             "port": int(device.port),
+            "snmp_port": int(device.snmp_port),
             "unit_id": int(device.unit_id),
             "snmp_community": str(device.snmp_community),
             "poll_interval": (
@@ -1980,10 +1999,11 @@ def start_web_server(
                 )
             try:
                 port = int(config_payload.get("port", 502))
+                snmp_port = int(config_payload.get("snmp_port", 161))
                 unit_id = int(config_payload.get("unit_id", 1))
             except (TypeError, ValueError):
                 raise ValueError(
-                    f"Invalid device entry at index {index}: port/unit_id must be numeric"
+                    f"Invalid device entry at index {index}: port/snmp_port/unit_id must be numeric"
                 ) from None
             poll_interval_raw = config_payload.get("poll_interval")
             poll_interval: int | None
@@ -2097,7 +2117,7 @@ def start_web_server(
                 source=driver_key,
                 host=host,
                 port=port,
-                snmp_port=int(config_payload.get("snmp_port", 161) or 161),
+                snmp_port=snmp_port,
                 unit_id=unit_id,
                 snmp_community=str(config_payload.get("snmp_community", "public") or "public"),
                 poll_interval=poll_interval,
