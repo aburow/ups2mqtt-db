@@ -491,6 +491,11 @@ async def _device_loop(
 
         identity = device.device_uid or device.id
         started = monotonic()
+        wait_started = started
+        poll_started = 0.0
+        wait_elapsed = 0.0
+        poll_elapsed = 0.0
+        publish_elapsed = 0.0
         metrics.record_start(identity)
         try:
             LOG.debug(
@@ -499,8 +504,6 @@ async def _device_loop(
                 ",".join(due_groups),
                 len(allowed_keys),
             )
-            wait_started = monotonic()
-            poll_started = 0.0
             if type_limiter is None:
                 async with global_poll_semaphore:
                     async with endpoint_semaphore:
@@ -604,6 +607,9 @@ async def _device_loop(
                     (monotonic() - started) * 1000,
                     len(values),
                     warning=warning_text,
+                    wait_ms=wait_elapsed * 1000,
+                    poll_ms=poll_elapsed * 1000,
+                    publish_ms=publish_elapsed * 1000,
                 )
             else:
                 LOG.warning("No values read for %s", device.id)
@@ -612,6 +618,9 @@ async def _device_loop(
                     (monotonic() - started) * 1000,
                     0,
                     warning=warning_text,
+                    wait_ms=wait_elapsed * 1000,
+                    poll_ms=poll_elapsed * 1000,
+                    publish_ms=publish_elapsed * 1000,
                 )
             cycle_elapsed = max(0.0, monotonic() - started)
             perf_cycles += 1
@@ -640,13 +649,31 @@ async def _device_loop(
                 monotonic() - started,
             )
         except TimeoutError:
+            if poll_started:
+                wait_elapsed = max(0.0, poll_started - wait_started)
+                poll_elapsed = max(0.0, monotonic() - poll_started)
             LOG.error("Polling timeout for %s after %ss", device.id, poll_timeout)
             metrics.record_timeout(
-                identity, (monotonic() - started) * 1000, poll_timeout
+                identity,
+                (monotonic() - started) * 1000,
+                poll_timeout,
+                wait_ms=wait_elapsed * 1000,
+                poll_ms=poll_elapsed * 1000,
+                publish_ms=publish_elapsed * 1000,
             )
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            if poll_started:
+                wait_elapsed = max(0.0, poll_started - wait_started)
+                poll_elapsed = max(0.0, monotonic() - poll_started)
             LOG.exception("Polling failed for %s: %s", device.id, err)
-            metrics.record_failure(identity, (monotonic() - started) * 1000, str(err))
+            metrics.record_failure(
+                identity,
+                (monotonic() - started) * 1000,
+                str(err),
+                wait_ms=wait_elapsed * 1000,
+                poll_ms=poll_elapsed * 1000,
+                publish_ms=publish_elapsed * 1000,
+            )
         next_base = monotonic()
         for group in due_groups:
             interval = float(group_intervals.get(group, base_interval))
@@ -1605,9 +1632,7 @@ async def async_main() -> None:
     loop = asyncio.get_running_loop()
     global_poll_semaphore = asyncio.Semaphore(config.max_concurrent_polls)
     metrics = MetricsStore(global_poll_semaphore=global_poll_semaphore, db=db)
-    type_limiter = AdaptiveTypeLimiter(config.max_concurrent_polls)
-    type_caps: dict[str, int] = {}
-    last_type_rebalance = 0.0
+    type_limiter: AdaptiveTypeLimiter | None = None
 
     # Helper for mapping metrics IDs to device IDs when names change
     def _metrics_rename(old_id: str, new_id: str) -> None:
@@ -1872,19 +1897,6 @@ async def async_main() -> None:
                     profiles=profile_state["profiles"],
                     profile_bindings=profile_bindings,
                 )
-            now = monotonic()
-            if now - last_type_rebalance >= 30.0:
-                new_caps = _compute_adaptive_type_caps(
-                    running=running,
-                    metrics_snapshot=metrics.snapshot(),
-                    total_slots=config.max_concurrent_polls,
-                    current_caps=type_caps,
-                )
-                if new_caps and new_caps != type_caps:
-                    type_caps = new_caps
-                    await type_limiter.update_caps(type_caps)
-                    LOG.info("Adaptive type caps updated: %s", type_caps)
-                last_type_rebalance = now
             await asyncio.sleep(1)
     finally:
         for device, _runtime_signature, task in running.values():

@@ -526,6 +526,21 @@ def _prepare_metrics_presentation(
                     if item.get("last_duration_ms") is not None
                     else ""
                 ),
+                "wait_ms": (
+                    f"{float(item.get('last_wait_ms')):.1f}"
+                    if item.get("last_wait_ms") is not None
+                    else ""
+                ),
+                "poll_ms": (
+                    f"{float(item.get('last_poll_ms')):.1f}"
+                    if item.get("last_poll_ms") is not None
+                    else ""
+                ),
+                "publish_ms": (
+                    f"{float(item.get('last_publish_ms')):.1f}"
+                    if item.get("last_publish_ms") is not None
+                    else ""
+                ),
                 "cadence_min_ms": (
                     f"{float(item.get('cadence_min_ms')):.1f}"
                     if item.get("cadence_min_ms") is not None
@@ -548,7 +563,8 @@ def _prepare_metrics_presentation(
                 ),
                 "utilization": (
                     f"{(float(item.get('average_duration_ms', 0.0)) / float(item.get('cadence_average_ms'))):.2f}"
-                    if float(item.get("cadence_average_ms") or 0.0) > 0.0
+                    if int(item.get("polls_succeeded") or 0) > 0
+                    and float(item.get("cadence_average_ms") or 0.0) > 0.0
                     else ""
                 ),
                 "values": int(item.get("last_values_count") or 0),

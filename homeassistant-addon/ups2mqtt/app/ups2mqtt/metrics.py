@@ -27,6 +27,9 @@ class DeviceMetrics:
     min_duration_ms: float | None = None
     max_duration_ms: float | None = None
     last_duration_ms: float | None = None
+    last_wait_ms: float | None = None
+    last_poll_ms: float | None = None
+    last_publish_ms: float | None = None
     last_status: str = "unknown"
     last_error: str = ""
     last_update_utc: str = ""
@@ -93,6 +96,9 @@ class MetricsStore:
         duration_ms: float,
         values_count: int,
         warning: str = "",
+        wait_ms: float | None = None,
+        poll_ms: float | None = None,
+        publish_ms: float | None = None,
     ) -> None:
         with self._lock:
             metric = self._ensure(device_id)
@@ -107,6 +113,9 @@ class MetricsStore:
             if metric.max_duration_ms is None or duration_ms > metric.max_duration_ms:
                 metric.max_duration_ms = duration_ms
             metric.last_duration_ms = duration_ms
+            metric.last_wait_ms = wait_ms
+            metric.last_poll_ms = poll_ms
+            metric.last_publish_ms = publish_ms
             metric.last_status = "success"
             if warning:
                 metric.last_error = warning[:500]
@@ -115,23 +124,43 @@ class MetricsStore:
             self.polls_in_flight -= 1
 
     def record_timeout(
-        self, device_id: str, duration_ms: float, timeout_s: int
+        self,
+        device_id: str,
+        duration_ms: float,
+        timeout_s: int,
+        wait_ms: float | None = None,
+        poll_ms: float | None = None,
+        publish_ms: float | None = None,
     ) -> None:
         with self._lock:
             metric = self._ensure(device_id)
             metric.polls_failed += 1
             metric.polls_timed_out += 1
             metric.last_duration_ms = duration_ms
+            metric.last_wait_ms = wait_ms
+            metric.last_poll_ms = poll_ms
+            metric.last_publish_ms = publish_ms
             metric.last_status = "timeout"
             metric.last_error = f"Timeout after {timeout_s}s"[:500]
             metric.last_update_utc = _utc_now()
             self.polls_in_flight -= 1
 
-    def record_failure(self, device_id: str, duration_ms: float, error: str) -> None:
+    def record_failure(
+        self,
+        device_id: str,
+        duration_ms: float,
+        error: str,
+        wait_ms: float | None = None,
+        poll_ms: float | None = None,
+        publish_ms: float | None = None,
+    ) -> None:
         with self._lock:
             metric = self._ensure(device_id)
             metric.polls_failed += 1
             metric.last_duration_ms = duration_ms
+            metric.last_wait_ms = wait_ms
+            metric.last_poll_ms = poll_ms
+            metric.last_publish_ms = publish_ms
             metric.last_status = "error"
             metric.last_error = error[:500]
             metric.last_update_utc = _utc_now()
