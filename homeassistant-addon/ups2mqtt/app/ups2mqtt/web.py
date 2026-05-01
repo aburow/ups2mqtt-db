@@ -598,6 +598,25 @@ def _prepare_metrics_presentation(
             metrics.get("backpressure", {}).get("adaptive_concurrency", {})
         ),
     }
+    source_rows = []
+    for source, item in sorted(dict(metrics.get("sources", {})).items()):
+        source_rows.append(
+            {
+                "source": source,
+                "queued": int(item.get("queued") or 0),
+                "active": int(item.get("active") or 0),
+                "queued_total": int(item.get("polls_queued") or 0),
+                "dequeued_total": int(item.get("polls_dequeued") or 0),
+                "completed_total": int(item.get("polls_completed") or 0),
+                "failed": int(item.get("polls_failed") or 0),
+                "timeout": int(item.get("polls_timed_out") or 0),
+                "wait_avg_ms": f"{float(item.get('average_wait_ms') or 0.0):.1f}",
+                "wait_p50_ms": f"{float(item.get('wait_p50_ms') or 0.0):.1f}",
+                "wait_p95_ms": f"{float(item.get('wait_p95_ms') or 0.0):.1f}",
+                "endpoint_wait_p95_ms": f"{float(item.get('endpoint_wait_p95_ms') or 0.0):.1f}",
+                "max_queue_age_ms": f"{float(item.get('max_queue_age_ms') or 0.0):.1f}",
+            }
+        )
 
     return {
         "generated_at_utc": _format_utc_timestamp(
@@ -609,6 +628,7 @@ def _prepare_metrics_presentation(
         "total_failed_timeout": int(totals["polls_failed"])
         + int(totals["polls_timed_out"]),
         "backpressure": backpressure,
+        "source_rows": source_rows,
         "rows": rows,
     }
 

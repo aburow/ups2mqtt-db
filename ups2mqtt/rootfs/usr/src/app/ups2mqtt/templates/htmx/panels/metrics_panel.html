@@ -39,9 +39,13 @@
     <div class="card-body py-2">
       <div class="small text-muted mb-1"><strong>Backpressure</strong></div>
       <div class="small">
-        Polls in-flight: <strong>{{ backpressure.polls_in_flight }}</strong>
+        Polls queued+active: <strong>{{ backpressure.polls_in_flight }}</strong>
         <span class="mx-2">|</span>
-        Semaphore available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}
+        Limiter active: <strong>{{ backpressure.adaptive_concurrency.in_flight or 0 }}</strong>
+        <span class="mx-2">|</span>
+        Limiter queued: <strong>{{ backpressure.adaptive_concurrency.queued or 0 }}</strong>
+        <span class="mx-2">|</span>
+        Limiter available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}
         {% if backpressure.adaptive_concurrency %}
         <span class="mx-2">|</span>
         Adaptive: <strong>{{ "on" if backpressure.adaptive_concurrency.adaptive_enabled else "off" }}</strong>
@@ -54,6 +58,43 @@
         <span class="mx-2">|</span>
         Wait p50/p95: <strong>{{ "%.1f"|format(backpressure.wait_pressure.p50_wait_ms or 0) }} / {{ "%.1f"|format(backpressure.wait_pressure.p95_wait_ms or 0) }} ms</strong>
         {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Driver</th><th>Queued</th><th>Active</th><th>Queued Total</th><th>Dequeued</th><th>Completed</th>
+              <th>Failed</th><th>Timeout</th><th>Wait Avg ms</th><th>Wait p50 ms</th><th>Wait p95 ms</th>
+              <th>Endpoint p95 ms</th><th>Max Queue Age ms</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in source_rows %}
+            <tr>
+              <td>{{ row.source }}</td>
+              <td>{{ row.queued }}</td>
+              <td>{{ row.active }}</td>
+              <td>{{ row.queued_total }}</td>
+              <td>{{ row.dequeued_total }}</td>
+              <td>{{ row.completed_total }}</td>
+              <td>{{ row.failed }}</td>
+              <td>{{ row.timeout }}</td>
+              <td>{{ row.wait_avg_ms }}</td>
+              <td>{{ row.wait_p50_ms }}</td>
+              <td>{{ row.wait_p95_ms }}</td>
+              <td>{{ row.endpoint_wait_p95_ms }}</td>
+              <td>{{ row.max_queue_age_ms }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="13" class="text-muted p-3">No driver fairness metrics yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

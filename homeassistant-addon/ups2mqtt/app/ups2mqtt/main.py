@@ -207,17 +207,24 @@ async def _run_adaptive_concurrency_controller(
     *,
     limiter: AdjustableConcurrencyLimiter,
     metrics: MetricsStore,
+    poll_interval_seconds: int,
     window_seconds: int,
     target_p95_wait_ms: int,
 ) -> None:
     low_wait_ms = max(100.0, float(target_p95_wait_ms) * 0.10)
+    high_wait_floor_ms = max(100.0, float(target_p95_wait_ms) * 0.10)
+    sample_cap_ms = max(
+        float(target_p95_wait_ms) * 2.0,
+        float(max(1, int(poll_interval_seconds))) * 2000.0,
+    )
     idle_windows = 0
+    pressure_windows = 0
     check_interval = max(5.0, min(10.0, float(window_seconds) / 3.0))
     min_samples = 20
 
     while True:
         await asyncio.sleep(check_interval)
-        pressure = metrics.wait_pressure(window_seconds)
+        pressure = metrics.wait_pressure(window_seconds, sample_cap_ms=sample_cap_ms)
         samples = int(pressure.get("samples", 0))
         if samples < min_samples:
             continue
@@ -226,19 +233,32 @@ async def _run_adaptive_concurrency_controller(
         max_limit = int(snapshot.get("configured_max", current_limit))
         min_limit = int(snapshot.get("configured_min", current_limit))
         available = int(snapshot.get("available", 0))
+        in_flight = int(snapshot.get("in_flight", 0))
         p95_wait_ms = float(pressure.get("p95_wait_ms", 0.0))
         p50_wait_ms = float(pressure.get("p50_wait_ms", 0.0))
 
-        if p95_wait_ms > float(target_p95_wait_ms) and available == 0:
-            step = max(4, int(current_limit * 0.10 + 0.999))
+        saturated = available == 0 and in_flight >= current_limit
+        if (
+            saturated
+            and p95_wait_ms > float(target_p95_wait_ms)
+            and p50_wait_ms > high_wait_floor_ms
+        ):
+            pressure_windows += 1
+        else:
+            pressure_windows = 0
+
+        if pressure_windows >= 3:
+            step = 2
             new_limit = min(max_limit, current_limit + step)
             idle_windows = 0
+            pressure_windows = 0
             if new_limit > current_limit:
                 applied = await limiter.set_limit(
                     new_limit,
                     reason=(
                         f"p95_wait_ms={p95_wait_ms:.1f} "
-                        f"p50_wait_ms={p50_wait_ms:.1f} samples={samples}"
+                        f"p50_wait_ms={p50_wait_ms:.1f} "
+                        f"samples={samples} cap_ms={sample_cap_ms:.1f}"
                     ),
                 )
                 LOG.info(
@@ -261,6 +281,8 @@ async def _run_adaptive_concurrency_controller(
             idle_windows += 1
         else:
             idle_windows = 0
+        if idle_windows:
+            pressure_windows = 0
         if idle_windows < 3:
             continue
         step = max(1, int(current_limit * 0.05))
@@ -580,7 +602,7 @@ async def _device_loop(
         wait_elapsed = 0.0
         poll_elapsed = 0.0
         publish_elapsed = 0.0
-        metrics.record_start(identity)
+        metrics.record_start(identity, runtime_source)
         try:
             LOG.debug(
                 "Polling cycle started for %s (groups=%s, allowed_keys=%d)",
@@ -589,18 +611,38 @@ async def _device_loop(
                 len(allowed_keys),
             )
             if type_limiter is None:
-                async with global_poll_semaphore:
+                async with global_poll_semaphore.slot(runtime_source):
+                    endpoint_wait_started = monotonic()
                     async with endpoint_semaphore:
                         poll_started = monotonic()
+                        metrics.record_dequeue(
+                            identity,
+                            runtime_source,
+                            wait_ms=(poll_started - wait_started) * 1000.0,
+                            endpoint_wait_ms=(
+                                poll_started - endpoint_wait_started
+                            )
+                            * 1000.0,
+                        )
                         values = await asyncio.wait_for(
                             poll_device(runtime_device, profile, set(due_groups)),
                             timeout=max(2, poll_timeout),
                         )
             else:
                 async with type_limiter.slot(runtime_source):
-                    async with global_poll_semaphore:
+                    async with global_poll_semaphore.slot(runtime_source):
+                        endpoint_wait_started = monotonic()
                         async with endpoint_semaphore:
                             poll_started = monotonic()
+                            metrics.record_dequeue(
+                                identity,
+                                runtime_source,
+                                wait_ms=(poll_started - wait_started) * 1000.0,
+                                endpoint_wait_ms=(
+                                    poll_started - endpoint_wait_started
+                                )
+                                * 1000.0,
+                            )
                             values = await asyncio.wait_for(
                                 poll_device(runtime_device, profile, set(due_groups)),
                                 timeout=max(2, poll_timeout),
@@ -1835,6 +1877,7 @@ async def async_main() -> None:
             _run_adaptive_concurrency_controller(
                 limiter=global_poll_semaphore,
                 metrics=metrics,
+                poll_interval_seconds=config.poll_interval,
                 window_seconds=config.adaptive_concurrency_window_seconds,
                 target_p95_wait_ms=config.adaptive_concurrency_target_p95_wait_ms,
             )

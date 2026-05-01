@@ -45,6 +45,25 @@ class DeviceMetrics:
     cadence_last_ms: float | None = None
 
 
+@dataclass(slots=True)
+class SourceMetrics:
+    polls_queued: int = 0
+    polls_dequeued: int = 0
+    polls_completed: int = 0
+    polls_failed: int = 0
+    polls_timed_out: int = 0
+    total_wait_ms: float = 0.0
+    average_wait_ms: float = 0.0
+    last_wait_ms: float | None = None
+    max_wait_ms: float | None = None
+    wait_p50_ms: float = 0.0
+    wait_p95_ms: float = 0.0
+    endpoint_wait_p95_ms: float = 0.0
+    max_queue_age_ms: float = 0.0
+    active: int = 0
+    queued: int = 0
+
+
 class MetricsStore:
     def __init__(
         self,
@@ -53,8 +72,13 @@ class MetricsStore:
     ) -> None:
         self._lock = threading.Lock()
         self._devices: dict[str, DeviceMetrics] = {}
+        self._device_sources: dict[str, str] = {}
+        self._sources: dict[str, SourceMetrics] = {}
         self._last_start_monotonic: dict[str, float] = {}
         self._wait_samples: deque[tuple[float, float]] = deque(maxlen=10000)
+        self._source_wait_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._source_endpoint_wait_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._source_queue_started: dict[str, deque[float]] = {}
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -64,16 +88,40 @@ class MetricsStore:
             self._devices[device_id] = DeviceMetrics()
         return self._devices[device_id]
 
+    def _ensure_source(self, source: str) -> SourceMetrics:
+        key = str(source or "unknown")
+        if key not in self._sources:
+            self._sources[key] = SourceMetrics()
+        return self._sources[key]
+
     def _record_wait_sample_locked(self, wait_ms: float | None) -> None:
         if wait_ms is None:
             return
         self._wait_samples.append((monotonic(), max(0.0, float(wait_ms))))
 
-    def _wait_pressure_locked(self, window_seconds: int) -> dict[str, float | int]:
+    @staticmethod
+    def _percentiles(values: list[float]) -> tuple[float, float, float]:
+        if not values:
+            return 0.0, 0.0, 0.0
+        ordered = sorted(values)
+        p50_index = min(len(ordered) - 1, int((len(ordered) - 1) * 0.50))
+        p95_index = min(len(ordered) - 1, int((len(ordered) - 1) * 0.95))
+        return float(ordered[p50_index]), float(ordered[p95_index]), float(ordered[-1])
+
+    def _wait_pressure_locked(
+        self,
+        window_seconds: int,
+        sample_cap_ms: float | None = None,
+    ) -> dict[str, float | int]:
         cutoff = monotonic() - max(1, int(window_seconds))
         while self._wait_samples and self._wait_samples[0][0] < cutoff:
             self._wait_samples.popleft()
-        values = sorted(wait_ms for _sample_time, wait_ms in self._wait_samples)
+        values = [
+            min(wait_ms, float(sample_cap_ms))
+            if sample_cap_ms is not None and sample_cap_ms > 0
+            else wait_ms
+            for _sample_time, wait_ms in self._wait_samples
+        ]
         if not values:
             return {
                 "samples": 0,
@@ -82,24 +130,30 @@ class MetricsStore:
                 "p95_wait_ms": 0.0,
                 "max_wait_ms": 0.0,
             }
-        p50_index = min(len(values) - 1, int((len(values) - 1) * 0.50))
-        p95_index = min(len(values) - 1, int((len(values) - 1) * 0.95))
+        p50_wait_ms, p95_wait_ms, max_wait_ms = self._percentiles(values)
         return {
             "samples": len(values),
             "window_seconds": int(window_seconds),
-            "p50_wait_ms": float(values[p50_index]),
-            "p95_wait_ms": float(values[p95_index]),
-            "max_wait_ms": float(values[-1]),
+            "p50_wait_ms": p50_wait_ms,
+            "p95_wait_ms": p95_wait_ms,
+            "max_wait_ms": max_wait_ms,
         }
 
-    def wait_pressure(self, window_seconds: int) -> dict[str, float | int]:
+    def wait_pressure(
+        self,
+        window_seconds: int,
+        sample_cap_ms: float | None = None,
+    ) -> dict[str, float | int]:
         with self._lock:
-            return self._wait_pressure_locked(window_seconds)
+            return self._wait_pressure_locked(window_seconds, sample_cap_ms)
 
-    def record_start(self, device_id: str) -> None:
+    def record_start(self, device_id: str, source: str = "") -> None:
         now_monotonic = monotonic()
+        source_key = str(source or "unknown")
         with self._lock:
             metric = self._ensure(device_id)
+            source_metric = self._ensure_source(source_key)
+            self._device_sources[device_id] = source_key
             last_started = self._last_start_monotonic.get(device_id)
             if last_started is not None and now_monotonic >= last_started:
                 cadence_ms = max(0.0, (now_monotonic - last_started) * 1000.0)
@@ -124,6 +178,94 @@ class MetricsStore:
             metric.last_status = "running"
             metric.last_update_utc = _utc_now()
             self.polls_in_flight += 1
+            source_metric.polls_queued += 1
+            source_metric.queued += 1
+            self._source_queue_started.setdefault(source_key, deque()).append(
+                now_monotonic
+            )
+
+    def record_dequeue(
+        self,
+        device_id: str,
+        source: str = "",
+        wait_ms: float | None = None,
+        endpoint_wait_ms: float | None = None,
+    ) -> None:
+        source_key = str(source or self._device_sources.get(device_id) or "unknown")
+        now_monotonic = monotonic()
+        with self._lock:
+            source_metric = self._ensure_source(source_key)
+            source_metric.polls_dequeued += 1
+            source_metric.active += 1
+            if source_metric.queued > 0:
+                source_metric.queued -= 1
+            started_queue = self._source_queue_started.setdefault(
+                source_key, deque()
+            )
+            while started_queue and now_monotonic - started_queue[0] > 3600:
+                started_queue.popleft()
+            if started_queue:
+                age_ms = max(0.0, (now_monotonic - started_queue.popleft()) * 1000.0)
+                source_metric.max_queue_age_ms = max(source_metric.max_queue_age_ms, age_ms)
+            if wait_ms is not None:
+                wait_value = max(0.0, float(wait_ms))
+                source_metric.last_wait_ms = wait_value
+                source_metric.max_wait_ms = (
+                    wait_value
+                    if source_metric.max_wait_ms is None
+                    else max(source_metric.max_wait_ms, wait_value)
+                )
+                samples = self._source_wait_samples.setdefault(
+                    source_key, deque(maxlen=1000)
+                )
+                samples.append((now_monotonic, wait_value))
+                recent = [
+                    value
+                    for sample_time, value in samples
+                    if now_monotonic - sample_time <= 60.0
+                ]
+                source_metric.wait_p50_ms, source_metric.wait_p95_ms, _ = (
+                    self._percentiles(recent)
+                )
+            if endpoint_wait_ms is not None:
+                endpoint_value = max(0.0, float(endpoint_wait_ms))
+                endpoint_samples = self._source_endpoint_wait_samples.setdefault(
+                    source_key, deque(maxlen=1000)
+                )
+                endpoint_samples.append((now_monotonic, endpoint_value))
+                recent_endpoint = [
+                    value
+                    for sample_time, value in endpoint_samples
+                    if now_monotonic - sample_time <= 60.0
+                ]
+                _p50, source_metric.endpoint_wait_p95_ms, _max = self._percentiles(
+                    recent_endpoint
+                )
+
+    def _record_source_complete_locked(
+        self,
+        device_id: str,
+        failed: bool = False,
+        timed_out: bool = False,
+        wait_ms: float | None = None,
+    ) -> None:
+        source_key = self._device_sources.get(device_id, "unknown")
+        source_metric = self._ensure_source(source_key)
+        source_metric.polls_completed += 1
+        if failed:
+            source_metric.polls_failed += 1
+        if timed_out:
+            source_metric.polls_timed_out += 1
+        if source_metric.active > 0:
+            source_metric.active -= 1
+        elif source_metric.queued > 0:
+            source_metric.queued -= 1
+        if wait_ms is not None:
+            source_metric.total_wait_ms += max(0.0, float(wait_ms))
+            if source_metric.polls_completed > 0:
+                source_metric.average_wait_ms = (
+                    source_metric.total_wait_ms / source_metric.polls_completed
+                )
 
     def record_success(
         self,
@@ -157,6 +299,7 @@ class MetricsStore:
             metric.last_success_utc = _utc_now()
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_source_complete_locked(device_id, wait_ms=wait_ms)
             self.polls_in_flight -= 1
 
     def record_timeout(
@@ -180,6 +323,12 @@ class MetricsStore:
             metric.last_error = f"Timeout after {timeout_s}s"[:500]
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_source_complete_locked(
+                device_id,
+                failed=True,
+                timed_out=True,
+                wait_ms=wait_ms,
+            )
             self.polls_in_flight -= 1
 
     def record_failure(
@@ -202,6 +351,11 @@ class MetricsStore:
             metric.last_error = error[:500]
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_source_complete_locked(
+                device_id,
+                failed=True,
+                wait_ms=wait_ms,
+            )
             self.polls_in_flight -= 1
 
     def rename(self, old_id: str, new_id: str) -> None:
@@ -209,18 +363,28 @@ class MetricsStore:
         with self._lock:
             if old_id in self._devices and old_id != new_id:
                 self._devices[new_id] = self._devices.pop(old_id)
+                if old_id in self._device_sources:
+                    self._device_sources[new_id] = self._device_sources.pop(old_id)
 
     def drop(self, device_id: str) -> None:
         """Remove metrics for a device that no longer exists."""
         with self._lock:
             self._devices.pop(device_id, None)
             self._last_start_monotonic.pop(device_id, None)
+            self._device_sources.pop(device_id, None)
 
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
         with self._lock:
             self._devices.clear()
             self._last_start_monotonic.clear()
+            self._device_sources.clear()
+            self._sources.clear()
+            self._wait_samples.clear()
+            self._source_wait_samples.clear()
+            self._source_endpoint_wait_samples.clear()
+            self._source_queue_started.clear()
+            self.polls_in_flight = 0
 
     def prune_unknown(self, valid_ids: set[str]) -> int:
         """Drop metric rows that do not belong to currently known device identities."""
@@ -231,12 +395,16 @@ class MetricsStore:
             for device_id in stale_ids:
                 self._devices.pop(device_id, None)
                 self._last_start_monotonic.pop(device_id, None)
+                self._device_sources.pop(device_id, None)
             return len(stale_ids)
 
     def snapshot(self) -> dict:
         with self._lock:
             devices = {
                 device_id: asdict(metric) for device_id, metric in self._devices.items()
+            }
+            sources = {
+                source: asdict(metric) for source, metric in self._sources.items()
             }
             polls_in_flight = self.polls_in_flight
             wait_pressure = self._wait_pressure_locked(60)
@@ -273,5 +441,6 @@ class MetricsStore:
             "generated_at_utc": _utc_now(),
             "totals": totals,
             "backpressure": backpressure,
+            "sources": sources,
             "devices": devices,
         }
