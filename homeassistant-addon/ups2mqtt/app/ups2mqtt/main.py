@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from copy import deepcopy
+from contextlib import asynccontextmanager
 import json
 import logging
 import os
@@ -47,6 +48,125 @@ LOG = logging.getLogger("ups2mqtt")
 DEVICE_LOG = logging.getLogger("ups2mqtt.device")
 AUDIT_LOG = logging.getLogger("ups2mqtt.audit")
 DISCOVERY_MIGRATION_MARKER = "/data/.discovery_v2_migrated"
+
+
+class AdaptiveTypeLimiter:
+    """Adaptive per-source concurrency limiter."""
+
+    def __init__(self, total_slots: int) -> None:
+        self._total_slots = max(1, int(total_slots))
+        self._caps: dict[str, int] = {}
+        self._inflight: dict[str, int] = defaultdict(int)
+        self._cond = asyncio.Condition()
+
+    async def acquire(self, source: str) -> None:
+        key = str(source or "")
+        async with self._cond:
+            while self._inflight[key] >= max(1, int(self._caps.get(key, 1))):
+                await self._cond.wait()
+            self._inflight[key] += 1
+
+    async def release(self, source: str) -> None:
+        key = str(source or "")
+        async with self._cond:
+            if self._inflight[key] > 0:
+                self._inflight[key] -= 1
+            self._cond.notify_all()
+
+    @asynccontextmanager
+    async def slot(self, source: str):
+        await self.acquire(source)
+        try:
+            yield
+        finally:
+            await self.release(source)
+
+    async def update_caps(self, caps: dict[str, int]) -> None:
+        normalized = {
+            str(source): max(1, int(value))
+            for source, value in caps.items()
+            if str(source)
+        }
+        async with self._cond:
+            self._caps = normalized
+            self._cond.notify_all()
+
+    async def snapshot(self) -> dict[str, dict[str, int]]:
+        async with self._cond:
+            out: dict[str, dict[str, int]] = {}
+            for source in sorted(set(self._caps) | set(self._inflight)):
+                out[source] = {
+                    "cap": int(self._caps.get(source, 1)),
+                    "inflight": int(self._inflight.get(source, 0)),
+                }
+            return out
+
+
+def _compute_adaptive_type_caps(
+    *,
+    running: dict[str, tuple[DeviceConfig, str, asyncio.Task]],
+    metrics_snapshot: dict[str, Any],
+    total_slots: int,
+    current_caps: dict[str, int],
+) -> dict[str, int]:
+    source_to_devices: dict[str, list[str]] = defaultdict(list)
+    for device, _runtime_signature, _task in running.values():
+        identity = str(device.device_uid or device.id)
+        source_to_devices[str(device.source or "")].append(identity)
+    sources = [source for source in source_to_devices if source]
+    if not sources:
+        return {}
+
+    slots = max(1, int(total_slots))
+    device_metrics = dict(metrics_snapshot.get("devices", {}))
+    weights: dict[str, float] = {}
+    for source in sources:
+        identities = source_to_devices[source]
+        durations: list[float] = []
+        failures = 0
+        starts = 0
+        for identity in identities:
+            metric = device_metrics.get(identity, {})
+            avg_ms = float(metric.get("average_duration_ms") or 0.0)
+            if avg_ms > 0:
+                durations.append(avg_ms)
+            failures += int(metric.get("polls_failed") or 0)
+            starts += int(metric.get("polls_started") or 0)
+        mean_ms = (sum(durations) / len(durations)) if durations else 1000.0
+        fail_rate = (failures / starts) if starts > 0 else 0.0
+        health = max(0.2, 1.0 - min(0.8, fail_rate))
+        weights[source] = (1.0 / max(1.0, mean_ms)) * health
+
+    cap: dict[str, int] = {source: 1 for source in sources}
+    remaining = max(0, slots - len(sources))
+    if remaining > 0:
+        weight_total = sum(weights.values()) or float(len(sources))
+        fractions: dict[str, float] = {}
+        for source in sources:
+            add = remaining * (weights[source] / weight_total)
+            whole = int(add)
+            cap[source] += whole
+            fractions[source] = add - whole
+        leftover = slots - sum(cap.values())
+        for source in sorted(sources, key=lambda item: fractions[item], reverse=True):
+            if leftover <= 0:
+                break
+            cap[source] += 1
+            leftover -= 1
+
+    for source in list(cap):
+        cap[source] = min(cap[source], len(source_to_devices[source]))
+
+    # Damp changes to avoid oscillation: adjust by at most 1 slot per rebalance.
+    adjusted = dict(cap)
+    for source in cap:
+        previous = int(current_caps.get(source, cap[source]))
+        target = int(cap[source])
+        if target > previous:
+            adjusted[source] = previous + 1
+        elif target < previous:
+            adjusted[source] = max(1, previous - 1)
+    return adjusted
 
 
 def _apply_catalog_derived_values(
@@ -242,6 +362,7 @@ async def _device_loop(
     global_poll_semaphore: asyncio.Semaphore,
     endpoint_semaphores: dict[str, asyncio.Semaphore],
     metrics: MetricsStore,
+    type_limiter: AdaptiveTypeLimiter | None = None,
     apps_dir: str | None = None,
 ) -> None:
     perf_sample_every = 20
@@ -347,13 +468,23 @@ async def _device_loop(
             )
             wait_started = monotonic()
             poll_started = 0.0
-            async with global_poll_semaphore:
-                async with endpoint_semaphore:
-                    poll_started = monotonic()
-                    values = await asyncio.wait_for(
-                        poll_device(runtime_device, profile, set(due_groups)),
-                        timeout=max(2, poll_timeout),
-                    )
+            if type_limiter is None:
+                async with global_poll_semaphore:
+                    async with endpoint_semaphore:
+                        poll_started = monotonic()
+                        values = await asyncio.wait_for(
+                            poll_device(runtime_device, profile, set(due_groups)),
+                            timeout=max(2, poll_timeout),
+                        )
+            else:
+                async with type_limiter.slot(runtime_source):
+                    async with global_poll_semaphore:
+                        async with endpoint_semaphore:
+                            poll_started = monotonic()
+                            values = await asyncio.wait_for(
+                                poll_device(runtime_device, profile, set(due_groups)),
+                                timeout=max(2, poll_timeout),
+                            )
             warning_text = ""
             if isinstance(values, dict):
                 warning_raw = values.pop("__poll_warning__", "")
@@ -528,6 +659,7 @@ async def _reconcile_device_tasks(
     metrics: MetricsStore,
     discovery_registry: dict[str, set[str]],
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]],
+    type_limiter: AdaptiveTypeLimiter | None = None,
     apps_dir: str | None = None,
     ha_url: str | None = None,
     ha_token: str | None = None,
@@ -710,6 +842,7 @@ async def _reconcile_device_tasks(
                 global_poll_semaphore,
                 endpoint_semaphores,
                 metrics,
+                type_limiter=type_limiter,
                 apps_dir=apps_dir,
             )
         )
@@ -1436,6 +1569,9 @@ async def async_main() -> None:
     loop = asyncio.get_running_loop()
     global_poll_semaphore = asyncio.Semaphore(config.max_concurrent_polls)
     metrics = MetricsStore(global_poll_semaphore=global_poll_semaphore, db=db)
+    type_limiter = AdaptiveTypeLimiter(config.max_concurrent_polls)
+    type_caps: dict[str, int] = {}
+    last_type_rebalance = 0.0
 
     # Helper for mapping metrics IDs to device IDs when names change
     def _metrics_rename(old_id: str, new_id: str) -> None:
@@ -1688,6 +1824,7 @@ async def async_main() -> None:
                     metrics=metrics,
                     discovery_registry=discovery_registry,
                     running=running,
+                    type_limiter=type_limiter,
                     apps_dir=config.apps_dir,
                     ha_url=config.ha_url,
                     ha_token=config.ha_token,
@@ -1699,6 +1836,19 @@ async def async_main() -> None:
                     profiles=profile_state["profiles"],
                     profile_bindings=profile_bindings,
                 )
+            now = monotonic()
+            if now - last_type_rebalance >= 30.0:
+                new_caps = _compute_adaptive_type_caps(
+                    running=running,
+                    metrics_snapshot=metrics.snapshot(),
+                    total_slots=config.max_concurrent_polls,
+                    current_caps=type_caps,
+                )
+                if new_caps and new_caps != type_caps:
+                    type_caps = new_caps
+                    await type_limiter.update_caps(type_caps)
+                    LOG.info("Adaptive type caps updated: %s", type_caps)
+                last_type_rebalance = now
             await asyncio.sleep(1)
     finally:
         for device, _runtime_signature, task in running.values():
