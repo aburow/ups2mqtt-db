@@ -7,6 +7,7 @@ import asyncio
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from time import monotonic
 
 from .database import Database
 
@@ -31,6 +32,12 @@ class DeviceMetrics:
     last_update_utc: str = ""
     last_success_utc: str = ""
     last_values_count: int = 0
+    cadence_count: int = 0
+    cadence_total_ms: float = 0.0
+    cadence_average_ms: float = 0.0
+    cadence_min_ms: float | None = None
+    cadence_max_ms: float | None = None
+    cadence_last_ms: float | None = None
 
 
 class MetricsStore:
@@ -41,6 +48,7 @@ class MetricsStore:
     ) -> None:
         self._lock = threading.Lock()
         self._devices: dict[str, DeviceMetrics] = {}
+        self._last_start_monotonic: dict[str, float] = {}
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -51,8 +59,29 @@ class MetricsStore:
         return self._devices[device_id]
 
     def record_start(self, device_id: str) -> None:
+        now_monotonic = monotonic()
         with self._lock:
             metric = self._ensure(device_id)
+            last_started = self._last_start_monotonic.get(device_id)
+            if last_started is not None and now_monotonic >= last_started:
+                cadence_ms = max(0.0, (now_monotonic - last_started) * 1000.0)
+                metric.cadence_count += 1
+                metric.cadence_total_ms += cadence_ms
+                metric.cadence_average_ms = (
+                    metric.cadence_total_ms / metric.cadence_count
+                )
+                metric.cadence_last_ms = cadence_ms
+                if (
+                    metric.cadence_min_ms is None
+                    or cadence_ms < metric.cadence_min_ms
+                ):
+                    metric.cadence_min_ms = cadence_ms
+                if (
+                    metric.cadence_max_ms is None
+                    or cadence_ms > metric.cadence_max_ms
+                ):
+                    metric.cadence_max_ms = cadence_ms
+            self._last_start_monotonic[device_id] = now_monotonic
             metric.polls_started += 1
             metric.last_status = "running"
             metric.last_update_utc = _utc_now()
@@ -118,11 +147,13 @@ class MetricsStore:
         """Remove metrics for a device that no longer exists."""
         with self._lock:
             self._devices.pop(device_id, None)
+            self._last_start_monotonic.pop(device_id, None)
 
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
         with self._lock:
             self._devices.clear()
+            self._last_start_monotonic.clear()
 
     def prune_unknown(self, valid_ids: set[str]) -> int:
         """Drop metric rows that do not belong to currently known device identities."""
@@ -132,6 +163,7 @@ class MetricsStore:
             ]
             for device_id in stale_ids:
                 self._devices.pop(device_id, None)
+                self._last_start_monotonic.pop(device_id, None)
             return len(stale_ids)
 
     def snapshot(self) -> dict:

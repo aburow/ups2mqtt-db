@@ -53,7 +53,9 @@
           <thead>
             <tr>
               <th>Device</th><th>Status</th><th>Started</th><th>Success</th><th>Failed</th><th>Timeout</th>
-              <th>Min ms</th><th>Avg ms</th><th>Max ms</th><th>Last ms</th><th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
+              <th>Min ms</th><th>Avg ms</th><th>Max ms</th><th>Last ms</th>
+              <th>Cad Min ms</th><th>Cad Avg ms</th><th>Cad Max ms</th><th>Cad Last ms</th><th>Util</th>
+              <th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -69,6 +71,11 @@
               <td>{{ row.avg_ms }}</td>
               <td>{{ row.max_ms }}</td>
               <td>{{ row.last_ms }}</td>
+              <td>{{ row.cadence_min_ms }}</td>
+              <td>{{ row.cadence_avg_ms }}</td>
+              <td>{{ row.cadence_max_ms }}</td>
+              <td>{{ row.cadence_last_ms }}</td>
+              <td>{{ row.utilization }}</td>
               <td>{{ row["values"] }}</td>
               <td>{{ row.last_error }}</td>
               <td>{{ row.updated_utc }}</td>
@@ -85,7 +92,7 @@
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="14" class="text-muted p-3">No metrics yet.</td></tr>
+            <tr><td colspan="19" class="text-muted p-3">No metrics yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
