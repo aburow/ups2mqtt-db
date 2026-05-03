@@ -221,6 +221,7 @@ async def _run_adaptive_concurrency_controller(
     pressure_windows = 0
     check_interval = max(5.0, min(10.0, float(window_seconds) / 3.0))
     min_samples = 20
+    last_source_totals: dict[str, dict[str, int]] = {}
 
     while True:
         await asyncio.sleep(check_interval)
@@ -236,6 +237,49 @@ async def _run_adaptive_concurrency_controller(
         in_flight = int(snapshot.get("in_flight", 0))
         p95_wait_ms = float(pressure.get("p95_wait_ms", 0.0))
         p50_wait_ms = float(pressure.get("p50_wait_ms", 0.0))
+        source_totals = metrics.source_totals()
+        completed_delta = 0
+        timeout_delta = 0
+        failed_delta = 0
+        for source, totals in source_totals.items():
+            previous = last_source_totals.get(source, {})
+            completed_now = int(totals.get("polls_completed", 0))
+            failed_now = int(totals.get("polls_failed", 0))
+            timed_out_now = int(totals.get("polls_timed_out", 0))
+            completed_prev = int(previous.get("polls_completed", completed_now))
+            failed_prev = int(previous.get("polls_failed", failed_now))
+            timed_out_prev = int(previous.get("polls_timed_out", timed_out_now))
+            completed_delta += max(0, completed_now - completed_prev)
+            failed_delta += max(0, failed_now - failed_prev)
+            timeout_delta += max(0, timed_out_now - timed_out_prev)
+        last_source_totals = source_totals
+
+        timeout_rate = timeout_delta / max(1, completed_delta)
+        if timeout_delta > 0 and current_limit > min_limit:
+            step = max(4, int(current_limit * max(0.15, min(timeout_rate, 0.50))))
+            new_limit = max(min_limit, current_limit - step)
+            idle_windows = 0
+            pressure_windows = 0
+            if new_limit < current_limit:
+                applied = await limiter.set_limit(
+                    new_limit,
+                    reason=(
+                        f"timeout_backoff timeouts={timeout_delta} "
+                        f"failures={failed_delta} completed={completed_delta} "
+                        f"timeout_rate={timeout_rate:.3f}"
+                    ),
+                )
+                LOG.warning(
+                    "Adaptive concurrency decreased on timeout pressure: %d -> %d "
+                    "(timeouts=%d failures=%d completed=%d timeout_rate=%.3f)",
+                    current_limit,
+                    applied,
+                    timeout_delta,
+                    failed_delta,
+                    completed_delta,
+                    timeout_rate,
+                )
+            continue
 
         saturated = available == 0 and in_flight >= current_limit
         if (

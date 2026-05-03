@@ -24,6 +24,11 @@ def test_successful_poll_accounting_remains_balanced() -> None:
     assert snapshot["sources"]["source-a"]["polls_completed"] == 1
     assert snapshot["sources"]["source-a"]["active"] == 0
     assert snapshot["sources"]["source-a"]["queued"] == 0
+    assert metrics.source_totals()["source-a"] == {
+        "polls_completed": 1,
+        "polls_failed": 0,
+        "polls_timed_out": 0,
+    }
 
 
 def test_stale_completion_after_clear_does_not_create_impossible_totals() -> None:

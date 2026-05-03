@@ -154,6 +154,17 @@ class MetricsStore:
         with self._lock:
             return self._wait_pressure_locked(window_seconds, sample_cap_ms)
 
+    def source_totals(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {
+                source: {
+                    "polls_completed": int(metric.polls_completed),
+                    "polls_failed": int(metric.polls_failed),
+                    "polls_timed_out": int(metric.polls_timed_out),
+                }
+                for source, metric in self._sources.items()
+            }
+
     def record_start(self, device_id: str, source: str = "") -> None:
         now_monotonic = monotonic()
         source_key = str(source or "unknown")
