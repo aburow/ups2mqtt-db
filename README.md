@@ -6,7 +6,7 @@
 
 **UPS telemetry bridge for MQTT and Home Assistant**
 
-Expose UPS metrics (battery, load, runtime, status) via MQTT and integrate seamlessly into Home Assistant.
+Expose UPS metrics (battery, load, runtime, status) via MQTT and integrate reliably into Home Assistant.
 
 ---
 

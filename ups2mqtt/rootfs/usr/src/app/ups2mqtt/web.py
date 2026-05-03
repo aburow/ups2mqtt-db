@@ -2786,6 +2786,7 @@ def start_web_server(
         existing_device: DeviceConfig | None = None,
     ) -> DeviceConfig:
         device_id = _validate_device_id((data.get("id", [""])[0]).strip())
+        source = (data.get("source", [""])[0]).strip()
         host = _validate_host((data.get("host", [""])[0]).strip())
         port = _validate_port(_int_or_default((data.get("port", [""])[0]), 502))
         snmp_port = _validate_port(
@@ -2808,8 +2809,6 @@ def start_web_server(
         profile = _get_profile(profile_uid) if profile_uid else None
         if profile_uid and profile is None:
             raise ValueError("Selected profile not found")
-
-        source = (data.get("source", [""])[0]).strip()
         local_profile_payload: dict[str, object] | None = None
         local_selected_sensors: list[str] | None = None
         local_sensor_preferences: dict[str, dict[str, Any]] | None = None
@@ -3484,6 +3483,9 @@ def start_web_server(
 
         def _handle_htmx_post(self, parsed_path, data: dict[str, list[str]]) -> bool:
             filters = _device_filter_values_from_data(data)
+            # Backward-compatible alias: legacy CSV import posted to "/" with action=import_csv.
+            if parsed_path.path == "/" and (data.get("action", [""])[0]).strip() == "import_csv":
+                parsed_path = parsed_path._replace(path="/htmx/maintenance/import/csv")
             if parsed_path.path == "/htmx/devices/actions/upsert":
                 try:
                     original_id = (data.get("original_id", [""])[0]).strip()
@@ -4065,7 +4067,10 @@ def start_web_server(
                 )
                 return True
 
-            if parsed_path.path == "/htmx/logs/actions/clear":
+            if parsed_path.path in {
+                "/htmx/logs/actions/clear",
+                "/htmx/devices/actions/logs/clear",  # legacy alias
+            }:
                 log_buffer.clear()
                 LOG.debug("Cleared in-memory log buffer")
                 self._send_html(

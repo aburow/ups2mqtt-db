@@ -472,7 +472,7 @@ def test_csv_import_template_route_returns_headers_only(tmp_path: Path) -> None:
         assert status == HTTPStatus.OK
         assert headers.get("Content-Type", "").startswith("text/csv")
         assert body == (
-            "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
+            "ID,Source,Host,Port,SNMPPort,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
         )
     finally:
         server.shutdown()
