@@ -1,0 +1,9 @@
+.git/
+app/.venv/
+app/tests/
+app/**/__pycache__/
+app/.pytest_cache/
+app/.ruff_cache/
+app/**/*.pyc
+app/**/*.pyo
+**/.coverage

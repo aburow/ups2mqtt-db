@@ -1,4 +1,11 @@
-<div id="metrics-panel" class="d-flex flex-column gap-3">
+<div
+  id="metrics-panel"
+  class="d-flex flex-column gap-3"
+  hx-get="/htmx/devices/partials/panel/metrics"
+  hx-trigger="every 15s"
+  hx-target="#admin-panel"
+  hx-swap="innerHTML"
+>
   <div class="d-flex justify-content-between align-items-center">
     <h2 class="h5 m-0">Metrics</h2>
     <div class="d-flex gap-2 align-items-center">
@@ -24,40 +31,21 @@
       </form>
     </div>
   </div>
-  <div>
-    <small class="text-muted">Cleared counters may begin increasing again immediately while polling is active.</small>
-  </div>
-
   <div class="row g-2">
     <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Devices</div><div class="h5 m-0">{{ totals.devices }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Polls Started</div><div class="h5 m-0">{{ totals.polls_started }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Succeeded</div><div class="h5 m-0 text-success">{{ totals.polls_succeeded }}</div></div></div></div>
-    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Failed / Timeout</div><div class="h5 m-0 text-danger">{{ total_failed_timeout }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Success Rate</div><div class="h5 m-0 text-success">{{ totals.success_rate or "n/a" }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Errors</div><div class="h5 m-0 {{ 'text-danger' if totals.polls_errors else '' }}">{{ totals.polls_errors }}</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Devices With Errors</div><div class="h5 m-0 {{ 'text-danger' if totals.devices_with_errors else '' }}">{{ totals.devices_with_errors }}</div></div></div></div>
   </div>
 
   <div class="card">
     <div class="card-body py-2">
-      <div class="small text-muted mb-1"><strong>Backpressure</strong></div>
-      <div class="small">
-        Polls queued+active: <strong>{{ backpressure.polls_in_flight }}</strong>
-        <span class="mx-2">|</span>
-        Limiter active: <strong>{{ backpressure.adaptive_concurrency.in_flight or 0 }}</strong>
-        <span class="mx-2">|</span>
-        Limiter queued: <strong>{{ backpressure.adaptive_concurrency.queued or 0 }}</strong>
-        <span class="mx-2">|</span>
-        Limiter available: <strong>{{ backpressure.semaphore_available }}</strong> / {{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}
-        {% if backpressure.adaptive_concurrency %}
-        <span class="mx-2">|</span>
-        Adaptive: <strong>{{ "on" if backpressure.adaptive_concurrency.adaptive_enabled else "off" }}</strong>
-        <span class="mx-2">|</span>
-        Bounds: <strong>{{ backpressure.adaptive_concurrency.configured_min }}-{{ backpressure.adaptive_concurrency.configured_max }}</strong>
-        <span class="mx-2">|</span>
-        Adjustments: <strong>{{ backpressure.adaptive_concurrency.adjustments }}</strong>
-        {% endif %}
-        {% if backpressure.wait_pressure %}
-        <span class="mx-2">|</span>
-        Wait p50/p95: <strong>{{ "%.1f"|format(backpressure.wait_pressure.p50_wait_ms or 0) }} / {{ "%.1f"|format(backpressure.wait_pressure.p95_wait_ms or 0) }} ms</strong>
-        {% endif %}
+      <div class="small text-muted mb-2"><strong>Polling Pressure</strong></div>
+      <div class="row g-2 small">
+        <div class="col-6 col-md-3">In flight: <strong>{{ backpressure.polls_in_flight }}</strong></div>
+        <div class="col-6 col-md-3">Queued: <strong>{{ backpressure.adaptive_concurrency.queued or 0 }}</strong></div>
+        <div class="col-6 col-md-3">Limit: <strong>{{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}</strong></div>
+        <div class="col-6 col-md-3">Wait p95: <strong>{{ "%.0f"|format(backpressure.wait_pressure.p95_wait_ms or 0) if backpressure.wait_pressure else "0" }} ms</strong></div>
       </div>
     </div>
   </div>
@@ -68,30 +56,21 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Driver</th><th>Queued</th><th>Active</th><th>Queued Total</th><th>Dequeued</th><th>Completed</th>
-              <th>Failed</th><th>Timeout</th><th>Wait Avg ms</th><th>Wait p50 ms</th><th>Wait p95 ms</th>
-              <th>Endpoint p95 ms</th><th>Max Queue Age ms</th>
+              <th>Driver</th><th>Now</th><th>Completed</th><th>Errors</th><th>Wait p95</th><th>Oldest Queue</th>
             </tr>
           </thead>
           <tbody>
             {% for row in source_rows %}
             <tr>
               <td>{{ row.source }}</td>
-              <td>{{ row.queued }}</td>
-              <td>{{ row.active }}</td>
-              <td>{{ row.queued_total }}</td>
-              <td>{{ row.dequeued_total }}</td>
+              <td>{{ row.active }} active / {{ row.queued }} queued</td>
               <td>{{ row.completed_total }}</td>
-              <td>{{ row.failed }}</td>
-              <td>{{ row.timeout }}</td>
-              <td>{{ row.wait_avg_ms }}</td>
-              <td>{{ row.wait_p50_ms }}</td>
-              <td>{{ row.wait_p95_ms }}</td>
-              <td>{{ row.endpoint_wait_p95_ms }}</td>
-              <td>{{ row.max_queue_age_ms }}</td>
+              <td class="{{ 'text-danger' if row.errors else '' }}">{{ row.errors }}</td>
+              <td>{{ row.wait_p95_display }}</td>
+              <td>{{ row.max_queue_age_display }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="13" class="text-muted p-3">No driver fairness metrics yet.</td></tr>
+            <tr><td colspan="6" class="text-muted p-3">No driver metrics yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -105,11 +84,8 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Device</th><th>Status</th><th>Started</th><th>Success</th><th>Failed</th><th>Timeout</th>
-              <th>Dur 1m ms</th><th>Dur 5m ms</th><th>Dur 15m ms</th>
-              <th>Wait 1m ms</th><th>Wait 5m ms</th><th>Wait 15m ms</th>
-              <th>Cad Min ms</th><th>Cad Avg ms</th><th>Cad Max ms</th><th>Cad Last ms</th><th>Util</th>
-              <th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
+              <th>Device</th><th>Status</th><th>Success</th><th>Errors</th><th>Last Poll</th><th>Queue Wait</th>
+              <th>Cadence</th><th>Publish</th><th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -117,23 +93,28 @@
             <tr>
               <td>{{ row.name }}</td>
               <td>{{ row.status }}</td>
-              <td>{{ row.started }}</td>
-              <td>{{ row.success }}</td>
-              <td>{{ row.failed }}</td>
-              <td>{{ row.timeout }}</td>
-              <td>{{ row.duration_1m_ms }}</td>
-              <td>{{ row.duration_5m_ms }}</td>
-              <td>{{ row.duration_15m_ms }}</td>
-              <td>{{ row.wait_1m_ms }}</td>
-              <td>{{ row.wait_5m_ms }}</td>
-              <td>{{ row.wait_15m_ms }}</td>
-              <td>{{ row.cadence_min_ms }}</td>
-              <td>{{ row.cadence_avg_ms }}</td>
-              <td>{{ row.cadence_max_ms }}</td>
-              <td>{{ row.cadence_last_ms }}</td>
-              <td>{{ row.utilization }}</td>
+              <td>{{ row.success }}{% if row.success_rate %} ({{ row.success_rate }}){% endif %}</td>
+              <td class="{{ 'text-danger' if row.errors else '' }}">{{ row.errors }}</td>
+              <td>{{ row.last_poll_display }}</td>
+              <td>{{ row.last_wait_display }}</td>
+              <td>{{ row.cadence_display }}</td>
+              <td>{{ row.last_publish_display }}</td>
               <td>{{ row["values"] }}</td>
-              <td>{{ row.last_error }}</td>
+              <td>
+                {% if row.last_error %}
+                <div class="d-flex align-items-center gap-2">
+                  <span>{{ row.last_error }}</span>
+                  <button
+                    class="btn btn-sm btn-outline-secondary"
+                    hx-post="/htmx/devices/actions/metrics/clear-error"
+                    hx-vals='{"device_uid":"{{ row.device_uid }}"}'
+                    hx-target="#admin-panel"
+                    hx-swap="innerHTML"
+                    hx-indicator="#global-loading"
+                  >Clear</button>
+                </div>
+                {% endif %}
+              </td>
               <td>{{ row.updated_utc }}</td>
               <td>
                 <button
@@ -148,7 +129,7 @@
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="19" class="text-muted p-3">No metrics yet.</td></tr>
+            <tr><td colspan="12" class="text-muted p-3">No metrics yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>

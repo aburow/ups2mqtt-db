@@ -20,3 +20,5 @@ gogogo
 # Local diagnostics
 quickcap.pcap
 ups2mqtt-backup-*-format.json
+ups2mqtt-backup-*.json
+=9,

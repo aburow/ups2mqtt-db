@@ -11,6 +11,11 @@ from uuid import uuid4
 
 import yaml
 
+from .constants import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    clamp_optional_poll_interval,
+    clamp_poll_interval,
+)
 from .model import AppConfig, DeviceConfig
 
 RUNTIME_DEVICES_PATH = "/data/ups2mqtt_devices.yaml"
@@ -93,7 +98,10 @@ def _load_raw_options(options_path: str | None) -> dict[str, Any]:
     return {}
 
 
-def _parse_device(item: dict[str, Any]) -> DeviceConfig:
+def _parse_device(
+    item: dict[str, Any],
+    minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
+) -> DeviceConfig:
     device_id = str(item["id"]).strip()
     source = str(item["source"]).strip()
     host = str(item["host"]).strip()
@@ -134,9 +142,10 @@ def _parse_device(item: dict[str, Any]) -> DeviceConfig:
         snmp_port=int(item.get("snmp_port", 161)),
         unit_id=int(item.get("unit_id", 1)),
         snmp_community=str(item.get("snmp_community", "public")),
-        poll_interval=int(item["poll_interval"])
-        if item.get("poll_interval") is not None
-        else None,
+        poll_interval=clamp_optional_poll_interval(
+            item.get("poll_interval"),
+            minimum_poll_interval,
+        ),
         name=_clean_optional(item.get("name")),
         location=_clean_optional(item.get("location")),
         debug_logging=bool(item.get("debug_logging", False)),
@@ -153,12 +162,15 @@ def _parse_device(item: dict[str, Any]) -> DeviceConfig:
     )
 
 
-def _parse_devices(parsed: dict[str, Any]) -> list[DeviceConfig]:
+def _parse_devices(
+    parsed: dict[str, Any],
+    minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
+) -> list[DeviceConfig]:
     devices: list[DeviceConfig] = []
     for item in parsed.get("devices", []):
         if not isinstance(item, dict):
             continue
-        devices.append(_parse_device(item))
+        devices.append(_parse_device(item, minimum_poll_interval))
     return devices
 
 
@@ -208,7 +220,10 @@ def _device_to_dict(device: DeviceConfig) -> dict[str, Any]:
     return payload
 
 
-def load_runtime_devices(path: str | None = None) -> list[DeviceConfig]:
+def load_runtime_devices(
+    path: str | None = None,
+    minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
+) -> list[DeviceConfig]:
     resolved_path = path or _resolve_runtime_devices_path()
     runtime_path = Path(resolved_path)
     if not runtime_path.exists():
@@ -216,7 +231,7 @@ def load_runtime_devices(path: str | None = None) -> list[DeviceConfig]:
     parsed = yaml.safe_load(runtime_path.read_text(encoding="utf-8")) or {}
     if not isinstance(parsed, dict):
         return []
-    return _parse_devices(parsed)
+    return _parse_devices(parsed, minimum_poll_interval)
 
 
 def save_runtime_devices(devices: list[DeviceConfig], path: str | None = None) -> None:
@@ -250,14 +265,17 @@ def save_runtime_settings(settings: dict[str, Any], path: str | None = None) -> 
 
 def load_config(options_path: str | None = None) -> AppConfig:
     raw_options = _load_raw_options(options_path)
+    poll_interval = clamp_poll_interval(
+        raw_options.get("poll_interval", DEFAULT_POLL_INTERVAL_SECONDS)
+    )
     embedded_yaml = raw_options.get("config", "")
     parsed = yaml.safe_load(embedded_yaml) if embedded_yaml else {}
     if not isinstance(parsed, dict):
         parsed = {}
-    devices = _parse_devices(parsed)
+    devices = _parse_devices(parsed, poll_interval)
     runtime_settings = load_runtime_settings()
 
-    runtime_devices = load_runtime_devices()
+    runtime_devices = load_runtime_devices(minimum_poll_interval=poll_interval)
     if runtime_devices:
         devices = runtime_devices
 
@@ -339,7 +357,7 @@ def load_config(options_path: str | None = None) -> AppConfig:
             raw_options.get("mqtt_discovery_prefix", "homeassistant")
         ),
         mqtt_topic_prefix=str(raw_options.get("mqtt_topic_prefix", "ups2mqtt")),
-        poll_interval=max(1, int(raw_options.get("poll_interval", 10))),
+        poll_interval=poll_interval,
         poll_timeout=max(2, int(raw_options.get("poll_timeout", 15))),
         max_concurrent_polls=max_concurrent_polls,
         adaptive_concurrency_enabled=adaptive_concurrency_enabled,

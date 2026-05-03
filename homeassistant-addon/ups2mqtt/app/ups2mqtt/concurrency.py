@@ -150,6 +150,28 @@ class AdjustableConcurrencyLimiter:
                 self._cond.notify_all()
                 raise
 
+    def try_acquire(self, source: str = "") -> bool:
+        source_key = str(source or "unknown")
+        with self._lock:
+            if self._in_flight >= self._limit:
+                return False
+            fair_limit = self._fair_source_limit_locked()
+            source_in_flight = int(self._in_flight_by_source.get(source_key, 0))
+            if source_in_flight >= fair_limit:
+                # Work-conserving fallback: if no other source is active or queued,
+                # allow this source to consume remaining global capacity.
+                has_competing_source = any(
+                    key != source_key and count > 0
+                    for key, count in self._in_flight_by_source.items()
+                ) or any(key != source_key for key in self._waiters)
+                if has_competing_source:
+                    return False
+            self._in_flight += 1
+            self._in_flight_by_source[source_key] += 1
+            self._grants_by_source[source_key] += 1
+            self._last_granted_source = source_key
+            return True
+
     async def release(self, source: str = "") -> None:
         source_key = str(source or "unknown")
         async with self._cond:

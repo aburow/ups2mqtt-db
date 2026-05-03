@@ -24,6 +24,11 @@ from .capabilities import (
     source_keys,
 )
 from .config import load_config, load_runtime_settings, save_runtime_settings
+from .constants import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    clamp_optional_poll_interval,
+    clamp_poll_interval,
+)
 from .concurrency import AdjustableConcurrencyLimiter
 from .database import Database
 from .ha_api import apply_entity_default_states, delete_device_entities
@@ -73,6 +78,14 @@ class AdaptiveTypeLimiter:
             if self._inflight[key] > 0:
                 self._inflight[key] -= 1
             self._cond.notify_all()
+
+    def try_acquire(self, source: str) -> bool:
+        key = str(source or "")
+        cap = max(1, int(self._caps.get(key, 1)))
+        if self._inflight[key] >= cap:
+            return False
+        self._inflight[key] += 1
+        return True
 
     @asynccontextmanager
     async def slot(self, source: str):
@@ -139,7 +152,10 @@ def _compute_adaptive_type_caps(
         for device, _runtime_signature, _task in running.values():
             if str(device.source or "") != source:
                 continue
-            interval = int(device.poll_interval or 10)
+            interval = int(
+                clamp_optional_poll_interval(device.poll_interval)
+                or DEFAULT_POLL_INTERVAL_SECONDS
+            )
             intervals_s.append(float(max(1, interval)))
         mean_ms = (sum(durations) / len(durations)) if durations else 1000.0
         target_ms = (
@@ -352,6 +368,16 @@ async def _run_adaptive_concurrency_controller(
             )
 
 
+async def _run_event_loop_lag_monitor(metrics: MetricsStore) -> None:
+    interval_s = 1.0
+    expected = monotonic() + interval_s
+    while True:
+        await asyncio.sleep(interval_s)
+        now = monotonic()
+        metrics.record_event_loop_lag(max(0.0, (now - expected) * 1000.0))
+        expected = now + interval_s
+
+
 def _apply_catalog_derived_values(
     values: dict[str, Any],
     runtime_source: str,
@@ -547,16 +573,22 @@ async def _device_loop(
     metrics: MetricsStore,
     type_limiter: AdaptiveTypeLimiter | None = None,
     apps_dir: str | None = None,
+    slot_offset_seconds: float = 0.0,
 ) -> None:
     perf_sample_every = 20
     perf_cycles = 0
     perf_total_s = 0.0
     perf_wait_s = 0.0
     perf_poll_s = 0.0
+    perf_prepare_s = 0.0
     perf_publish_s = 0.0
 
-    base_interval = device.poll_interval or default_interval
-    base_interval = max(1, int(base_interval))
+    minimum_interval = clamp_poll_interval(default_interval)
+    effective_poll_interval = clamp_optional_poll_interval(
+        device.poll_interval,
+        minimum_interval,
+    )
+    base_interval = effective_poll_interval or minimum_interval
     group_intervals = poll_group_intervals(profile, base_interval)
     runtime_device = DeviceConfig(
         id=device.id,
@@ -566,7 +598,7 @@ async def _device_loop(
         snmp_port=device.snmp_port,
         unit_id=device.unit_id,
         snmp_community=device.snmp_community,
-        poll_interval=device.poll_interval,
+        poll_interval=effective_poll_interval,
         name=device.name,
         location=device.location,
         debug_logging=device.debug_logging,
@@ -603,8 +635,10 @@ async def _device_loop(
         _format_key_list(list(allowed_keys), max_display=20),
     )
     now_started = monotonic()
+    slot_offset_seconds = max(0.0, min(float(slot_offset_seconds), float(base_interval)))
+    startup_not_before = now_started + slot_offset_seconds
     next_due: dict[str, float] = {
-        group: now_started + float(interval)
+        group: now_started + slot_offset_seconds + float(interval)
         for group, interval in group_intervals.items()
     }
     startup_poll_sequence: list[list[str]] = []
@@ -614,9 +648,10 @@ async def _device_loop(
         startup_poll_sequence.append(["fast"])
     if startup_poll_sequence:
         LOG.info(
-            "Startup poll warm-up for %s: %s",
+            "Startup poll warm-up for %s: %s (slot_offset=%.2fs)",
             device.id,
             " -> ".join(",".join(groups) for groups in startup_poll_sequence),
+            slot_offset_seconds,
         )
     endpoint_key = f"{device.host}:{device.port}"
     endpoint_semaphore = endpoint_semaphores.setdefault(
@@ -626,10 +661,23 @@ async def _device_loop(
     # catalog-derived sensors on fast poll cycles when raw sources aren't refreshed
     raw_bitfield_cache: dict[str, Any] = {}
 
+    def _advance_due_groups(groups: list[str], now_value: float) -> None:
+        for group_name in groups:
+            interval = float(group_intervals.get(group_name, base_interval))
+            due = float(next_due.get(group_name, now_value + interval))
+            while due <= now_value:
+                due += interval
+            next_due[group_name] = due
+
     while True:
         now = monotonic()
+        startup_cycle = False
         if startup_poll_sequence:
+            if now < startup_not_before:
+                await asyncio.sleep(min(max(0.1, startup_not_before - now), 0.5))
+                continue
             due_groups = startup_poll_sequence.pop(0)
+            startup_cycle = True
         else:
             due_groups = sorted(
                 group for group, due_at in next_due.items() if due_at <= now
@@ -645,8 +693,11 @@ async def _device_loop(
         poll_started = 0.0
         wait_elapsed = 0.0
         poll_elapsed = 0.0
+        prepare_elapsed = 0.0
         publish_elapsed = 0.0
-        metrics.record_start(identity, runtime_source)
+        type_slot_acquired = False
+        global_slot_acquired = False
+        endpoint_slot_acquired = False
         try:
             LOG.debug(
                 "Polling cycle started for %s (groups=%s, allowed_keys=%d)",
@@ -654,43 +705,37 @@ async def _device_loop(
                 ",".join(due_groups),
                 len(allowed_keys),
             )
-            if type_limiter is None:
-                async with global_poll_semaphore.slot(runtime_source):
-                    endpoint_wait_started = monotonic()
-                    async with endpoint_semaphore:
-                        poll_started = monotonic()
-                        metrics.record_dequeue(
-                            identity,
-                            runtime_source,
-                            wait_ms=(poll_started - wait_started) * 1000.0,
-                            endpoint_wait_ms=(
-                                poll_started - endpoint_wait_started
-                            )
-                            * 1000.0,
-                        )
-                        values = await asyncio.wait_for(
-                            poll_device(runtime_device, profile, set(due_groups)),
-                            timeout=max(2, poll_timeout),
-                        )
-            else:
-                async with type_limiter.slot(runtime_source):
-                    async with global_poll_semaphore.slot(runtime_source):
-                        endpoint_wait_started = monotonic()
-                        async with endpoint_semaphore:
-                            poll_started = monotonic()
-                            metrics.record_dequeue(
-                                identity,
-                                runtime_source,
-                                wait_ms=(poll_started - wait_started) * 1000.0,
-                                endpoint_wait_ms=(
-                                    poll_started - endpoint_wait_started
-                                )
-                                * 1000.0,
-                            )
-                            values = await asyncio.wait_for(
-                                poll_device(runtime_device, profile, set(due_groups)),
-                                timeout=max(2, poll_timeout),
-                            )
+            if type_limiter is not None:
+                type_slot_acquired = type_limiter.try_acquire(runtime_source)
+                if not type_slot_acquired:
+                    metrics.record_missed_capacity(identity, runtime_source)
+                    _advance_due_groups(due_groups, monotonic())
+                    continue
+            global_slot_acquired = global_poll_semaphore.try_acquire(runtime_source)
+            if not global_slot_acquired:
+                metrics.record_missed_capacity(identity, runtime_source)
+                _advance_due_groups(due_groups, monotonic())
+                continue
+            endpoint_wait_started = monotonic()
+            if endpoint_semaphore.locked():
+                metrics.record_missed_capacity(identity, runtime_source)
+                _advance_due_groups(due_groups, monotonic())
+                continue
+            await endpoint_semaphore.acquire()
+            endpoint_slot_acquired = True
+
+            metrics.record_start(identity, runtime_source)
+            poll_started = monotonic()
+            metrics.record_dequeue(
+                identity,
+                runtime_source,
+                wait_ms=(poll_started - wait_started) * 1000.0,
+                endpoint_wait_ms=(poll_started - endpoint_wait_started) * 1000.0,
+            )
+            values = await asyncio.wait_for(
+                poll_device(runtime_device, profile, set(due_groups)),
+                timeout=max(2, poll_timeout),
+            )
             warning_text = ""
             if isinstance(values, dict):
                 warning_raw = values.pop("__poll_warning__", "")
@@ -698,6 +743,7 @@ async def _device_loop(
                     warning_text = str(warning_raw)
             wait_elapsed = max(0.0, poll_started - wait_started)
             poll_elapsed = max(0.0, monotonic() - poll_started)
+            prepare_started = monotonic()
             publish_elapsed = 0.0
             if values:
                 # Derive bit-flag sensor values from raw polled registers using catalog
@@ -745,6 +791,7 @@ async def _device_loop(
                         _format_key_list(list(not_polled), max_display=10),
                     )
 
+                prepare_elapsed = max(0.0, monotonic() - prepare_started)
                 publish_started = monotonic()
                 published = mqtt.publish_state(
                     runtime_device,
@@ -779,9 +826,11 @@ async def _device_loop(
                     warning=warning_text,
                     wait_ms=wait_elapsed * 1000,
                     poll_ms=poll_elapsed * 1000,
+                    prepare_ms=prepare_elapsed * 1000,
                     publish_ms=publish_elapsed * 1000,
                 )
             else:
+                prepare_elapsed = max(0.0, monotonic() - prepare_started)
                 LOG.warning("No values read for %s", device.id)
                 metrics.record_success(
                     identity,
@@ -790,6 +839,7 @@ async def _device_loop(
                     warning=warning_text,
                     wait_ms=wait_elapsed * 1000,
                     poll_ms=poll_elapsed * 1000,
+                    prepare_ms=prepare_elapsed * 1000,
                     publish_ms=publish_elapsed * 1000,
                 )
             cycle_elapsed = max(0.0, monotonic() - started)
@@ -797,21 +847,24 @@ async def _device_loop(
             perf_total_s += cycle_elapsed
             perf_wait_s += wait_elapsed
             perf_poll_s += poll_elapsed
+            perf_prepare_s += prepare_elapsed
             perf_publish_s += publish_elapsed
             if perf_cycles >= perf_sample_every:
                 LOG.info(
-                    "Perf sample [%s] cycles=%d avg_total=%.3fs avg_wait=%.3fs avg_poll=%.3fs avg_publish=%.3fs",
+                    "Perf sample [%s] cycles=%d avg_total=%.3fs avg_wait=%.3fs avg_poll=%.3fs avg_prepare=%.3fs avg_publish=%.3fs",
                     device.id,
                     perf_cycles,
                     perf_total_s / perf_cycles,
                     perf_wait_s / perf_cycles,
                     perf_poll_s / perf_cycles,
+                    perf_prepare_s / perf_cycles,
                     perf_publish_s / perf_cycles,
                 )
                 perf_cycles = 0
                 perf_total_s = 0.0
                 perf_wait_s = 0.0
                 perf_poll_s = 0.0
+                perf_prepare_s = 0.0
                 perf_publish_s = 0.0
             LOG.info(
                 "Polling cycle completed for %s in %.2fs",
@@ -829,6 +882,7 @@ async def _device_loop(
                 poll_timeout,
                 wait_ms=wait_elapsed * 1000,
                 poll_ms=poll_elapsed * 1000,
+                prepare_ms=prepare_elapsed * 1000,
                 publish_ms=publish_elapsed * 1000,
             )
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
@@ -842,16 +896,28 @@ async def _device_loop(
                 str(err),
                 wait_ms=wait_elapsed * 1000,
                 poll_ms=poll_elapsed * 1000,
+                prepare_ms=prepare_elapsed * 1000,
                 publish_ms=publish_elapsed * 1000,
             )
+        finally:
+            if endpoint_slot_acquired:
+                endpoint_semaphore.release()
+            if global_slot_acquired:
+                await global_poll_semaphore.release(runtime_source)
+            if type_slot_acquired and type_limiter is not None:
+                await type_limiter.release(runtime_source)
         next_base = monotonic()
+        if startup_cycle:
+            continue
         for group in due_groups:
             interval = float(group_intervals.get(group, base_interval))
             due = float(next_due.get(group, next_base + interval))
+            next_slot = due + interval
+            while next_slot <= next_base:
+                metrics.record_missed_overlap(identity, runtime_source)
+                next_slot += interval
             # Preserve fixed-rate cadence rather than drifting to now+interval.
-            while due <= next_base:
-                due += interval
-            next_due[group] = due
+            next_due[group] = next_slot
 
 
 def _round_robin_devices_by_source(devices: list[DeviceConfig]) -> list[DeviceConfig]:
@@ -878,6 +944,26 @@ def _round_robin_devices_by_source(devices: list[DeviceConfig]) -> list[DeviceCo
         if queue:
             active_sources.append(source)
     return interleaved
+
+
+def _device_poll_slot_offsets(
+    devices: list[DeviceConfig],
+    *,
+    interval_seconds: int,
+    bank_size: int,
+) -> dict[str, float]:
+    """Assign devices to poll banks spread evenly across one poll interval."""
+    if not devices:
+        return {}
+    interval = float(max(1, int(interval_seconds)))
+    bank_size = max(1, int(bank_size))
+    bank_count = max(1, (len(devices) + bank_size - 1) // bank_size)
+    slot_width = interval / float(bank_count)
+    offsets: dict[str, float] = {}
+    for index, device in enumerate(devices):
+        identity = str(device.device_uid or device.id)
+        offsets[identity] = float(index // bank_size) * slot_width
+    return offsets
 
 
 async def _reconcile_device_tasks(
@@ -916,6 +1002,16 @@ async def _reconcile_device_tasks(
         mqtt.clear_legacy_discovery(device_id, keys_to_clear)
 
     ordered_devices = _round_robin_devices_by_source(store.list_devices())
+    poll_bank_size = max(
+        1,
+        min(10, int(getattr(global_poll_semaphore, "current_limit", 10))),
+    )
+    effective_default_interval = clamp_poll_interval(default_interval)
+    slot_offsets = _device_poll_slot_offsets(
+        ordered_devices,
+        interval_seconds=effective_default_interval,
+        bank_size=poll_bank_size,
+    )
     desired = {device.device_uid: device for device in ordered_devices}
 
     for uid, (existing_device, existing_runtime_signature, task) in list(
@@ -1077,6 +1173,7 @@ async def _reconcile_device_tasks(
                 metrics,
                 type_limiter=type_limiter,
                 apps_dir=apps_dir,
+                slot_offset_seconds=slot_offsets.get(uid, 0.0),
             )
         )
         running[uid] = (device, runtime_signature, task)
@@ -1458,6 +1555,8 @@ def _apply_profile_payload_overrides(
         profile_groups = effective_profile.get("poll_groups")
         if isinstance(profile_groups, dict):
             for name, interval in poll_groups.items():
+                if name == "fast":
+                    continue
                 if name not in profile_groups:
                     continue
                 if not isinstance(profile_groups.get(name), dict):
@@ -1797,13 +1896,51 @@ async def async_main() -> None:
     else:
         LOG.info("MQTT is disabled; polling + web UI only")
 
+    def _enforce_minimum_device_poll_interval(device: DeviceConfig) -> DeviceConfig:
+        effective_poll_interval = clamp_optional_poll_interval(
+            device.poll_interval,
+            config.poll_interval,
+        )
+        if effective_poll_interval == device.poll_interval:
+            return device
+        return DeviceConfig(
+            id=device.id,
+            source=device.source,
+            host=device.host,
+            port=device.port,
+            snmp_port=device.snmp_port,
+            unit_id=device.unit_id,
+            snmp_community=device.snmp_community,
+            poll_interval=effective_poll_interval,
+            name=device.name,
+            location=device.location,
+            debug_logging=device.debug_logging,
+            keep_connection_open=device.keep_connection_open,
+            device_uid=device.device_uid,
+            discovery_enabled=device.discovery_enabled,
+            polling_enabled=device.polling_enabled,
+            profile_uid=device.profile_uid,
+            profile_mode=device.profile_mode,
+            local_profile_payload=device.local_profile_payload,
+            local_selected_sensors=device.local_selected_sensors,
+            local_sensor_preferences=device.local_sensor_preferences,
+            enable_extended_fields=device.enable_extended_fields,
+        )
+
     # Load devices from database, fallback to config if database is empty
     db_devices = db.load_devices()
-    devices_to_use = db_devices if db_devices else config.devices
+    devices_to_use = [
+        _enforce_minimum_device_poll_interval(device)
+        for device in (db_devices if db_devices else config.devices)
+    ]
+    if db_devices:
+        for original, clamped in zip(db_devices, devices_to_use, strict=False):
+            if original.poll_interval != clamped.poll_interval:
+                db.save_device(clamped)
 
     # Save config devices to database if database was empty
-    if not db_devices and config.devices:
-        for device in config.devices:
+    if not db_devices and devices_to_use:
+        for device in devices_to_use:
             db.save_device(device)
 
     store = DeviceStore(devices_to_use, db)
@@ -1846,6 +1983,9 @@ async def async_main() -> None:
     def _metrics_clear() -> None:
         metrics.clear_all()
 
+    def _metrics_clear_error(device_id: str) -> bool:
+        return metrics.clear_last_error(device_id)
+
     def _cleanup_db_state() -> dict[str, int]:
         devices = store.list_devices()
         valid_uids = {device.device_uid for device in devices if device.device_uid}
@@ -1875,6 +2015,7 @@ async def async_main() -> None:
             host=config.web_host,
             port=config.web_port,
             web_base_path=config.web_base_path,
+            minimum_poll_interval=config.poll_interval,
             store=store,
             get_source_names=lambda: sorted(profile_state["profiles"].keys()),
             log_buffer=log_buffer,
@@ -1896,6 +2037,7 @@ async def async_main() -> None:
             trigger_reload=lambda: loop.call_soon_threadsafe(reload_event.set),
             trigger_metrics_drop=_metrics_drop,
             trigger_metrics_clear=_metrics_clear,
+            trigger_metrics_clear_error=_metrics_clear_error,
             trigger_db_cleanup=_cleanup_db_state,
             trigger_device_reinitialize=lambda device_id: loop.call_soon_threadsafe(
                 device_reinitialize_queue.put_nowait, device_id
@@ -1916,6 +2058,7 @@ async def async_main() -> None:
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}
     adaptive_concurrency_task: asyncio.Task | None = None
+    event_loop_lag_task = asyncio.create_task(_run_event_loop_lag_monitor(metrics))
     if config.adaptive_concurrency_enabled:
         adaptive_concurrency_task = asyncio.create_task(
             _run_adaptive_concurrency_controller(
@@ -2105,6 +2248,7 @@ async def async_main() -> None:
     finally:
         if adaptive_concurrency_task is not None:
             adaptive_concurrency_task.cancel()
+        event_loop_lag_task.cancel()
         for device, _runtime_signature, task in running.values():
             task.cancel()
             mqtt.publish_unavailable(device)

@@ -24,6 +24,8 @@ class DeviceMetrics:
     polls_succeeded: int = 0
     polls_failed: int = 0
     polls_timed_out: int = 0
+    missed_capacity_count: int = 0
+    missed_overlap_count: int = 0
     total_duration_ms: float = 0.0
     average_duration_ms: float = 0.0
     min_duration_ms: float | None = None
@@ -31,6 +33,7 @@ class DeviceMetrics:
     last_duration_ms: float | None = None
     last_wait_ms: float | None = None
     last_poll_ms: float | None = None
+    last_prepare_ms: float | None = None
     last_publish_ms: float | None = None
     last_status: str = "unknown"
     last_error: str = ""
@@ -52,6 +55,8 @@ class SourceMetrics:
     polls_completed: int = 0
     polls_failed: int = 0
     polls_timed_out: int = 0
+    missed_capacity_count: int = 0
+    missed_overlap_count: int = 0
     total_wait_ms: float = 0.0
     average_wait_ms: float = 0.0
     last_wait_ms: float | None = None
@@ -86,6 +91,13 @@ class MetricsStore:
         self._source_endpoint_wait_samples: dict[str, deque[tuple[float, float]]] = {}
         self._source_queue_started: dict[str, deque[float]] = {}
         self._active_polls_by_device: dict[str, deque[ActivePoll]] = {}
+        self._device_duration_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._device_wait_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._device_prepare_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._last_success_monotonic: dict[str, float] = {}
+        self._start_samples: deque[float] = deque(maxlen=10000)
+        self._completion_samples: deque[tuple[float, bool]] = deque(maxlen=10000)
+        self._event_loop_lag_ms = 0.0
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -105,6 +117,46 @@ class MetricsStore:
         if wait_ms is None:
             return
         self._wait_samples.append((monotonic(), max(0.0, float(wait_ms))))
+
+    @staticmethod
+    def _record_device_sample_locked(
+        samples: dict[str, deque[tuple[float, float]]],
+        device_id: str,
+        value_ms: float | None,
+    ) -> None:
+        if value_ms is None:
+            return
+        bucket = samples.setdefault(device_id, deque(maxlen=2000))
+        bucket.append((monotonic(), max(0.0, float(value_ms))))
+
+    @staticmethod
+    def _rolling_average_from_samples(
+        samples: deque[tuple[float, float]],
+        now_monotonic: float,
+        window_seconds: int,
+    ) -> float:
+        cutoff = now_monotonic - window_seconds
+        values = [value for ts, value in samples if ts >= cutoff]
+        if not values:
+            return 0.0
+        return float(sum(values) / len(values))
+
+    def _device_load_average_locked(
+        self,
+        sample_map: dict[str, deque[tuple[float, float]]],
+        device_id: str,
+        now_monotonic: float,
+    ) -> dict[str, float]:
+        samples = sample_map.get(device_id, deque())
+        if samples:
+            cutoff = now_monotonic - 900.0
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+        return {
+            "1m": self._rolling_average_from_samples(samples, now_monotonic, 60),
+            "5m": self._rolling_average_from_samples(samples, now_monotonic, 300),
+            "15m": self._rolling_average_from_samples(samples, now_monotonic, 900),
+        }
 
     @staticmethod
     def _percentiles(values: list[float]) -> tuple[float, float, float]:
@@ -165,6 +217,34 @@ class MetricsStore:
                 for source, metric in self._sources.items()
             }
 
+    def record_missed_capacity(self, device_id: str, source: str = "") -> None:
+        source_key = str(source or self._device_sources.get(device_id) or "unknown")
+        with self._lock:
+            metric = self._ensure(device_id)
+            source_metric = self._ensure_source(source_key)
+            self._device_sources[device_id] = source_key
+            metric.missed_capacity_count += 1
+            metric.last_status = "missed_capacity"
+            metric.last_error = "Poll slot missed: capacity unavailable"
+            metric.last_update_utc = _utc_now()
+            source_metric.missed_capacity_count += 1
+
+    def record_missed_overlap(self, device_id: str, source: str = "") -> None:
+        source_key = str(source or self._device_sources.get(device_id) or "unknown")
+        with self._lock:
+            metric = self._ensure(device_id)
+            source_metric = self._ensure_source(source_key)
+            self._device_sources[device_id] = source_key
+            metric.missed_overlap_count += 1
+            metric.last_status = "missed_overlap"
+            metric.last_error = "Poll slot missed: previous poll still active"
+            metric.last_update_utc = _utc_now()
+            source_metric.missed_overlap_count += 1
+
+    def record_event_loop_lag(self, lag_ms: float) -> None:
+        with self._lock:
+            self._event_loop_lag_ms = max(0.0, float(lag_ms))
+
     def record_start(self, device_id: str, source: str = "") -> None:
         now_monotonic = monotonic()
         source_key = str(source or "unknown")
@@ -193,6 +273,7 @@ class MetricsStore:
                     metric.cadence_max_ms = cadence_ms
             self._last_start_monotonic[device_id] = now_monotonic
             metric.polls_started += 1
+            self._start_samples.append(now_monotonic)
             metric.last_status = "running"
             metric.last_update_utc = _utc_now()
             self.polls_in_flight += 1
@@ -328,6 +409,7 @@ class MetricsStore:
         wait_ms: float | None = None,
         poll_ms: float | None = None,
         publish_ms: float | None = None,
+        prepare_ms: float | None = None,
     ) -> None:
         with self._lock:
             poll = self._consume_active_poll_locked(device_id)
@@ -347,13 +429,27 @@ class MetricsStore:
             metric.last_duration_ms = duration_ms
             metric.last_wait_ms = wait_ms
             metric.last_poll_ms = poll_ms
+            metric.last_prepare_ms = prepare_ms
             metric.last_publish_ms = publish_ms
+            metric.last_values_count = max(0, int(values_count))
             metric.last_status = "success"
             if warning:
                 metric.last_error = warning[:500]
-            metric.last_success_utc = _utc_now()
-            metric.last_update_utc = _utc_now()
+            now_utc = _utc_now()
+            metric.last_success_utc = now_utc
+            metric.last_update_utc = now_utc
+            self._last_success_monotonic[device_id] = monotonic()
+            self._completion_samples.append((monotonic(), False))
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
+            self._record_device_sample_locked(
+                self._device_prepare_samples, device_id, prepare_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 wait_ms=wait_ms,
@@ -367,6 +463,7 @@ class MetricsStore:
         timeout_s: int,
         wait_ms: float | None = None,
         poll_ms: float | None = None,
+        prepare_ms: float | None = None,
         publish_ms: float | None = None,
     ) -> None:
         with self._lock:
@@ -379,11 +476,22 @@ class MetricsStore:
             metric.last_duration_ms = duration_ms
             metric.last_wait_ms = wait_ms
             metric.last_poll_ms = poll_ms
+            metric.last_prepare_ms = prepare_ms
             metric.last_publish_ms = publish_ms
             metric.last_status = "timeout"
             metric.last_error = f"Timeout after {timeout_s}s"[:500]
             metric.last_update_utc = _utc_now()
+            self._completion_samples.append((monotonic(), True))
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
+            self._record_device_sample_locked(
+                self._device_prepare_samples, device_id, prepare_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 failed=True,
@@ -399,6 +507,7 @@ class MetricsStore:
         error: str,
         wait_ms: float | None = None,
         poll_ms: float | None = None,
+        prepare_ms: float | None = None,
         publish_ms: float | None = None,
     ) -> None:
         with self._lock:
@@ -410,11 +519,22 @@ class MetricsStore:
             metric.last_duration_ms = duration_ms
             metric.last_wait_ms = wait_ms
             metric.last_poll_ms = poll_ms
+            metric.last_prepare_ms = prepare_ms
             metric.last_publish_ms = publish_ms
             metric.last_status = "error"
             metric.last_error = error[:500]
             metric.last_update_utc = _utc_now()
+            self._completion_samples.append((monotonic(), False))
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
+            self._record_device_sample_locked(
+                self._device_prepare_samples, device_id, prepare_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 failed=True,
@@ -432,6 +552,25 @@ class MetricsStore:
                 if old_id in self._active_polls_by_device:
                     existing = self._active_polls_by_device.setdefault(new_id, deque())
                     existing.extend(self._active_polls_by_device.pop(old_id))
+                if old_id in self._device_duration_samples:
+                    existing_duration = self._device_duration_samples.setdefault(
+                        new_id, deque(maxlen=2000)
+                    )
+                    existing_duration.extend(self._device_duration_samples.pop(old_id))
+                if old_id in self._device_wait_samples:
+                    existing_wait = self._device_wait_samples.setdefault(
+                        new_id, deque(maxlen=2000)
+                    )
+                    existing_wait.extend(self._device_wait_samples.pop(old_id))
+                if old_id in self._device_prepare_samples:
+                    existing_prepare = self._device_prepare_samples.setdefault(
+                        new_id, deque(maxlen=2000)
+                    )
+                    existing_prepare.extend(self._device_prepare_samples.pop(old_id))
+                if old_id in self._last_success_monotonic:
+                    self._last_success_monotonic[new_id] = (
+                        self._last_success_monotonic.pop(old_id)
+                    )
 
     def drop(self, device_id: str) -> None:
         """Remove metrics for a device that no longer exists."""
@@ -440,6 +579,20 @@ class MetricsStore:
             self._last_start_monotonic.pop(device_id, None)
             self._device_sources.pop(device_id, None)
             self._discard_active_polls_locked(device_id)
+            self._device_duration_samples.pop(device_id, None)
+            self._device_wait_samples.pop(device_id, None)
+            self._device_prepare_samples.pop(device_id, None)
+            self._last_success_monotonic.pop(device_id, None)
+
+    def clear_last_error(self, device_id: str) -> bool:
+        """Clear only the last error text for one device metrics row."""
+        with self._lock:
+            metric = self._devices.get(device_id)
+            if metric is None:
+                return False
+            metric.last_error = ""
+            metric.last_update_utc = _utc_now()
+            return True
 
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
@@ -453,6 +606,13 @@ class MetricsStore:
             self._source_endpoint_wait_samples.clear()
             self._source_queue_started.clear()
             self._active_polls_by_device.clear()
+            self._device_duration_samples.clear()
+            self._device_wait_samples.clear()
+            self._device_prepare_samples.clear()
+            self._last_success_monotonic.clear()
+            self._start_samples.clear()
+            self._completion_samples.clear()
+            self._event_loop_lag_ms = 0.0
             self.polls_in_flight = 0
 
     def prune_unknown(self, valid_ids: set[str]) -> int:
@@ -466,18 +626,53 @@ class MetricsStore:
                 self._last_start_monotonic.pop(device_id, None)
                 self._device_sources.pop(device_id, None)
                 self._discard_active_polls_locked(device_id)
+                self._device_duration_samples.pop(device_id, None)
+                self._device_wait_samples.pop(device_id, None)
+                self._device_prepare_samples.pop(device_id, None)
+                self._last_success_monotonic.pop(device_id, None)
             return len(stale_ids)
 
     def snapshot(self) -> dict:
         with self._lock:
-            devices = {
-                device_id: asdict(metric) for device_id, metric in self._devices.items()
-            }
+            now_monotonic = monotonic()
+            devices: dict[str, dict[str, Any]] = {}
+            for device_id, metric in self._devices.items():
+                payload = asdict(metric)
+                payload["duration_load_avg_ms"] = self._device_load_average_locked(
+                    self._device_duration_samples, device_id, now_monotonic
+                )
+                payload["wait_load_avg_ms"] = self._device_load_average_locked(
+                    self._device_wait_samples, device_id, now_monotonic
+                )
+                payload["prepare_load_avg_ms"] = self._device_load_average_locked(
+                    self._device_prepare_samples, device_id, now_monotonic
+                )
+                last_success = self._last_success_monotonic.get(device_id)
+                payload["last_success_age_seconds"] = (
+                    max(0.0, now_monotonic - last_success)
+                    if last_success is not None
+                    else None
+                )
+                devices[device_id] = payload
             sources = {
                 source: asdict(metric) for source, metric in self._sources.items()
             }
             polls_in_flight = self.polls_in_flight
             wait_pressure = self._wait_pressure_locked(60)
+            completion_cutoff = now_monotonic - 60.0
+            while self._start_samples and self._start_samples[0] < completion_cutoff:
+                self._start_samples.popleft()
+            while (
+                self._completion_samples
+                and self._completion_samples[0][0] < completion_cutoff
+            ):
+                self._completion_samples.popleft()
+            starts_60s = len(self._start_samples)
+            completions_60s = len(self._completion_samples)
+            timeouts_60s = sum(
+                1 for _ts, timed_out in self._completion_samples if timed_out
+            )
+            event_loop_lag_ms = self._event_loop_lag_ms
         totals = {
             "devices": len(devices),
             "polls_started": sum(
@@ -489,6 +684,12 @@ class MetricsStore:
             "polls_failed": sum(int(item["polls_failed"]) for item in devices.values()),
             "polls_timed_out": sum(
                 int(item["polls_timed_out"]) for item in devices.values()
+            ),
+            "missed_capacity_count": sum(
+                int(item["missed_capacity_count"]) for item in devices.values()
+            ),
+            "missed_overlap_count": sum(
+                int(item["missed_overlap_count"]) for item in devices.values()
             ),
         }
         # Backpressure metrics
@@ -506,6 +707,10 @@ class MetricsStore:
             "semaphore_available": semaphore_available,
             "wait_pressure": wait_pressure,
             "adaptive_concurrency": adaptive_concurrency,
+            "polls_started_per_second": starts_60s / 60.0,
+            "polls_completed_per_second": completions_60s / 60.0,
+            "timeout_rate": timeouts_60s / max(1, completions_60s),
+            "event_loop_lag_ms": event_loop_lag_ms,
         }
         return {
             "generated_at_utc": _utc_now(),

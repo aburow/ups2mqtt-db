@@ -4,8 +4,11 @@
 ENV_FILE ?= .env
 COMPOSE_FILE ?= standalone/docker-compose.yml
 SERVICE ?= ups2mqtt
+DOCKER_BUILDKIT ?= 1
+COMPOSE_DOCKER_CLI_BUILD ?= 1
+BUILDKIT_PROGRESS ?= auto
 
-.PHONY: dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
+.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -14,15 +17,17 @@ CAP_SNAPSHOT ?= $(APP_DIR)/capabilities/capability_snapshot.sql
 DB_PATH_ABS := $(if $(filter /%,$(DB_PATH)),$(DB_PATH),$(CURDIR)/$(DB_PATH))
 CAP_SNAPSHOT_ABS := $(if $(filter /%,$(CAP_SNAPSHOT)),$(CAP_SNAPSHOT),$(CURDIR)/$(CAP_SNAPSHOT))
 
+build: dev-build
+
 dev-up:
-	DOCKER_BUILDKIT=0 docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build
+	DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) COMPOSE_DOCKER_CLI_BUILD=$(COMPOSE_DOCKER_CLI_BUILD) BUILDKIT_PROGRESS=$(BUILDKIT_PROGRESS) docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build
 
 dev-up-direct:
 	@echo "Starting dual debug mode: direct HTTP on http://$${UPS2MQTT_WEB_BIND:-0.0.0.0}:$${UPS2MQTT_WEB_PORT:-8099}/ and proxied HTTPS on :$${UPS2MQTT_PROXY_HTTPS_PORT:-8443}"
-	DOCKER_BUILDKIT=0 UPS2MQTT_WEB_BIND=$${UPS2MQTT_WEB_BIND:-0.0.0.0} docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build $(SERVICE) caddy
+	DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) COMPOSE_DOCKER_CLI_BUILD=$(COMPOSE_DOCKER_CLI_BUILD) BUILDKIT_PROGRESS=$(BUILDKIT_PROGRESS) UPS2MQTT_WEB_BIND=$${UPS2MQTT_WEB_BIND:-0.0.0.0} docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build $(SERVICE) caddy
 
 dev-build:
-	DOCKER_BUILDKIT=0 docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) build
+	DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) COMPOSE_DOCKER_CLI_BUILD=$(COMPOSE_DOCKER_CLI_BUILD) BUILDKIT_PROGRESS=$(BUILDKIT_PROGRESS) docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) build
 
 dev-restart:
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) restart $(SERVICE)

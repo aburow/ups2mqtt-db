@@ -22,6 +22,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .catalog import CATALOG_DRIVER_KEYS, get_catalog_sensor_rows
 from .capabilities import source_keys
+from .constants import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    clamp_optional_poll_interval,
+    clamp_poll_interval,
+)
 from .database import Database as ProfileDatabase
 from .diagnostics import check_config
 from .icon_resolver import resolve_enabled_defaults
@@ -177,11 +182,14 @@ def _validate_unit_id(unit_id: int, *, source: str) -> int:
     return unit_id
 
 
-def _validate_poll_interval(poll_interval: int | None) -> int | None:
+def _validate_poll_interval(
+    poll_interval: int | None,
+    minimum: int = DEFAULT_POLL_INTERVAL_SECONDS,
+) -> int | None:
     """Validate poll interval is positive if provided."""
     if poll_interval is not None and poll_interval <= 0:
         raise ValueError(f"Poll interval must be positive, got {poll_interval}")
-    return poll_interval
+    return clamp_optional_poll_interval(poll_interval, minimum)
 
 
 def _normalize_timezone(value: str | None) -> str:
@@ -477,6 +485,24 @@ def _prepare_metrics_presentation(
     devices: list[DeviceConfig],
     timezone_name: str = DEFAULT_TIMEZONE,
 ) -> dict[str, object]:
+    def _format_ms(value: object, *, blank_zero: bool = False) -> str:
+        if value is None:
+            return ""
+        try:
+            numeric = max(0.0, float(value))
+        except (TypeError, ValueError):
+            return ""
+        if blank_zero and numeric <= 0.0:
+            return ""
+        if numeric >= 1000.0:
+            return f"{numeric / 1000.0:.1f}s"
+        return f"{numeric:.0f} ms"
+
+    def _format_percent(numerator: int, denominator: int) -> str:
+        if denominator <= 0:
+            return ""
+        return f"{(float(numerator) / float(denominator)) * 100.0:.1f}%"
+
     metrics_totals = metrics.get("totals", {})
     metrics_devices = metrics.get("devices", {})
     identity_by_uid = {
@@ -500,6 +526,11 @@ def _prepare_metrics_presentation(
 
     for device_uid in ordered_uids:
         item = metrics_devices.get(device_uid, {})
+        started = int(item.get("polls_started", 0))
+        succeeded = int(item.get("polls_succeeded", 0))
+        failed = int(item.get("polls_failed", 0))
+        timed_out = int(item.get("polls_timed_out", 0))
+        errors = failed + timed_out
         identity = identity_by_uid.get(
             device_uid,
             {
@@ -515,10 +546,12 @@ def _prepare_metrics_presentation(
                 "device_name": str(identity["device_name"]),
                 "name": str(identity["display_name"]),
                 "status": str(item.get("last_status", "unknown")),
-                "started": int(item.get("polls_started", 0)),
-                "success": int(item.get("polls_succeeded", 0)),
-                "failed": int(item.get("polls_failed", 0)),
-                "timeout": int(item.get("polls_timed_out", 0)),
+                "started": started,
+                "success": succeeded,
+                "failed": failed,
+                "timeout": timed_out,
+                "errors": errors,
+                "success_rate": _format_percent(succeeded, succeeded + errors),
                 "duration_1m_ms": (
                     f"{float(item.get('duration_load_avg_ms', {}).get('1m', 0.0)):.1f}"
                 ),
@@ -537,6 +570,42 @@ def _prepare_metrics_presentation(
                 "wait_15m_ms": (
                     f"{float(item.get('wait_load_avg_ms', {}).get('15m', 0.0)):.1f}"
                 ),
+                "prepare_1m_ms": (
+                    f"{float(item.get('prepare_load_avg_ms', {}).get('1m', 0.0)):.1f}"
+                ),
+                "prepare_5m_ms": (
+                    f"{float(item.get('prepare_load_avg_ms', {}).get('5m', 0.0)):.1f}"
+                ),
+                "prepare_15m_ms": (
+                    f"{float(item.get('prepare_load_avg_ms', {}).get('15m', 0.0)):.1f}"
+                ),
+                "last_wait_ms": (
+                    f"{float(item.get('last_wait_ms')):.1f}"
+                    if item.get("last_wait_ms") is not None
+                    else ""
+                ),
+                "last_poll_ms": (
+                    f"{float(item.get('last_poll_ms')):.1f}"
+                    if item.get("last_poll_ms") is not None
+                    else ""
+                ),
+                "last_prepare_ms": (
+                    f"{float(item.get('last_prepare_ms')):.1f}"
+                    if item.get("last_prepare_ms") is not None
+                    else ""
+                ),
+                "last_publish_ms": (
+                    f"{float(item.get('last_publish_ms')):.1f}"
+                    if item.get("last_publish_ms") is not None
+                    else ""
+                ),
+                "last_wait_display": _format_ms(item.get("last_wait_ms")),
+                "last_poll_display": _format_ms(item.get("last_poll_ms")),
+                "last_prepare_display": _format_ms(item.get("last_prepare_ms")),
+                "last_publish_display": _format_ms(item.get("last_publish_ms")),
+                "cadence_display": _format_ms(item.get("cadence_last_ms")),
+                "avg_cadence_display": _format_ms(item.get("cadence_average_ms")),
+                "avg_duration_display": _format_ms(item.get("average_duration_ms")),
                 "cadence_min_ms": (
                     f"{float(item.get('cadence_min_ms')):.1f}"
                     if item.get("cadence_min_ms") is not None
@@ -579,6 +648,16 @@ def _prepare_metrics_presentation(
         "polls_failed": int(metrics_totals.get("polls_failed", 0)),
         "polls_timed_out": int(metrics_totals.get("polls_timed_out", 0)),
     }
+    totals["polls_errors"] = int(totals["polls_failed"]) + int(
+        totals["polls_timed_out"]
+    )
+    totals["success_rate"] = _format_percent(
+        int(totals["polls_succeeded"]),
+        int(totals["polls_succeeded"]) + int(totals["polls_errors"]),
+    )
+    totals["devices_with_errors"] = sum(
+        1 for row in rows if int(row.get("errors") or 0) > 0 or row.get("last_error")
+    )
 
     backpressure = {
         "polls_in_flight": int(
@@ -606,11 +685,15 @@ def _prepare_metrics_presentation(
                 "completed_total": int(item.get("polls_completed") or 0),
                 "failed": int(item.get("polls_failed") or 0),
                 "timeout": int(item.get("polls_timed_out") or 0),
+                "errors": int(item.get("polls_failed") or 0)
+                + int(item.get("polls_timed_out") or 0),
                 "wait_avg_ms": f"{float(item.get('average_wait_ms') or 0.0):.1f}",
                 "wait_p50_ms": f"{float(item.get('wait_p50_ms') or 0.0):.1f}",
                 "wait_p95_ms": f"{float(item.get('wait_p95_ms') or 0.0):.1f}",
+                "wait_p95_display": _format_ms(item.get("wait_p95_ms")),
                 "endpoint_wait_p95_ms": f"{float(item.get('endpoint_wait_p95_ms') or 0.0):.1f}",
                 "max_queue_age_ms": f"{float(item.get('max_queue_age_ms') or 0.0):.1f}",
+                "max_queue_age_display": _format_ms(item.get("max_queue_age_ms")),
             }
         )
 
@@ -720,6 +803,7 @@ def start_web_server(
     trigger_reload: Callable[[], None],
     trigger_metrics_drop: Callable[[str], None] | None = None,
     trigger_metrics_clear: Callable[[], None] | None = None,
+    trigger_metrics_clear_error: Callable[[str], bool] | None = None,
     trigger_db_cleanup: Callable[[], dict[str, int]] | None = None,
     trigger_device_reinitialize: Callable[[str], None] | None = None,
     get_config: Callable[[], dict] | None = None,
@@ -738,6 +822,7 @@ def start_web_server(
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
     web_base_path: str = "/",
+    minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> HTTPServer:
     def _normalize_base_path(value: str | None) -> str:
         text = str(value or "").strip()
@@ -749,6 +834,7 @@ def start_web_server(
         return text or "/"
 
     normalized_base_path = _normalize_base_path(web_base_path)
+    normalized_minimum_poll_interval = clamp_poll_interval(minimum_poll_interval)
 
     # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
     templates = Environment(
@@ -1039,7 +1125,7 @@ def start_web_server(
                 merged_payload["poll_groups"] = dict(defaults["poll_groups"]) | {
                     str(key): _int_or_default(str(value), 60)
                     for key, value in incoming_groups.items()
-                    if str(key) in dict(defaults["poll_groups"])
+                    if str(key) in dict(defaults["poll_groups"]) and str(key) != "fast"
                 }
             if isinstance(incoming_precedence, dict):
                 merged_payload["key_precedence"] = dict(defaults["key_precedence"]) | {
@@ -1432,6 +1518,7 @@ def start_web_server(
             total_failed_timeout=int(prepared_metrics["total_failed_timeout"]),
             backpressure=prepared_metrics["backpressure"],
             max_concurrent_polls=capability_status.get("max_concurrent_polls", "?"),
+            source_rows=prepared_metrics["source_rows"],
             rows=prepared_metrics["rows"],
         )
 
@@ -2074,7 +2161,10 @@ def start_web_server(
                 poll_interval = None
             else:
                 try:
-                    poll_interval = int(poll_interval_raw)
+                    poll_interval = _validate_poll_interval(
+                        int(poll_interval_raw),
+                        normalized_minimum_poll_interval,
+                    )
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"Invalid device entry at index {index}: poll_interval must be numeric or null"
@@ -2305,6 +2395,38 @@ def start_web_server(
         for metric_key in dict(snapshot.get("devices", {})).keys():
             trigger_metrics_drop(str(metric_key))
         return True, "All metrics cleared"
+
+    def _clear_metrics_error(
+        *,
+        device_uid: str,
+    ) -> tuple[bool, str]:
+        target_uid = str(device_uid or "").strip()
+        if not target_uid:
+            return False, "Device is required"
+        if trigger_metrics_clear_error is None:
+            return False, "Metrics error clear is not available"
+        target_device = next(
+            (
+                device
+                for device in store.list_devices()
+                if (device.device_uid or device.id) == target_uid
+            ),
+            None,
+        )
+        candidates = [target_uid]
+        label = target_uid
+        if target_device is not None:
+            target_identity = target_device.device_uid or target_device.id
+            candidates = [target_identity]
+            if target_device.id != target_identity:
+                candidates.append(target_device.id)
+            label = target_device.name or target_device.id
+        cleared = False
+        for candidate in candidates:
+            cleared = trigger_metrics_clear_error(candidate) or cleared
+        if not cleared:
+            return False, f"No metrics row found for {label}"
+        return True, f"Cleared last error for {label}"
 
     def _profile_rows_for_device_form() -> list[dict[str, str | bool]]:
         eligible_drivers = set(_eligible_profile_drivers().keys())
@@ -2593,6 +2715,8 @@ def start_web_server(
                 for group_name, interval in incoming_groups.items():
                     if group_name not in merged_payload["poll_groups"]:
                         continue
+                    if group_name == "fast":
+                        continue
                     merged_payload["poll_groups"][group_name] = _int_or_default(
                         str(interval), 60
                     )
@@ -2612,6 +2736,7 @@ def start_web_server(
                 (
                     (str(name), _int_or_default(str(interval), 60))
                     for name, interval in merged_payload["poll_groups"].items()
+                    if str(name) != "fast"
                 ),
                 key=lambda item: item[0],
             )
@@ -2781,7 +2906,10 @@ def start_web_server(
         poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
         poll_interval: int | None = None
         if poll_interval_raw:
-            poll_interval = _validate_poll_interval(int(poll_interval_raw))
+            poll_interval = _validate_poll_interval(
+                int(poll_interval_raw),
+                normalized_minimum_poll_interval,
+            )
 
         profile_uid = (data.get("profile_uid", [""])[0]).strip()
         profile_mode = (data.get("profile_mode", [""])[0]).strip().lower() or "local"
@@ -2825,6 +2953,8 @@ def start_web_server(
                 for group_name, interval in dict(
                     profile_payload.get("poll_groups", {})
                 ).items():
+                    if group_name == "fast":
+                        continue
                     if group_name in dict(defaults.get("poll_groups", {})):
                         local_profile_payload["poll_groups"][group_name] = max(
                             1,
@@ -2844,6 +2974,8 @@ def start_web_server(
                 for group_name, interval in incoming_groups.items():
                     if group_name not in dict(defaults.get("poll_groups", {})):
                         raise ValueError(f"Unknown poll group: {group_name}")
+                    if group_name == "fast":
+                        continue
                     local_profile_payload["poll_groups"][group_name] = max(
                         1,
                         _int_or_default(str(interval), 60),
@@ -3002,7 +3134,7 @@ def start_web_server(
         for key, value in values.items():
             if key.startswith("cfg_poll_group__"):
                 group = key.removeprefix("cfg_poll_group__").strip()
-                if group:
+                if group and group != "fast":
                     payload["poll_groups"][group] = _int_or_default(value, 60)
             elif key.startswith("cfg_key_precedence__"):
                 metric = key.removeprefix("cfg_key_precedence__").strip()
@@ -3118,6 +3250,8 @@ def start_web_server(
         for group_name, interval in dict(posted_payload.get("poll_groups", {})).items():
             if group_name not in dict(defaults.get("poll_groups", {})):
                 raise ValueError(f"Unknown poll group: {group_name}")
+            if group_name == "fast":
+                continue
             interval_int = _int_or_default(str(interval), 60)
             if interval_int <= 0:
                 raise ValueError(f"Poll group interval must be > 0: {group_name}")
@@ -4037,6 +4171,21 @@ def start_web_server(
                 ok, message = _clear_metrics_scope(
                     device_uid=target_uid if target_uid else None
                 )
+                self._send_html(
+                    _render_htmx_metrics_panel(),
+                    status=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
+                    headers={
+                        "HX-Trigger": _hx_trigger_payload(
+                            toast_level="success" if ok else "danger",
+                            toast_message=message,
+                        )
+                    },
+                )
+                return True
+
+            if parsed_path.path == "/htmx/devices/actions/metrics/clear-error":
+                target_uid = (data.get("device_uid", [""])[0]).strip()
+                ok, message = _clear_metrics_error(device_uid=target_uid)
                 self._send_html(
                     _render_htmx_metrics_panel(),
                     status=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,

@@ -273,7 +273,7 @@ def poll_group_intervals(
     out: dict[str, int] = {}
     for name, spec in groups.items():
         interval = int(spec.get("interval_s", fallback))
-        out[name] = max(1, interval)
+        out[name] = max(fallback, interval)
     if "slow" not in out:
         out["slow"] = fallback
     return out

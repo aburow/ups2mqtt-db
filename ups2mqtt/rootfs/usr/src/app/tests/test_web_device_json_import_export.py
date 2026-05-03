@@ -472,7 +472,7 @@ def test_csv_import_template_route_returns_headers_only(tmp_path: Path) -> None:
         assert status == HTTPStatus.OK
         assert headers.get("Content-Type", "").startswith("text/csv")
         assert body == (
-            "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
+            "ID,Source,Host,Port,SNMPPort,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
         )
     finally:
         server.shutdown()
@@ -602,6 +602,22 @@ def test_sidebar_versions_block_shows_app_and_backup_versions(tmp_path: Path) ->
             f"Backup schema:</strong> {BACKUP_SCHEMA_NAME} v{BACKUP_SCHEMA_VERSION}"
             in body
         )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_metrics_panel_auto_refreshes_every_15_seconds(tmp_path: Path) -> None:
+    server, _db, _store = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url, "/htmx/devices/partials/panel/metrics"
+        )
+        assert status == HTTPStatus.OK
+        assert 'id="metrics-panel"' in body
+        assert 'hx-trigger="every 15s"' in body
+        assert 'hx-target="#admin-panel"' in body
     finally:
         server.shutdown()
         server.server_close()

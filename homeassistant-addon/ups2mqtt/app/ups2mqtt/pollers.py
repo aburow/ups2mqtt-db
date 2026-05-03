@@ -757,39 +757,26 @@ def _poll_modbus_sync(
     return output
 
 
-def _snmp_get_sync(host: str, community: str, oid: str, *, port: int = 161) -> str | None:
-    try:
-        from pysnmp.hlapi import (  # type: ignore[attr-defined]
-            CommunityData,
-            ContextData,
-            ObjectIdentity,
-            ObjectType,
-            SnmpEngine,
-            UdpTransportTarget,
-            getCmd,
-        )
-
-        iterator = getCmd(
-            SnmpEngine(),
-            CommunityData(community, mpModel=1),
-            UdpTransportTarget((host, port), timeout=2, retries=0),
-            ContextData(),
-            ObjectType(ObjectIdentity(oid)),
-        )
-        error_indication, error_status, _error_index, var_binds = next(iterator)
-        if error_indication or error_status:
-            return None
-        for _oid, value in var_binds:
-            text = str(value)
-            return text if text else None
+def _snmp_value_text(value: Any) -> str | None:
+    value_type = type(value).__name__.lower()
+    if value_type in {"nosuchobject", "nosuchinstance", "endofmibview"}:
         return None
-    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-        return _snmp_get_sync_v1arch(host, community, oid, port=port)
+    text = str(value)
+    return text if text else None
 
 
-def _snmp_get_sync_v1arch(
-    host: str, community: str, oid: str, *, port: int = 161
-) -> str | None:
+def _snmp_get_many_sync(
+    host: str,
+    community: str,
+    oids: list[str],
+    *,
+    port: int = 161,
+    timeout: int = 2,
+) -> dict[str, str]:
+    requested_oids = [str(oid).lstrip(".") for oid in oids if str(oid).strip()]
+    if not requested_oids:
+        return {}
+
     from pysnmp.hlapi.v1arch.asyncio import (  # type: ignore[attr-defined]
         CommunityData,
         ObjectIdentity,
@@ -799,25 +786,44 @@ def _snmp_get_sync_v1arch(
         get_cmd,
     )
 
-    async def _run() -> str | None:
-        target = await UdpTransportTarget.create((host, port), timeout=2, retries=0)
+    async def _run() -> dict[str, str]:
         dispatcher = SnmpDispatcher()
-        error_indication, error_status, _error_index, var_binds = await get_cmd(
-            dispatcher,
-            CommunityData(community),
-            target,
-            ObjectType(ObjectIdentity(oid)),
-        )
-        if error_indication or error_status:
-            return None
-        for _oid, value in var_binds:
-            text = str(value)
-            return text if text else None
-        return None
+        try:
+            target = await UdpTransportTarget.create(
+                (host, port), timeout=timeout, retries=0
+            )
+            error_indication, error_status, error_index, var_binds = await get_cmd(
+                dispatcher,
+                CommunityData(community),
+                target,
+                *[
+                    ObjectType(ObjectIdentity(oid))
+                    for oid in requested_oids
+                ],
+                lookupMib=False,
+            )
+            if error_indication or error_status:
+                LOG.debug(
+                    "SNMP GET failed for %s:%s oids=%d error=%s status=%s index=%s",
+                    host,
+                    port,
+                    len(requested_oids),
+                    error_indication,
+                    error_status,
+                    error_index,
+                )
+                return {}
+            out: dict[str, str] = {}
+            for requested_oid, (_response_oid, value) in zip(requested_oids, var_binds):
+                text = _snmp_value_text(value)
+                if text is not None:
+                    out[requested_oid] = text
+            return out
+        finally:
+            close = getattr(dispatcher, "close", None)
+            if callable(close):
+                close()
 
-    # Fallback path may be invoked from async call chains (e.g. metadata refresh
-    # during multi_source polling). asyncio.run() cannot execute inside an already
-    # running event loop, so offload to a worker thread in that case.
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -825,6 +831,13 @@ def _snmp_get_sync_v1arch(
     return concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(
         lambda: asyncio.run(_run())
     ).result()
+
+
+def _snmp_get_sync(host: str, community: str, oid: str, *, port: int = 161) -> str | None:
+    normalized_oid = str(oid).lstrip(".")
+    return _snmp_get_many_sync(host, community, [normalized_oid], port=port).get(
+        normalized_oid
+    )
 
 
 def _snmp_get_first(
@@ -1559,20 +1572,28 @@ def _coerce_snmp_value(raw: str, spec: dict[str, Any]) -> int | float | str:
 def _poll_snmp_sync(
     device: DeviceConfig, profile: dict[str, Any], poll_groups: set[str] | None = None
 ) -> dict[str, Any]:
+    poll_started = time.monotonic()
     out: dict[str, Any] = {}
     allowed_groups = poll_groups or {"slow"}
+    metadata_elapsed = 0.0
+    batch_elapsed = 0.0
+    candidate_elapsed = 0.0
 
     # Runtime metadata is tracked independently from tier-gated sensor selection.
     # For APC-MIB SNMP drivers, always refresh identity cache so HA device info
     # stays populated even when metadata sensors are not enabled.
     if device.source == "ups_snmp_apc_mib":
         try:
+            started = time.monotonic()
             _maybe_refresh_apc_snmp_metadata(device)
+            metadata_elapsed = time.monotonic() - started
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             LOG.debug("Runtime metadata refresh failed for %s: %s", device.source, err)
     elif device.source == "ups_snmp_ups_mib":
         try:
+            started = time.monotonic()
             _maybe_refresh_ups_mib_snmp_metadata(device)
+            metadata_elapsed = time.monotonic() - started
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             LOG.debug("Runtime metadata refresh failed for %s: %s", device.source, err)
 
@@ -1599,6 +1620,8 @@ def _poll_snmp_sync(
             continue
         oids[str(key)] = spec
 
+    single_oid_specs: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    candidate_specs: list[tuple[str, dict[str, Any], list[str]]] = []
     for key, spec in oids.items():
         if not isinstance(spec, dict):
             continue
@@ -1607,14 +1630,61 @@ def _poll_snmp_sync(
             candidates = [str(item) for item in spec["oids"]]
         elif "oid" in spec:
             candidates = [str(spec["oid"])]
+        candidates = [oid.lstrip(".") for oid in candidates if oid.strip()]
+        if len(candidates) == 1:
+            single_oid_specs.setdefault(candidates[0], []).append((key, spec))
+        elif len(candidates) > 1:
+            candidate_specs.append((key, spec, candidates))
+
+    if single_oid_specs:
+        started = time.monotonic()
+        raw_values = _snmp_get_many_sync(
+            device.host,
+            device.snmp_community,
+            list(single_oid_specs.keys()),
+            port=device.snmp_port,
+        )
+        LOG.debug(
+            "SNMP batched GET for %s: requested=%d returned=%d elapsed=%.3fs",
+            device.id,
+            len(single_oid_specs),
+            len(raw_values),
+            time.monotonic() - started,
+        )
+        batch_elapsed = time.monotonic() - started
+        for oid, specs in single_oid_specs.items():
+            raw = raw_values.get(oid)
+            if raw is None:
+                continue
+            for key, spec in specs:
+                out[str(key)] = _coerce_snmp_value(raw, spec)
+
+    for key, spec, candidates in candidate_specs:
         for oid in candidates:
+            started = time.monotonic()
             raw = _snmp_get_sync(
                 device.host, device.snmp_community, oid, port=device.snmp_port
             )
+            candidate_elapsed += time.monotonic() - started
             if raw is None:
                 continue
             out[str(key)] = _coerce_snmp_value(raw, spec)
             break
+    requested_count = len(single_oid_specs) + sum(
+        len(candidates) for _key, _spec, candidates in candidate_specs
+    )
+    LOG.info(
+        "[%s] SNMP poll timing breakdown: total=%.3fs, metadata=%.3fs, "
+        "batch_get=%.3fs, candidate_get=%.3fs, requested=%d, returned=%d, missing=%d",
+        device.id,
+        time.monotonic() - poll_started,
+        metadata_elapsed,
+        batch_elapsed,
+        candidate_elapsed,
+        requested_count,
+        len(out),
+        max(0, requested_count - len(out)),
+    )
     return out
 
 

@@ -6,7 +6,7 @@
   "mqtt_password": "",
   "mqtt_discovery_prefix": "homeassistant",
   "mqtt_topic_prefix": "ups2mqtt",
-  "poll_interval": 10,
+  "poll_interval": 15,
   "poll_timeout": 15,
   "max_concurrent_polls": 8,
   "apps_dir": "/apps",

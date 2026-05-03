@@ -30,10 +30,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...constants import DEFAULT_POLL_INTERVAL_SECONDS
 from .oids import OIDS_APC_MIB, OIDS_UPS_MIB
 
 DEFAULT_POLL_GROUPS: dict[str, dict[str, int]] = {
-    "fast": {"interval_s": 10},
+    "fast": {"interval_s": DEFAULT_POLL_INTERVAL_SECONDS},
     "slow": {"interval_s": 60},
 }
 

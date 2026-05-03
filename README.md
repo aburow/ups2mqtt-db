@@ -151,5 +151,32 @@ The web metrics panel and `/metrics.json` expose scheduler/backpressure telemetr
   - max queue age
 - Per-device timing load averages:
   - `duration_load_avg_ms` and `wait_load_avg_ms` with `1m`, `5m`, `15m` windows
+- Slot scheduler comparison fields:
+  - `missed_capacity_count`
+  - `missed_overlap_count`
+  - `last_success_age_seconds`
+  - `polls_started_per_second`, `polls_completed_per_second`, `timeout_rate`, `event_loop_lag_ms`
 
 In the metrics UI, device timing columns show the `1m/5m/15m` load averages for duration and wait.
+
+## Polling behavior
+
+The default poll interval is centralized at 15 seconds. Runtime configuration may set a higher global `poll_interval`, but per-device and per-profile poll intervals are clamped so they cannot run faster than the configured global/default minimum. The built-in `fast` poll group also follows this minimum and is not user-overridden through profile import/edit flows.
+
+Device polling is scheduled into round-robin time slots by source so large banks of devices do not all start at once. If a slot cannot acquire capacity, the poll is skipped for that slot and counted as `missed_capacity_count`; if a prior poll still overlaps the next slot, it is counted as `missed_overlap_count`.
+
+SNMP polling batches single-OID reads into one SNMP GET per device cycle. This avoids constructing a separate SNMP engine/transport path for every metric and keeps the simulator and real devices closer to the intended 15-second cadence.
+
+## Development checks
+
+Before release, run the Python checks from each app runtime directory:
+
+```sh
+(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint ruff check ups2mqtt tests)
+(cd ups2mqtt/rootfs/usr/src/app && uv run pytest -q tests)
+(cd homeassistant-addon/ups2mqtt/app && uv run --group lint ruff check ups2mqtt tests)
+(cd homeassistant-addon/ups2mqtt/app && uv run pytest -q tests)
+make runtime-check
+```
+
+From the repository root, `make build` is an alias for the standalone Docker Compose build and uses BuildKit by default.

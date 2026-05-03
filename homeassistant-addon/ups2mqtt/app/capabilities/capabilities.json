@@ -3551,7 +3551,7 @@
       },
       "poll_groups": {
         "fast": {
-          "interval_s": 10
+          "interval_s": 15
         },
         "slow": {
           "interval_s": 60
