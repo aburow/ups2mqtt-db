@@ -159,8 +159,19 @@ def _validate_port(port: int) -> int:
     return port
 
 
-def _validate_unit_id(unit_id: int) -> int:
-    """Validate unit ID is in valid range (Modbus typical range)."""
+def _validate_unit_id(unit_id: int, *, source: str) -> int:
+    """Validate unit ID by transport family.
+
+    Modbus devices require 1..247.
+    SNMP devices allow 0 (placeholder/unused in transport) through 247.
+    """
+    source_key = str(source or "").strip().lower()
+    if "snmp" in source_key:
+        if not (0 <= unit_id <= 247):
+            raise ValueError(
+                f"Unit ID must be between 0 and 247 for SNMP sources, got {unit_id}"
+            )
+        return unit_id
     if not (1 <= unit_id <= 247):
         raise ValueError(f"Unit ID must be between 1 and 247, got {unit_id}")
     return unit_id
@@ -348,7 +359,10 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
 
     port = _validate_port(_int_or_default((data.get("port", [""])[0]), 502))
     snmp_port = _validate_port(_int_or_default((data.get("snmp_port", [""])[0]), 161))
-    unit_id = _validate_unit_id(_int_or_default((data.get("unit_id", [""])[0]), 1))
+    unit_id = _validate_unit_id(
+        _int_or_default((data.get("unit_id", [""])[0]), 1),
+        source=source,
+    )
 
     poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
     poll_interval: int | None = None
@@ -2777,7 +2791,10 @@ def start_web_server(
         snmp_port = _validate_port(
             _int_or_default((data.get("snmp_port", [""])[0]), 161)
         )
-        unit_id = _validate_unit_id(_int_or_default((data.get("unit_id", [""])[0]), 1))
+        unit_id = _validate_unit_id(
+            _int_or_default((data.get("unit_id", [""])[0]), 1),
+            source=source,
+        )
         poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
         poll_interval: int | None = None
         if poll_interval_raw:
