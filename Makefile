@@ -5,7 +5,7 @@ ENV_FILE ?= .env
 COMPOSE_FILE ?= standalone/docker-compose.yml
 SERVICE ?= ups2mqtt
 
-.PHONY: dev-up dev-restart dev-logs dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
+.PHONY: dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -17,6 +17,10 @@ CAP_SNAPSHOT_ABS := $(if $(filter /%,$(CAP_SNAPSHOT)),$(CAP_SNAPSHOT),$(CURDIR)/
 dev-up:
 	DOCKER_BUILDKIT=0 docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build
 
+dev-up-direct:
+	@echo "Starting dual debug mode: direct HTTP on http://$${UPS2MQTT_WEB_BIND:-0.0.0.0}:$${UPS2MQTT_WEB_PORT:-8099}/ and proxied HTTPS on :$${UPS2MQTT_PROXY_HTTPS_PORT:-8443}"
+	DOCKER_BUILDKIT=0 UPS2MQTT_WEB_BIND=$${UPS2MQTT_WEB_BIND:-0.0.0.0} docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --build $(SERVICE) caddy
+
 dev-build:
 	DOCKER_BUILDKIT=0 docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) build
 
@@ -24,6 +28,9 @@ dev-restart:
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) restart $(SERVICE)
 
 dev-logs:
+	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs -f $(SERVICE)
+
+dev-logs-direct:
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs -f $(SERVICE)
 
 dev-down:

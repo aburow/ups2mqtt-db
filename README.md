@@ -136,3 +136,20 @@ Once connected, you can:
       "runtime": 1240,
       "status": "ONLINE"
     }
+
+## Runtime observability
+
+The web metrics panel and `/metrics.json` expose scheduler/backpressure telemetry for live tuning:
+
+- Backpressure and adaptive limiter state:
+  - `current_limit`, `configured_min`, `configured_max`
+  - in-flight vs queued polls
+  - wait pressure (`p50/p95/max`) over the rolling 60s window
+- Per-driver/source fairness stats:
+  - dequeue/completion counts
+  - average + p50/p95 wait
+  - max queue age
+- Per-device timing load averages:
+  - `duration_load_avg_ms` and `wait_load_avg_ms` with `1m`, `5m`, `15m` windows
+
+In the metrics UI, device timing columns show the `1m/5m/15m` load averages for duration and wait.

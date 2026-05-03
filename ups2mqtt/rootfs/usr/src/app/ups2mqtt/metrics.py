@@ -86,6 +86,8 @@ class MetricsStore:
         self._source_endpoint_wait_samples: dict[str, deque[tuple[float, float]]] = {}
         self._source_queue_started: dict[str, deque[float]] = {}
         self._active_polls_by_device: dict[str, deque[ActivePoll]] = {}
+        self._device_duration_samples: dict[str, deque[tuple[float, float]]] = {}
+        self._device_wait_samples: dict[str, deque[tuple[float, float]]] = {}
         self.polls_in_flight = 0
         self.global_poll_semaphore = global_poll_semaphore
         self._db = db
@@ -105,6 +107,46 @@ class MetricsStore:
         if wait_ms is None:
             return
         self._wait_samples.append((monotonic(), max(0.0, float(wait_ms))))
+
+    @staticmethod
+    def _record_device_sample_locked(
+        samples: dict[str, deque[tuple[float, float]]],
+        device_id: str,
+        value_ms: float | None,
+    ) -> None:
+        if value_ms is None:
+            return
+        bucket = samples.setdefault(device_id, deque(maxlen=2000))
+        bucket.append((monotonic(), max(0.0, float(value_ms))))
+
+    @staticmethod
+    def _rolling_average_from_samples(
+        samples: deque[tuple[float, float]],
+        now_monotonic: float,
+        window_seconds: int,
+    ) -> float:
+        cutoff = now_monotonic - window_seconds
+        values = [value for ts, value in samples if ts >= cutoff]
+        if not values:
+            return 0.0
+        return float(sum(values) / len(values))
+
+    def _device_load_average_locked(
+        self,
+        sample_map: dict[str, deque[tuple[float, float]]],
+        device_id: str,
+        now_monotonic: float,
+    ) -> dict[str, float]:
+        samples = sample_map.get(device_id, deque())
+        if samples:
+            cutoff = now_monotonic - 900.0
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+        return {
+            "1m": self._rolling_average_from_samples(samples, now_monotonic, 60),
+            "5m": self._rolling_average_from_samples(samples, now_monotonic, 300),
+            "15m": self._rolling_average_from_samples(samples, now_monotonic, 900),
+        }
 
     @staticmethod
     def _percentiles(values: list[float]) -> tuple[float, float, float]:
@@ -354,6 +396,12 @@ class MetricsStore:
             metric.last_success_utc = _utc_now()
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 wait_ms=wait_ms,
@@ -384,6 +432,12 @@ class MetricsStore:
             metric.last_error = f"Timeout after {timeout_s}s"[:500]
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 failed=True,
@@ -415,6 +469,12 @@ class MetricsStore:
             metric.last_error = error[:500]
             metric.last_update_utc = _utc_now()
             self._record_wait_sample_locked(wait_ms)
+            self._record_device_sample_locked(
+                self._device_duration_samples, device_id, duration_ms
+            )
+            self._record_device_sample_locked(
+                self._device_wait_samples, device_id, wait_ms
+            )
             self._record_source_complete_locked(
                 device_id,
                 failed=True,
@@ -432,6 +492,16 @@ class MetricsStore:
                 if old_id in self._active_polls_by_device:
                     existing = self._active_polls_by_device.setdefault(new_id, deque())
                     existing.extend(self._active_polls_by_device.pop(old_id))
+                if old_id in self._device_duration_samples:
+                    existing_duration = self._device_duration_samples.setdefault(
+                        new_id, deque(maxlen=2000)
+                    )
+                    existing_duration.extend(self._device_duration_samples.pop(old_id))
+                if old_id in self._device_wait_samples:
+                    existing_wait = self._device_wait_samples.setdefault(
+                        new_id, deque(maxlen=2000)
+                    )
+                    existing_wait.extend(self._device_wait_samples.pop(old_id))
 
     def drop(self, device_id: str) -> None:
         """Remove metrics for a device that no longer exists."""
@@ -440,6 +510,8 @@ class MetricsStore:
             self._last_start_monotonic.pop(device_id, None)
             self._device_sources.pop(device_id, None)
             self._discard_active_polls_locked(device_id)
+            self._device_duration_samples.pop(device_id, None)
+            self._device_wait_samples.pop(device_id, None)
 
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
@@ -453,6 +525,8 @@ class MetricsStore:
             self._source_endpoint_wait_samples.clear()
             self._source_queue_started.clear()
             self._active_polls_by_device.clear()
+            self._device_duration_samples.clear()
+            self._device_wait_samples.clear()
             self.polls_in_flight = 0
 
     def prune_unknown(self, valid_ids: set[str]) -> int:
@@ -466,13 +540,23 @@ class MetricsStore:
                 self._last_start_monotonic.pop(device_id, None)
                 self._device_sources.pop(device_id, None)
                 self._discard_active_polls_locked(device_id)
+                self._device_duration_samples.pop(device_id, None)
+                self._device_wait_samples.pop(device_id, None)
             return len(stale_ids)
 
     def snapshot(self) -> dict:
         with self._lock:
-            devices = {
-                device_id: asdict(metric) for device_id, metric in self._devices.items()
-            }
+            now_monotonic = monotonic()
+            devices: dict[str, dict[str, Any]] = {}
+            for device_id, metric in self._devices.items():
+                payload = asdict(metric)
+                payload["duration_load_avg_ms"] = self._device_load_average_locked(
+                    self._device_duration_samples, device_id, now_monotonic
+                )
+                payload["wait_load_avg_ms"] = self._device_load_average_locked(
+                    self._device_wait_samples, device_id, now_monotonic
+                )
+                devices[device_id] = payload
             sources = {
                 source: asdict(metric) for source, metric in self._sources.items()
             }

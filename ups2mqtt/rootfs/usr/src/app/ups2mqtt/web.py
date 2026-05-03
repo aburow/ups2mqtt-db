@@ -514,46 +514,28 @@ def _prepare_metrics_presentation(
                 "device_id": str(identity["device_id"]),
                 "device_name": str(identity["device_name"]),
                 "name": str(identity["display_name"]),
-                "name_with_uid": (
-                    f"{identity['display_name']} ({device_uid})"
-                    if str(identity["display_name"]) != device_uid
-                    else device_uid
-                ),
                 "status": str(item.get("last_status", "unknown")),
                 "started": int(item.get("polls_started", 0)),
                 "success": int(item.get("polls_succeeded", 0)),
                 "failed": int(item.get("polls_failed", 0)),
                 "timeout": int(item.get("polls_timed_out", 0)),
-                "min_ms": (
-                    f"{float(item.get('min_duration_ms')):.1f}"
-                    if item.get("min_duration_ms") is not None
-                    else ""
+                "duration_1m_ms": (
+                    f"{float(item.get('duration_load_avg_ms', {}).get('1m', 0.0)):.1f}"
                 ),
-                "avg_ms": f"{float(item.get('average_duration_ms', 0.0)):.1f}",
-                "max_ms": (
-                    f"{float(item.get('max_duration_ms')):.1f}"
-                    if item.get("max_duration_ms") is not None
-                    else ""
+                "duration_5m_ms": (
+                    f"{float(item.get('duration_load_avg_ms', {}).get('5m', 0.0)):.1f}"
                 ),
-                "last_ms": (
-                    f"{float(item.get('last_duration_ms')):.1f}"
-                    if item.get("last_duration_ms") is not None
-                    else ""
+                "duration_15m_ms": (
+                    f"{float(item.get('duration_load_avg_ms', {}).get('15m', 0.0)):.1f}"
                 ),
-                "wait_ms": (
-                    f"{float(item.get('last_wait_ms')):.1f}"
-                    if item.get("last_wait_ms") is not None
-                    else ""
+                "wait_1m_ms": (
+                    f"{float(item.get('wait_load_avg_ms', {}).get('1m', 0.0)):.1f}"
                 ),
-                "poll_ms": (
-                    f"{float(item.get('last_poll_ms')):.1f}"
-                    if item.get("last_poll_ms") is not None
-                    else ""
+                "wait_5m_ms": (
+                    f"{float(item.get('wait_load_avg_ms', {}).get('5m', 0.0)):.1f}"
                 ),
-                "publish_ms": (
-                    f"{float(item.get('last_publish_ms')):.1f}"
-                    if item.get("last_publish_ms") is not None
-                    else ""
+                "wait_15m_ms": (
+                    f"{float(item.get('wait_load_avg_ms', {}).get('15m', 0.0)):.1f}"
                 ),
                 "cadence_min_ms": (
                     f"{float(item.get('cadence_min_ms')):.1f}"

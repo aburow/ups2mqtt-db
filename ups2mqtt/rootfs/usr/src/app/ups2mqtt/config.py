@@ -57,6 +57,13 @@ def _normalize_web_base_path(value: Any) -> str:
     return text or "/"
 
 
+def _env_or_default_int(name: str, default: Any) -> int:
+    value = _env_or_default(name, default)
+    if isinstance(value, str) and not value.strip():
+        return int(default)
+    return int(value)
+
+
 def _resolve_runtime_devices_path() -> str:
     return os.environ.get("UPS2MQTT_RUNTIME_DEVICES_PATH", RUNTIME_DEVICES_PATH)
 
@@ -276,7 +283,13 @@ def load_config(options_path: str | None = None) -> AppConfig:
         _env_or_default("UPS2MQTT_HA_BRIDGE_ENABLED", raw_ha_bridge_enabled),
         default=False,
     )
-    max_concurrent_polls = max(1, int(raw_options.get("max_concurrent_polls", 8)))
+    max_concurrent_polls = max(
+        1,
+        _env_or_default_int(
+            "UPS2MQTT_MAX_CONCURRENT_POLLS",
+            raw_options.get("max_concurrent_polls", 8),
+        ),
+    )
     adaptive_concurrency_enabled = _coerce_bool(
         _env_or_default(
             "UPS2MQTT_ADAPTIVE_CONCURRENCY_ENABLED",
@@ -286,41 +299,33 @@ def load_config(options_path: str | None = None) -> AppConfig:
     )
     adaptive_concurrency_min = max(
         1,
-        int(
-            _env_or_default(
-                "UPS2MQTT_ADAPTIVE_CONCURRENCY_MIN",
-                raw_options.get("adaptive_concurrency_min", max_concurrent_polls),
-            )
+        _env_or_default_int(
+            "UPS2MQTT_ADAPTIVE_CONCURRENCY_MIN",
+            raw_options.get("adaptive_concurrency_min", max_concurrent_polls),
         ),
     )
     adaptive_concurrency_max = max(
         adaptive_concurrency_min,
-        int(
-            _env_or_default(
-                "UPS2MQTT_ADAPTIVE_CONCURRENCY_MAX",
-                raw_options.get(
-                    "adaptive_concurrency_max",
-                    max(max_concurrent_polls, adaptive_concurrency_min),
-                ),
-            )
+        _env_or_default_int(
+            "UPS2MQTT_ADAPTIVE_CONCURRENCY_MAX",
+            raw_options.get(
+                "adaptive_concurrency_max",
+                max(max_concurrent_polls, adaptive_concurrency_min),
+            ),
         ),
     )
     adaptive_concurrency_window_seconds = max(
         10,
-        int(
-            _env_or_default(
-                "UPS2MQTT_ADAPTIVE_CONCURRENCY_WINDOW_SECONDS",
-                raw_options.get("adaptive_concurrency_window_seconds", 60),
-            )
+        _env_or_default_int(
+            "UPS2MQTT_ADAPTIVE_CONCURRENCY_WINDOW_SECONDS",
+            raw_options.get("adaptive_concurrency_window_seconds", 60),
         ),
     )
     adaptive_concurrency_target_p95_wait_ms = max(
         0,
-        int(
-            _env_or_default(
-                "UPS2MQTT_ADAPTIVE_CONCURRENCY_TARGET_P95_WAIT_MS",
-                raw_options.get("adaptive_concurrency_target_p95_wait_ms", 1000),
-            )
+        _env_or_default_int(
+            "UPS2MQTT_ADAPTIVE_CONCURRENCY_TARGET_P95_WAIT_MS",
+            raw_options.get("adaptive_concurrency_target_p95_wait_ms", 1000),
         ),
     )
 
