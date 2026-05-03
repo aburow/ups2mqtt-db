@@ -19,6 +19,14 @@
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
       >Refresh</button>
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        hx-post="/htmx/devices/actions/metrics/clear-errors"
+        hx-target="#admin-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#global-loading"
+        hx-confirm="Clear last errors for all metrics rows?"
+      >Clear All Errors</button>
       <form
         class="m-0"
         hx-post="/htmx/devices/actions/metrics/clear"

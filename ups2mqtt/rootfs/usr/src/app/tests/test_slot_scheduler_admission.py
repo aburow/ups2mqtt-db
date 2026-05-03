@@ -75,6 +75,21 @@ def test_metrics_record_success_tracks_last_values_count() -> None:
     assert snapshot["devices"]["device-a"]["last_values_count"] == 37
 
 
+def test_metrics_clear_all_last_errors_only_clears_error_text() -> None:
+    metrics = MetricsStore()
+
+    metrics.record_missed_capacity("device-a", "ups_snmp_apc_mib")
+    metrics.record_missed_overlap("device-b", "ups_snmp_apc_mib")
+
+    assert metrics.clear_all_last_errors() == 2
+
+    snapshot = metrics.snapshot()
+    assert snapshot["totals"]["missed_capacity_count"] == 1
+    assert snapshot["totals"]["missed_overlap_count"] == 1
+    assert snapshot["devices"]["device-a"]["last_error"] == ""
+    assert snapshot["devices"]["device-b"]["last_error"] == ""
+
+
 def test_device_poll_slot_offsets_spread_banks_across_interval() -> None:
     devices = [
         DeviceConfig(

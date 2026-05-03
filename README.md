@@ -165,7 +165,9 @@ The default poll interval is centralized at 15 seconds. Runtime configuration ma
 
 Device polling is scheduled into round-robin time slots by source so large banks of devices do not all start at once. If a slot cannot acquire capacity, the poll is skipped for that slot and counted as `missed_capacity_count`; if a prior poll still overlaps the next slot, it is counted as `missed_overlap_count`.
 
-SNMP polling batches single-OID reads into one SNMP GET per device cycle. This avoids constructing a separate SNMP engine/transport path for every metric and keeps the simulator and real devices closer to the intended 15-second cadence.
+SNMP polling batches single-OID reads and multi-candidate fallback reads into one SNMP GET per device cycle. APC, CyberPower, and UPS-MIB metadata refreshes also batch their OID lookups, and APC external probe discovery/merge paths batch probe candidates instead of trying OIDs sequentially. This avoids constructing a separate SNMP engine/transport path for every metric or fallback candidate and keeps the simulator and real devices closer to the intended 15-second cadence.
+
+The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
 ## Development checks
 

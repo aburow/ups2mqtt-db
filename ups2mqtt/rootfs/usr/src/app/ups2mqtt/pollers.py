@@ -840,11 +840,36 @@ def _snmp_get_sync(host: str, community: str, oid: str, *, port: int = 161) -> s
     )
 
 
+def _first_value_from_candidates(
+    raw_values: dict[str, str],
+    oids: list[str],
+) -> str | None:
+    for oid in oids:
+        raw = raw_values.get(str(oid).lstrip("."))
+        if raw is not None:
+            return raw
+    return None
+
+
+def _first_parseable_oid_from_candidates(
+    raw_values: dict[str, str],
+    oids: list[str],
+    parser,
+) -> str | None:
+    for oid in oids:
+        normalized_oid = str(oid).lstrip(".")
+        if parser(raw_values.get(normalized_oid)) is not None:
+            return normalized_oid
+    return None
+
+
 def _snmp_get_first(
     host: str, community: str, oids: list[str], *, port: int = 161
 ) -> str | None:
-    for oid in oids:
-        raw = _snmp_get_sync(host, community, oid, port=port)
+    normalized_oids = [str(oid).lstrip(".") for oid in oids if str(oid).strip()]
+    raw_values = _snmp_get_many_sync(host, community, normalized_oids, port=port)
+    for oid in normalized_oids:
+        raw = raw_values.get(oid)
         if raw is not None:
             return raw
     return None
@@ -985,78 +1010,85 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
         firmware_oids = [SMARTUPS_OID_FIRMWARE]
         firmware_date_oids = [SMARTUPS_OID_FIRMWARE_DATE]
 
-    metadata = {
-        "manufacturer": "APC",
+    metadata = {"manufacturer": "APC"}
+    metadata_candidates = {
+        "model": model_oids,
+        "location": location_oids,
+        "serial_number": serial_oids,
+        "firmware_version": firmware_oids,
+        "firmware_date": firmware_date_oids,
     }
-    model = _snmp_get_first(
-        device.host, device.snmp_community, model_oids, port=device.snmp_port
+    detection_candidates = {
+        "temp_1_oid": [
+            f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.1.1",
+            f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.1",
+        ],
+        "humidity_1_oid": [
+            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.1.1",
+            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.1",
+        ],
+        "temp_2_oid": [
+            f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.2.1",
+            f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.2",
+        ],
+        "humidity_2_oid": [
+            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.2.1",
+            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.2",
+        ],
+        "frequency_oid": [
+            SMARTUPS_OID_INPUT_FREQUENCY,
+            UPS_MIB_OID_INPUT_FREQUENCY_LINE1,
+        ],
+    }
+    parsers = {
+        "temp_1_oid": _parse_external_temp_c,
+        "humidity_1_oid": _parse_external_humidity_pct,
+        "temp_2_oid": _parse_external_temp_c,
+        "humidity_2_oid": _parse_external_humidity_pct,
+        "frequency_oid": _parse_frequency_hz,
+    }
+    requested_oids = list(
+        dict.fromkeys(
+            oid.lstrip(".")
+            for candidates in [
+                *metadata_candidates.values(),
+                *detection_candidates.values(),
+            ]
+            for oid in candidates
+            if str(oid).strip()
+        )
     )
+    raw_values = _snmp_get_many_sync(
+        device.host,
+        device.snmp_community,
+        requested_oids,
+        port=device.snmp_port,
+    )
+
+    model = _first_value_from_candidates(raw_values, model_oids)
     if model:
         metadata["model"] = model
-    location = _snmp_get_first(
-        device.host, device.snmp_community, location_oids, port=device.snmp_port
-    )
+    location = _first_value_from_candidates(raw_values, location_oids)
     if location:
         metadata["location"] = location
-    serial = _snmp_get_first(
-        device.host, device.snmp_community, serial_oids, port=device.snmp_port
-    )
+    serial = _first_value_from_candidates(raw_values, serial_oids)
     if serial:
         metadata["serial_number"] = serial
-    firmware = _snmp_get_first(
-        device.host, device.snmp_community, firmware_oids, port=device.snmp_port
-    )
+    firmware = _first_value_from_candidates(raw_values, firmware_oids)
     if firmware:
         metadata["firmware_version"] = firmware
         metadata["firmware"] = firmware
         metadata["sw_version"] = firmware  # HA device block standard field
-    firmware_date = _snmp_get_first(
-        device.host,
-        device.snmp_community,
-        firmware_date_oids,
-        port=device.snmp_port,
-    )
+    firmware_date = _first_value_from_candidates(raw_values, firmware_date_oids)
     if firmware_date:
         metadata["firmware_date"] = firmware_date
         metadata["hw_version"] = firmware_date
 
-    temp_1_oid = _first_detected_probe_oid(
-        device,
-        [f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.1.1", f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.1"],
-        _parse_external_temp_c,
-    )
-    humidity_1_oid = _first_detected_probe_oid(
-        device,
-        [
-            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.1.1",
-            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.1",
-        ],
-        _parse_external_humidity_pct,
-    )
-    temp_2_oid = _first_detected_probe_oid(
-        device,
-        [f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.2.1", f"{UIO_SENSOR_STATUS_TEMP_C_BASE}.2"],
-        _parse_external_temp_c,
-    )
-    humidity_2_oid = _first_detected_probe_oid(
-        device,
-        [
-            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.2.1",
-            f"{UIO_SENSOR_STATUS_HUMIDITY_BASE}.2",
-        ],
-        _parse_external_humidity_pct,
-    )
-    frequency_oid = _first_detected_probe_oid(
-        device,
-        [SMARTUPS_OID_INPUT_FREQUENCY, UPS_MIB_OID_INPUT_FREQUENCY_LINE1],
-        _parse_frequency_hz,
-    )
     detection = {
-        "temp_1_oid": temp_1_oid,
-        "humidity_1_oid": humidity_1_oid,
-        "temp_2_oid": temp_2_oid,
-        "humidity_2_oid": humidity_2_oid,
-        "frequency_oid": frequency_oid,
+        key: _first_parseable_oid_from_candidates(
+            raw_values, candidates, parsers[key]
+        )
+        for key, candidates in detection_candidates.items()
     }
 
     with _APC_SNMP_CACHE_LOCK:
@@ -1336,11 +1368,14 @@ def _maybe_refresh_cyberpower_snmp_metadata(
         "manufacturer": "CyberPower",
     }
 
-    # Poll each OID dynamically
+    raw_values = _snmp_get_many_sync(
+        device.host,
+        device.snmp_community,
+        list(dict.fromkeys(str(oid).lstrip(".") for oid in oid_map.values())),
+        port=device.snmp_port,
+    )
     for canonical_key, oid in oid_map.items():
-        value = _snmp_get_sync(
-            device.host, device.snmp_community, oid, port=device.snmp_port
-        )
+        value = raw_values.get(str(oid).lstrip("."))
         if value:
             metadata[canonical_key] = value
             # Legacy compatibility aliases
@@ -1380,32 +1415,33 @@ def _maybe_refresh_ups_mib_snmp_metadata(device: DeviceConfig) -> _UpsMibSnmpCac
 
     metadata: dict[str, str] = {}
 
-    manufacturer = _snmp_get_sync(
+    raw_values = _snmp_get_many_sync(
         device.host,
         device.snmp_community,
-        UPS_MIB_OID_MANUFACTURER,
+        [
+            UPS_MIB_OID_MANUFACTURER,
+            UPS_MIB_OID_MODEL,
+            UPS_MIB_OID_FIRMWARE,
+            UPS_MIB_OID_NAME,
+        ],
         port=device.snmp_port,
     )
+
+    manufacturer = raw_values.get(UPS_MIB_OID_MANUFACTURER)
     if manufacturer:
         metadata["manufacturer"] = manufacturer
 
-    model = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_MODEL, port=device.snmp_port
-    )
+    model = raw_values.get(UPS_MIB_OID_MODEL)
     if model:
         metadata["model"] = model
 
-    firmware = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_FIRMWARE, port=device.snmp_port
-    )
+    firmware = raw_values.get(UPS_MIB_OID_FIRMWARE)
     if firmware:
         metadata["firmware"] = firmware
         metadata["firmware_version"] = firmware
         metadata["sw_version"] = firmware
 
-    name = _snmp_get_sync(
-        device.host, device.snmp_community, UPS_MIB_OID_NAME, port=device.snmp_port
-    )
+    name = raw_values.get(UPS_MIB_OID_NAME)
     if name:
         metadata["name"] = name
 
@@ -1453,13 +1489,13 @@ def _first_detected_probe_oid(
     oids: list[str],
     parser,
 ) -> str | None:
-    for oid in oids:
-        raw = _snmp_get_sync(
-            device.host, device.snmp_community, oid, port=device.snmp_port
-        )
-        if parser(raw) is not None:
-            return oid
-    return None
+    raw_values = _snmp_get_many_sync(
+        device.host,
+        device.snmp_community,
+        [str(oid).lstrip(".") for oid in oids if str(oid).strip()],
+        port=device.snmp_port,
+    )
+    return _first_parseable_oid_from_candidates(raw_values, oids, parser)
 
 
 def _merge_apc_device_metadata(
@@ -1522,10 +1558,14 @@ def _merge_apc_external_probe_data(
             ("measure_ups_humidity_probe2", hum_2_oid, _parse_external_humidity_pct)
         )
 
+    raw_values = _snmp_get_many_sync(
+        device.host,
+        device.snmp_community,
+        list(dict.fromkeys(oid.lstrip(".") for _key, oid, _parser in mapping)),
+        port=device.snmp_port,
+    )
     for key, oid, parser in mapping:
-        raw = _snmp_get_sync(
-            device.host, device.snmp_community, oid, port=device.snmp_port
-        )
+        raw = raw_values.get(oid.lstrip("."))
         parsed = parser(raw)
         if parsed is None:
             continue
@@ -1636,22 +1676,37 @@ def _poll_snmp_sync(
         elif len(candidates) > 1:
             candidate_specs.append((key, spec, candidates))
 
-    if single_oid_specs:
+    requested_oids = list(
+        dict.fromkeys(
+            [
+                *single_oid_specs.keys(),
+                *[
+                    oid
+                    for _key, _spec, candidates in candidate_specs
+                    for oid in candidates
+                ],
+            ]
+        )
+    )
+    raw_values: dict[str, str] = {}
+    if requested_oids:
         started = time.monotonic()
         raw_values = _snmp_get_many_sync(
             device.host,
             device.snmp_community,
-            list(single_oid_specs.keys()),
+            requested_oids,
             port=device.snmp_port,
         )
         LOG.debug(
             "SNMP batched GET for %s: requested=%d returned=%d elapsed=%.3fs",
             device.id,
-            len(single_oid_specs),
+            len(requested_oids),
             len(raw_values),
             time.monotonic() - started,
         )
         batch_elapsed = time.monotonic() - started
+
+    if single_oid_specs:
         for oid, specs in single_oid_specs.items():
             raw = raw_values.get(oid)
             if raw is None:
@@ -1660,22 +1715,18 @@ def _poll_snmp_sync(
                 out[str(key)] = _coerce_snmp_value(raw, spec)
 
     for key, spec, candidates in candidate_specs:
+        started = time.monotonic()
         for oid in candidates:
-            started = time.monotonic()
-            raw = _snmp_get_sync(
-                device.host, device.snmp_community, oid, port=device.snmp_port
-            )
-            candidate_elapsed += time.monotonic() - started
+            raw = raw_values.get(oid)
             if raw is None:
                 continue
             out[str(key)] = _coerce_snmp_value(raw, spec)
             break
-    requested_count = len(single_oid_specs) + sum(
-        len(candidates) for _key, _spec, candidates in candidate_specs
-    )
+        candidate_elapsed += time.monotonic() - started
+    requested_count = len(requested_oids)
     LOG.info(
         "[%s] SNMP poll timing breakdown: total=%.3fs, metadata=%.3fs, "
-        "batch_get=%.3fs, candidate_get=%.3fs, requested=%d, returned=%d, missing=%d",
+        "batch_get=%.3fs, candidate_select=%.3fs, requested=%d, returned=%d, missing=%d",
         device.id,
         time.monotonic() - poll_started,
         metadata_elapsed,
@@ -1683,7 +1734,7 @@ def _poll_snmp_sync(
         candidate_elapsed,
         requested_count,
         len(out),
-        max(0, requested_count - len(out)),
+        max(0, requested_count - len(raw_values)),
     )
     return out
 

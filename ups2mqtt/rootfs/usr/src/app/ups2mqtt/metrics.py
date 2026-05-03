@@ -594,6 +594,19 @@ class MetricsStore:
             metric.last_update_utc = _utc_now()
             return True
 
+    def clear_all_last_errors(self) -> int:
+        """Clear only the last error text for all device metrics rows."""
+        with self._lock:
+            cleared = 0
+            now_utc = _utc_now()
+            for metric in self._devices.values():
+                if not metric.last_error:
+                    continue
+                metric.last_error = ""
+                metric.last_update_utc = now_utc
+                cleared += 1
+            return cleared
+
     def clear_all(self) -> None:
         """Clear all metrics for all devices."""
         with self._lock:

@@ -1986,6 +1986,9 @@ async def async_main() -> None:
     def _metrics_clear_error(device_id: str) -> bool:
         return metrics.clear_last_error(device_id)
 
+    def _metrics_clear_all_errors() -> int:
+        return metrics.clear_all_last_errors()
+
     def _cleanup_db_state() -> dict[str, int]:
         devices = store.list_devices()
         valid_uids = {device.device_uid for device in devices if device.device_uid}
@@ -2038,6 +2041,7 @@ async def async_main() -> None:
             trigger_metrics_drop=_metrics_drop,
             trigger_metrics_clear=_metrics_clear,
             trigger_metrics_clear_error=_metrics_clear_error,
+            trigger_metrics_clear_all_errors=_metrics_clear_all_errors,
             trigger_db_cleanup=_cleanup_db_state,
             trigger_device_reinitialize=lambda device_id: loop.call_soon_threadsafe(
                 device_reinitialize_queue.put_nowait, device_id

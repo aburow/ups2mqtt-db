@@ -804,6 +804,7 @@ def start_web_server(
     trigger_metrics_drop: Callable[[str], None] | None = None,
     trigger_metrics_clear: Callable[[], None] | None = None,
     trigger_metrics_clear_error: Callable[[str], bool] | None = None,
+    trigger_metrics_clear_all_errors: Callable[[], int] | None = None,
     trigger_db_cleanup: Callable[[], dict[str, int]] | None = None,
     trigger_device_reinitialize: Callable[[str], None] | None = None,
     get_config: Callable[[], dict] | None = None,
@@ -2427,6 +2428,21 @@ def start_web_server(
         if not cleared:
             return False, f"No metrics row found for {label}"
         return True, f"Cleared last error for {label}"
+
+    def _clear_all_metrics_errors() -> tuple[bool, str]:
+        if trigger_metrics_clear_all_errors is not None:
+            cleared = trigger_metrics_clear_all_errors()
+            return True, f"Cleared last errors for {cleared} metrics row(s)"
+        if trigger_metrics_clear_error is None:
+            return False, "Metrics error clear is not available"
+        snapshot = get_metrics_snapshot()
+        cleared = 0
+        for metric_key, item in dict(snapshot.get("devices", {})).items():
+            if not dict(item).get("last_error"):
+                continue
+            if trigger_metrics_clear_error(str(metric_key)):
+                cleared += 1
+        return True, f"Cleared last errors for {cleared} metrics row(s)"
 
     def _profile_rows_for_device_form() -> list[dict[str, str | bool]]:
         eligible_drivers = set(_eligible_profile_drivers().keys())
@@ -4186,6 +4202,20 @@ def start_web_server(
             if parsed_path.path == "/htmx/devices/actions/metrics/clear-error":
                 target_uid = (data.get("device_uid", [""])[0]).strip()
                 ok, message = _clear_metrics_error(device_uid=target_uid)
+                self._send_html(
+                    _render_htmx_metrics_panel(),
+                    status=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
+                    headers={
+                        "HX-Trigger": _hx_trigger_payload(
+                            toast_level="success" if ok else "danger",
+                            toast_message=message,
+                        )
+                    },
+                )
+                return True
+
+            if parsed_path.path == "/htmx/devices/actions/metrics/clear-errors":
+                ok, message = _clear_all_metrics_errors()
                 self._send_html(
                     _render_htmx_metrics_panel(),
                     status=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
