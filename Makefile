@@ -143,19 +143,30 @@ git-push-template:
 	@echo ""
 	@echo "# Git push commands (copy/paste and modify as needed):"
 	@echo ""
-	@echo "# Check current branch and remote status"
-	@echo "git status"
-	@echo "git branch -vv"
-	@echo ""
-	@echo "# Push to remote (regular push)"
-	@echo "git push"
-	@echo ""
-	@echo "# Push and set upstream for new branch"
-	@echo "git push -u origin <branch-name>"
-	@echo ""
-	@echo "# Push with force (use with caution!)"
-	@echo "# git push --force-with-lease"
-	@echo ""
-	@echo "# Push tags"
-	@echo "# git push --tags"
-	@echo ""
+	@BRANCH=$$(git branch --show-current); \
+	VERSION=$$(grep '^version:' homeassistant-addon/ups2mqtt/config.yaml | awk '{print $$2}' | tr -d '"'); \
+	echo "# Current branch: $$BRANCH"; \
+	echo "# Current version in config.yaml: $$VERSION"; \
+	echo ""; \
+	echo "# Check current branch and remote status"; \
+	echo "git status"; \
+	echo "git branch -vv"; \
+	echo ""; \
+	echo "# Push to remote (regular push)"; \
+	echo "git push"; \
+	echo ""; \
+	echo "# Push and set upstream for new branch"; \
+	echo "git push -u origin $$BRANCH"; \
+	echo ""; \
+	echo "# Push with force (use with caution!)"; \
+	echo "# git push --force-with-lease"; \
+	echo ""; \
+	echo "# ===== PUBLISH FOR HOME ASSISTANT ====="; \
+	echo ""; \
+	echo "# Create and push a version tag (HA will detect this):"; \
+	echo "git tag -a v$$VERSION -m \"Release v$$VERSION\""; \
+	echo "git push origin v$$VERSION"; \
+	echo ""; \
+	echo "# Or push all tags:"; \
+	echo "# git push --tags"; \
+	echo ""
