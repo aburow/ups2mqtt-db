@@ -8,7 +8,7 @@ DOCKER_BUILDKIT ?= 1
 COMPOSE_DOCKER_CLI_BUILD ?= 1
 BUILDKIT_PROGRESS ?= auto
 
-.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check git-commit-template git-push-template
+.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check git-commit-template git-push-template bump-version
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -117,15 +117,36 @@ runtime-check:
 release-check: runtime-check
 	@echo "Release checks passed"
 
+bump-version:
+	@if [ -z "$(VERSION)" ]; then \
+		VERSION=$$(grep '^APP=' version | cut -d'=' -f2); \
+		echo "Using version from version file: $$VERSION"; \
+	else \
+		VERSION="$(VERSION)"; \
+		echo "Setting new version: $$VERSION"; \
+		sed -i "s/^APP=.*/APP=$$VERSION/" version; \
+	fi; \
+	sed -i "s/^version:.*/version: \"$$VERSION\"/" homeassistant-addon/ups2mqtt/config.yaml; \
+	sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$$VERSION\"/" ups2mqtt/rootfs/usr/src/app/ups2mqtt/versions.py; \
+	sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$$VERSION\"/" homeassistant-addon/ups2mqtt/app/ups2mqtt/versions.py; \
+	echo "Updated version to $$VERSION in:"; \
+	echo "  - version"; \
+	echo "  - homeassistant-addon/ups2mqtt/config.yaml"; \
+	echo "  - ups2mqtt/rootfs/usr/src/app/ups2mqtt/versions.py"; \
+	echo "  - homeassistant-addon/ups2mqtt/app/ups2mqtt/versions.py"
+
 git-commit-template:
-	@echo ""
-	@echo "# Current git status:"
-	@echo ""
-	@git status --short
-	@echo ""
-	@echo "# Git add and commit commands (copy/paste and modify as needed):"
-	@echo ""
-	@if git status --short | grep -q .; then \
+	@VERSION=$$(grep '^APP=' version | cut -d'=' -f2); \
+	echo ""; \
+	echo "# Current version: $$VERSION"; \
+	echo ""; \
+	echo "# Current git status:"; \
+	echo ""; \
+	git status --short; \
+	echo ""; \
+	echo "# Git add and commit commands (copy/paste and modify as needed):"; \
+	echo ""; \
+	if git status --short | grep -q .; then \
 		echo "# Add individual files:"; \
 		git status --short | awk '{print "git add " $$NF}'; \
 		echo ""; \
@@ -136,17 +157,17 @@ git-commit-template:
 		echo "git commit -m \"<your commit message here>\""; \
 	else \
 		echo "# No changes detected"; \
-	fi
-	@echo ""
+	fi; \
+	echo ""
 
 git-push-template:
 	@echo ""
 	@echo "# Git push commands (copy/paste and modify as needed):"
 	@echo ""
 	@BRANCH=$$(git branch --show-current); \
-	VERSION=$$(grep '^version:' homeassistant-addon/ups2mqtt/config.yaml | awk '{print $$2}' | tr -d '"'); \
+	VERSION=$$(grep '^APP=' version | cut -d'=' -f2); \
 	echo "# Current branch: $$BRANCH"; \
-	echo "# Current version in config.yaml: $$VERSION"; \
+	echo "# Current version: $$VERSION"; \
 	echo ""; \
 	echo "# Check current branch and remote status"; \
 	echo "git status"; \
@@ -163,9 +184,18 @@ git-push-template:
 	echo ""; \
 	echo "# ===== PUBLISH FOR HOME ASSISTANT ====="; \
 	echo ""; \
-	echo "# Create and push a version tag (HA will detect this):"; \
+	echo "# Create and push a version tag:"; \
 	echo "git tag -a v$$VERSION -m \"Release v$$VERSION\""; \
 	echo "git push origin v$$VERSION"; \
+	echo ""; \
+	echo "# Preview auto-generated release notes BEFORE creating release:"; \
+	echo "gh api repos/aburow/ups2mqtt-db/releases/generate-notes -f tag_name=v$$VERSION"; \
+	echo ""; \
+	echo "# Create GitHub release (this makes it visible to HA):"; \
+	echo "gh release create v$$VERSION --title \"v$$VERSION\" --notes \"<release notes here>\""; \
+	echo ""; \
+	echo "# Or create release with auto-generated notes:"; \
+	echo "# gh release create v$$VERSION --title \"v$$VERSION\" --generate-notes"; \
 	echo ""; \
 	echo "# Or push all tags:"; \
 	echo "# git push --tags"; \
