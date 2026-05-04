@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-APP_VERSION = "0.90.0"
+APP_VERSION = "1.0.1"
 
 BACKUP_SCHEMA_NAME = "ups2mqtt.device_export"
 BACKUP_SCHEMA_VERSION = 1

@@ -8,7 +8,7 @@ DOCKER_BUILDKIT ?= 1
 COMPOSE_DOCKER_CLI_BUILD ?= 1
 BUILDKIT_PROGRESS ?= auto
 
-.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check
+.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check git-commit-template git-push-template
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -116,3 +116,46 @@ runtime-check:
 
 release-check: runtime-check
 	@echo "Release checks passed"
+
+git-commit-template:
+	@echo ""
+	@echo "# Current git status:"
+	@echo ""
+	@git status --short
+	@echo ""
+	@echo "# Git add and commit commands (copy/paste and modify as needed):"
+	@echo ""
+	@if git status --short | grep -q .; then \
+		echo "# Add individual files:"; \
+		git status --short | awk '{print "git add " $$NF}'; \
+		echo ""; \
+		echo "# Or add all files:"; \
+		echo "git add -A"; \
+		echo ""; \
+		echo "# Then commit:"; \
+		echo "git commit -m \"<your commit message here>\""; \
+	else \
+		echo "# No changes detected"; \
+	fi
+	@echo ""
+
+git-push-template:
+	@echo ""
+	@echo "# Git push commands (copy/paste and modify as needed):"
+	@echo ""
+	@echo "# Check current branch and remote status"
+	@echo "git status"
+	@echo "git branch -vv"
+	@echo ""
+	@echo "# Push to remote (regular push)"
+	@echo "git push"
+	@echo ""
+	@echo "# Push and set upstream for new branch"
+	@echo "git push -u origin <branch-name>"
+	@echo ""
+	@echo "# Push with force (use with caution!)"
+	@echo "# git push --force-with-lease"
+	@echo ""
+	@echo "# Push tags"
+	@echo "# git push --tags"
+	@echo ""
