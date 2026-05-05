@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import json
+from pathlib import Path
 from typing import Any
 
 from .capability_repository import get_capability_repository
@@ -11,6 +13,7 @@ from .drivers.runtime_metadata import validate_driver_metadata_ownership
 from .icon_resolver import resolve_enabled_defaults
 
 _DEFAULT_SLOW_INTERVAL = 60
+_GENERIC_NUT_DRIVER_KEY = "nut_network_upsd"
 
 
 def _sanitize_poll_groups(raw: Any) -> dict[str, dict[str, int]]:
@@ -167,6 +170,10 @@ def load_capabilities(
         "source": "database",
         "profiles": profiles,
     }
+    if _GENERIC_NUT_DRIVER_KEY not in profiles:
+        bundled_nut = _load_bundled_generic_nut_profile()
+        if bundled_nut:
+            payload["profiles"][_GENERIC_NUT_DRIVER_KEY] = bundled_nut
     if metric_contracts:
         payload["metric_contracts"] = metric_contracts
     validation_errors = list(runtime_errors)
@@ -180,6 +187,19 @@ def load_capabilities(
     if validation_errors:
         payload["validation_errors"] = validation_errors
     return payload
+
+
+def _load_bundled_generic_nut_profile() -> dict[str, Any]:
+    bundled_path = Path(__file__).resolve().parents[1] / "capabilities" / "capabilities.json"
+    if not bundled_path.exists():
+        return {}
+    try:
+        raw = json.loads(bundled_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    profiles = raw.get("profiles", {}) if isinstance(raw, dict) else {}
+    profile = profiles.get(_GENERIC_NUT_DRIVER_KEY, {}) if isinstance(profiles, dict) else {}
+    return dict(profile) if isinstance(profile, dict) else {}
 
 
 def source_keys(profile: dict[str, Any]) -> list[str]:

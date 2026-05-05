@@ -68,6 +68,7 @@ class DeviceStore:
                 id=device.id,
                 source=device.source,
                 host=device.host,
+                ups_name=device.ups_name,
                 port=device.port,
                 snmp_port=device.snmp_port,
                 unit_id=device.unit_id,

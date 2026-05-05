@@ -31,6 +31,9 @@
                 {% if profile.is_protected %}
                 <span class="badge text-bg-secondary ms-1">Protected</span>
                 {% endif %}
+                {% if profile.helper_text %}
+                <div class="small text-muted">{{ profile.helper_text }}</div>
+                {% endif %}
               </td>
               <td><code>{{ profile.driver_key }}</code></td>
               <td>{{ profile.sensor_count }}</td>

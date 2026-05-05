@@ -137,6 +137,15 @@ Once connected, you can:
       "status": "ONLINE"
     }
 
+## MQTT discovery key normalization
+
+For selected raw NUT variables that contain dotted keys (for example `battery.voltage`), ups2mqtt keeps the raw key in the MQTT state payload and uses bracket-safe templates in discovery:
+
+- state payload key: `battery.voltage`
+- discovery value template: `{{ value_json['battery.voltage'] }}`
+
+Home Assistant discovery identifiers/topics are normalized to HA-safe tokens (for example `battery_voltage`) to avoid entity-registration issues with dotted identifiers.
+
 ## Runtime observability
 
 The web metrics panel and `/metrics.json` expose scheduler/backpressure telemetry for live tuning:

@@ -165,3 +165,57 @@ def test_disabling_bridge_does_not_block_device_entity_discovery(monkeypatch) ->
     ]
     assert legacy_device_messages
     assert all(row["payload"] == "" for row in legacy_device_messages)
+
+
+def test_discovery_value_template_uses_bracket_access_for_dotted_keys(monkeypatch) -> None:
+    monkeypatch.setattr(mqtt_module.mqtt, "Client", _FakeClient)
+    monkeypatch.setattr(
+        mqtt_module,
+        "resolve_enabled_defaults",
+        lambda source, keys, apps_dir, authoritative=True: {
+            key: True for key in keys
+        },
+    )
+    monkeypatch.setattr(mqtt_module, "resolve_icon", lambda source, key, apps_dir: None)
+    publisher = mqtt_module.MqttPublisher(_make_config(ha_bridge_enabled=True))
+    device = DeviceConfig(
+        id="ups-a",
+        device_uid="uid-ups-a",
+        source="nut_network_upsd",
+        host="10.0.0.10",
+    )
+
+    assert publisher.publish_discovery(device, ["battery.voltage"])
+    topic = "homeassistant/sensor/ups2mqtt_uid-ups-a_battery_voltage/config"
+    messages = [row for row in publisher._client.published if row["topic"] == topic]
+    assert messages
+    payload = json.loads(next(row["payload"] for row in messages if row["payload"]))
+    assert payload["unique_id"] == "ups2mqtt_uid-ups-a_battery_voltage"
+    assert payload["value_template"] == "{{ value_json['battery.voltage'] }}"
+
+
+def test_publish_state_includes_dotted_selected_key(monkeypatch) -> None:
+    monkeypatch.setattr(mqtt_module.mqtt, "Client", _FakeClient)
+    publisher = mqtt_module.MqttPublisher(_make_config(ha_bridge_enabled=True))
+    device = DeviceConfig(
+        id="ups-a",
+        device_uid="uid-ups-a",
+        source="nut_network_upsd",
+        host="10.0.0.10",
+        port=3493,
+    )
+
+    assert publisher.publish_state(
+        device,
+        {
+            "battery_charge": 100.0,
+            "battery.voltage": "27.4",
+        },
+        discovery_keys=["battery_charge", "battery.voltage"],
+    )
+    state_topic = "ups2mqtt/ups-a/state"
+    messages = [row for row in publisher._client.published if row["topic"] == state_topic]
+    assert messages
+    payload = json.loads(next(row["payload"] for row in messages if row["payload"]))
+    assert payload["battery_charge"] == 100.0
+    assert payload["battery.voltage"] == "27.4"

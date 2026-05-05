@@ -70,6 +70,13 @@
               <label class="form-label small mb-1">Host</label>
               <input class="form-control form-control-sm" name="host" value="{{ form.host }}" required/>
             </div>
+            {% if show_ups_name %}
+            <div class="col-12 col-md-3">
+              <label class="form-label small mb-1">NUT UPS Name</label>
+              <input class="form-control form-control-sm" name="ups_name" value="{{ form.ups_name }}" placeholder="devups"/>
+              <div class="form-text">Device-specific NUT identity used at poll time. This is not stored in the reusable profile.</div>
+            </div>
+            {% endif %}
 
             <div class="col-6 col-md-2">
               <label class="form-label small mb-1">Port</label>

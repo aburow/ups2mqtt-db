@@ -15,6 +15,7 @@ class DeviceConfig:
     id: str
     source: str
     host: str
+    ups_name: str | None = None
     port: int = 502
     snmp_port: int = 161
     unit_id: int = 1
@@ -39,6 +40,7 @@ class DeviceConfig:
     ) -> tuple[
         str,
         str,
+        str | None,
         int,
         int,
         int,
@@ -72,6 +74,7 @@ class DeviceConfig:
         return (
             self.source,
             self.host,
+            self.ups_name,
             self.port,
             self.snmp_port,
             self.unit_id,

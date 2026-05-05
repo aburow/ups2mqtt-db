@@ -24,6 +24,7 @@ DEFAULT_PROTECTED_PROFILES: frozenset[tuple[str, str]] = frozenset(
     }
 )
 _DEVICE_COLUMN_MIGRATIONS: dict[str, str] = {
+    "ups_name": "ALTER TABLE devices ADD COLUMN ups_name TEXT",
     "snmp_port": "ALTER TABLE devices ADD COLUMN snmp_port INTEGER NOT NULL DEFAULT 161",
     "keep_connection_open": (
         "ALTER TABLE devices ADD COLUMN keep_connection_open INTEGER NOT NULL DEFAULT 0"
@@ -111,6 +112,7 @@ class Database:
                 id TEXT NOT NULL,
                 source TEXT NOT NULL,
                 host TEXT NOT NULL,
+                ups_name TEXT,
                 port INTEGER NOT NULL,
                 snmp_port INTEGER NOT NULL DEFAULT 161,
                 unit_id INTEGER NOT NULL,
@@ -132,6 +134,12 @@ class Database:
             )
         """)
 
+        self._ensure_column(
+            cursor=cursor,
+            table="devices",
+            column="ups_name",
+            definition="TEXT",
+        )
         self._ensure_column(
             cursor=cursor,
             table="devices",
@@ -534,15 +542,17 @@ class Database:
             """
             INSERT INTO devices (
                 device_uid, id, source, host, port, snmp_port, unit_id, snmp_community,
+                ups_name,
                 poll_interval, name, location, debug_logging, keep_connection_open,
                 discovery_enabled, polling_enabled,
                 profile_uid, profile_mode, local_profile_payload, local_selected_sensors, local_sensor_preferences,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(device_uid) DO UPDATE SET
                 id = excluded.id,
                 source = excluded.source,
                 host = excluded.host,
+                ups_name = excluded.ups_name,
                 port = excluded.port,
                 snmp_port = excluded.snmp_port,
                 unit_id = excluded.unit_id,
@@ -570,6 +580,7 @@ class Database:
                 device.snmp_port,
                 device.unit_id,
                 device.snmp_community,
+                device.ups_name,
                 device.poll_interval,
                 device.name,
                 device.location,
@@ -649,6 +660,7 @@ class Database:
                     id=row["id"],
                     source=row["source"],
                     host=row["host"],
+                    ups_name=row["ups_name"],
                     port=row["port"],
                     snmp_port=int(row["snmp_port"] or 161),
                     unit_id=row["unit_id"],

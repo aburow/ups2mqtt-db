@@ -136,6 +136,11 @@
           :class="{ 'active': activePanel === 'profiles' }"
           @click="loadPanel('profiles')"
         >Profiles</button>
+        <button
+          class="btn text-start nav-link"
+          :class="{ 'active': activePanel === 'profile-builder' }"
+          @click="loadPanel('profile-builder')"
+        >Profile Builder</button>
       </nav>
 
       <div class="sidebar-link-block">

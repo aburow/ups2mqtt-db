@@ -105,6 +105,7 @@ def _parse_device(
     device_id = str(item["id"]).strip()
     source = str(item["source"]).strip()
     host = str(item["host"]).strip()
+    ups_name = _clean_optional(item.get("ups_name"))
     if not device_id:
         raise ValueError("Device id is required")
     if not source:
@@ -138,6 +139,7 @@ def _parse_device(
         id=device_id,
         source=source,
         host=host,
+        ups_name=ups_name,
         port=int(item.get("port", default_port)),
         snmp_port=int(item.get("snmp_port", 161)),
         unit_id=int(item.get("unit_id", 1)),

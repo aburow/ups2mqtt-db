@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from time import monotonic
 from typing import Any
 
@@ -33,6 +34,27 @@ def _friendly_name(key: str) -> str:
             normalized = normalized[: -len(suffix)]
             break
     return normalized.replace("_", " ").strip().title()
+
+
+_JSON_DOT_PATH_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DISCOVERY_TOKEN_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def discovery_metric_token(key: str) -> str:
+    token = _DISCOVERY_TOKEN_RE.sub("_", str(key).strip())
+    token = token.strip("_")
+    return token or "metric"
+
+
+def discovery_unique_id(identity: str, key: str) -> str:
+    return f"{HA_ID_NAMESPACE}_{identity}_{discovery_metric_token(key)}"
+
+
+def _json_value_template_for_key(key: str) -> str:
+    if _JSON_DOT_PATH_KEY_RE.match(key):
+        return "{{ value_json." + key + " }}"
+    escaped = key.replace("\\", "\\\\").replace("'", "\\'")
+    return "{{ value_json['" + escaped + "'] }}"
 
 
 def _infer_units(key: str) -> tuple[str | None, str | None, str | None]:
@@ -156,10 +178,10 @@ class MqttPublisher:
             "entities": [
                 {
                     "key": key,
-                    "unique_id": f"{HA_ID_NAMESPACE}_{identity}_{key}",
+                    "unique_id": discovery_unique_id(identity, key),
                     "discovery_topic": (
                         f"{self._config.mqtt_discovery_prefix}/sensor/"
-                        f"{HA_ID_NAMESPACE}_{identity}_{key}/config"
+                        f"{discovery_unique_id(identity, key)}/config"
                     ),
                 }
                 for key in entities
@@ -359,7 +381,7 @@ class MqttPublisher:
         sensor_meta = self._sensor_metadata_for_source(device.source)
 
         for key in keys:
-            unique_id = f"{HA_ID_NAMESPACE}_{identity}_{key}"
+            unique_id = discovery_unique_id(identity, key)
             config_topic = (
                 f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
             )
@@ -381,7 +403,7 @@ class MqttPublisher:
                 "name": _friendly_name(key),
                 "unique_id": unique_id,
                 "state_topic": state_topic,
-                "value_template": "{{ value_json." + key + " }}",
+                "value_template": _json_value_template_for_key(key),
                 "availability": [
                     {
                         "topic": self._bridge_availability_topic,
@@ -435,22 +457,24 @@ class MqttPublisher:
         identity = device.device_uid or device.id
         for key in keys:
             for namespace in (HA_ID_NAMESPACE, LEGACY_HA_ID_NAMESPACE):
-                unique_id = f"{namespace}_{identity}_{key}"
-                config_topic = (
-                    f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
-                )
-                self._client.publish(config_topic, payload="", qos=1, retain=True)
+                for token in {str(key), discovery_metric_token(key)}:
+                    unique_id = f"{namespace}_{identity}_{token}"
+                    config_topic = (
+                        f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+                    )
+                    self._client.publish(config_topic, payload="", qos=1, retain=True)
         return True
 
     def clear_legacy_discovery(self, device_id: str, keys: list[str]) -> bool:
         if not self._attempt_connect():
             return False
         for key in keys:
-            unique_id = f"ups_unified_{device_id}_{key}"
-            config_topic = (
-                f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
-            )
-            self._client.publish(config_topic, payload="", qos=1, retain=True)
+            for token in {str(key), discovery_metric_token(key)}:
+                unique_id = f"ups_unified_{device_id}_{token}"
+                config_topic = (
+                    f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
+                )
+                self._client.publish(config_topic, payload="", qos=1, retain=True)
         return True
 
     def publish_state(

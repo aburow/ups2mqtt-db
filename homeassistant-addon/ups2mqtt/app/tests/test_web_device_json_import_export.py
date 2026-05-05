@@ -62,6 +62,18 @@ def _capability_profiles() -> dict[str, dict]:
             "poll_groups": {"slow": {"interval_s": 60}},
             "registers": [],
         },
+        "nut_network_upsd": {
+            "protocol": "nut",
+            "profile_id": "nut_network_upsd",
+            "source": "nut",
+            "poll_groups": {"fast": {"interval_s": 15}, "slow": {"interval_s": 60}},
+            "nut": {
+                "status_map": {"OL": {"key": "load_on_source", "value": True}},
+                "variables": {
+                    "battery.charge": {"key": "battery_charge", "poll_group": "fast", "type": "float"}
+                },
+            },
+        },
     }
 
 
@@ -114,6 +126,7 @@ def test_export_global_profile_device_includes_uid_and_profile_snapshot(tmp_path
                 id="dev-a",
                 source="apc_modbus_smt",
                 host="10.0.0.10",
+                ups_name="ignored-for-modbus",
                 device_uid="device-1",
                 profile_uid="profile-1",
                 profile_mode="global",
@@ -132,6 +145,7 @@ def test_export_global_profile_device_includes_uid_and_profile_snapshot(tmp_path
         assert payload["devices"][0]["device_uid"] == "device-1"
         assert payload["devices"][0]["profile_uid"] == "profile-1"
         assert payload["devices"][0]["profile_mode"] == "global"
+        assert payload["devices"][0]["config"]["ups_name"] == "ignored-for-modbus"
         assert payload["devices"][0]["location"] == ""
         assert any(item["profile_uid"] == "profile-1" for item in payload["profiles"])
     finally:
@@ -249,6 +263,46 @@ def test_import_reuses_existing_profile_when_uid_missing_and_name_driver_match(t
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_export_import_preserves_optional_ups_name(tmp_path: Path) -> None:
+    export_server, _export_db, export_store = _start_test_server(tmp_path / "export")
+    try:
+        export_store.upsert(
+            DeviceConfig(
+                id="nut-a",
+                source="nut_network_upsd",
+                host="10.0.0.25",
+                ups_name="devups",
+                port=3493,
+                device_uid="device-nut-1",
+                polling_enabled=True,
+                discovery_enabled=True,
+            )
+        )
+        base_url = f"http://127.0.0.1:{export_server.server_port}"
+        status, body, _headers = _fetch(base_url, "/htmx/maintenance/backup/export")
+        assert status == HTTPStatus.OK
+        exported = json.loads(body)
+        assert exported["devices"][0]["config"]["ups_name"] == "devups"
+    finally:
+        export_server.shutdown()
+        export_server.server_close()
+
+    import_server, import_db, _import_store = _start_test_server(tmp_path / "import")
+    try:
+        base_url = f"http://127.0.0.1:{import_server.server_port}"
+        status, _body, _headers = _post(
+            base_url,
+            "/htmx/maintenance/backup/import",
+            {"json_file": json.dumps(exported)},
+        )
+        assert status == HTTPStatus.OK
+        imported = next(item for item in import_db.load_devices() if item.device_uid == "device-nut-1")
+        assert imported.ups_name == "devups"
+    finally:
+        import_server.shutdown()
+        import_server.server_close()
 
 
 def test_import_conflicting_profile_uid_does_not_overwrite(tmp_path: Path) -> None:

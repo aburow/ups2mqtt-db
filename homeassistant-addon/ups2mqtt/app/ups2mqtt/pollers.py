@@ -1743,6 +1743,8 @@ def _nut_guess_ups_name(device: DeviceConfig, profile: dict[str, Any]) -> str:
     configured = profile.get("nut", {}).get("ups_name")
     if isinstance(configured, str) and configured.strip():
         return configured.strip()
+    if device.ups_name and device.ups_name.strip():
+        return device.ups_name.strip()
     if device.name and device.name.strip():
         return device.name.strip()
     return device.id
@@ -1751,11 +1753,6 @@ def _nut_guess_ups_name(device: DeviceConfig, profile: dict[str, Any]) -> str:
 def _nut_read_lines(sock: socket.socket, ups_name: str) -> list[str]:
     lines: list[str] = []
     with sock.makefile("rwb", buffering=0) as io:
-        # Ignore greeting banner if present.
-        try:
-            _ = io.readline()
-        except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-            pass
         io.write(f"LIST VAR {ups_name}\n".encode("utf-8"))
         io.flush()
         while True:
@@ -1766,6 +1763,8 @@ def _nut_read_lines(sock: socket.socket, ups_name: str) -> list[str]:
             if not line:
                 continue
             lines.append(line)
+            if line.startswith("ERR "):
+                break
             if line.startswith("END LIST VAR "):
                 break
     return lines
@@ -1812,6 +1811,8 @@ def _poll_nut_sync(
 
     values_by_var: dict[str, str] = {}
     for line in lines:
+        if line.startswith("ERR "):
+            raise OSError(f"NUT server returned error: {line}")
         if not line.startswith("VAR "):
             continue
         try:

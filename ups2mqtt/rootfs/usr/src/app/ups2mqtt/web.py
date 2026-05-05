@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import html
+import importlib.util
 import json
 import logging
 import threading
@@ -66,6 +67,8 @@ CSV_IMPORT_HEADERS = [
 ]
 # Cache reference managed by catalog module.
 APC_CATALOG_CACHE: dict[str, dict[str, list[dict[str, str]]]] = {}
+_NUTPOLLER_MODULE = None
+GENERIC_NUT_DRIVER_KEY = "nut_network_upsd"
 
 
 def _escape(value: str) -> str:
@@ -130,6 +133,167 @@ def _decode_http_text(raw: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", errors="replace")
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _nut_interface_root() -> Path:
+    return _repo_root().parent / "nut-interface"
+
+
+def _bundled_nutpoller_path() -> Path:
+    return Path(__file__).resolve().parent / "vendor" / "nutpoller.py"
+
+
+def _nutpoller_candidate_paths() -> list[Path]:
+    return [
+        _bundled_nutpoller_path(),
+        _nut_interface_root() / "nutpoller.py",
+    ]
+
+
+def _load_base_nutpoller_module():
+    global _NUTPOLLER_MODULE
+    if _NUTPOLLER_MODULE is not None:
+        return _NUTPOLLER_MODULE
+    module_path: Path | None = None
+    for candidate in _nutpoller_candidate_paths():
+        if candidate.exists():
+            module_path = candidate
+            break
+    if module_path is None:
+        candidate_paths = ", ".join(str(path) for path in _nutpoller_candidate_paths())
+        raise FileNotFoundError(
+            f"NUT reader not found. Checked: {candidate_paths}"
+        )
+    spec = importlib.util.spec_from_file_location(
+        "ups2mqtt_profile_builder_nutpoller",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load NUT reader from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _NUTPOLLER_MODULE = module
+    return module
+
+
+def _default_discover_nut_variables(
+    host: str,
+    port: int,
+    ups_name: str,
+    use_starttls: bool,
+) -> dict[str, str]:
+    if use_starttls:
+        raise ValueError("STARTTLS discovery is not available with the selected NUT reader")
+    module = _load_base_nutpoller_module()
+    result = module.poll_ups(host=host, port=port, ups_name=ups_name, timeout=5.0)
+    if not bool(getattr(result, "success", False)):
+        error_text = str(getattr(result, "error", "") or "").strip()
+        normalized = error_text.upper()
+        if "UNKNOWN-UPS" in normalized:
+            raise ValueError(f"Unknown UPS name: {ups_name}")
+        if "ACCESS-DENIED" in normalized:
+            raise ValueError("Access denied by the NUT server")
+        if "TIMED OUT" in normalized or "TIMEOUT" in normalized:
+            raise ValueError(f"Connection timeout to {host}:{port}")
+        if "NAME OR SERVICE NOT KNOWN" in normalized or "NODENAME NOR SERVNAME" in normalized:
+            raise ValueError(f"DNS resolution failed for {host}")
+        if "REFUSED" in normalized:
+            raise ValueError(f"Connection refused by {host}:{port}")
+        raise ValueError(error_text or "NUT discovery failed")
+    variables = getattr(result, "variables", {})
+    if not isinstance(variables, dict) or not variables:
+        raise ValueError("Discovery returned no variables for the selected UPS")
+    return {
+        str(key): str(value)
+        for key, value in variables.items()
+        if str(key).strip()
+    }
+
+
+def _generic_nut_contract(
+    capability_profiles: dict[str, dict[str, object]] | None,
+) -> dict[str, object]:
+    raw = capability_profiles or {}
+    profile = raw.get(GENERIC_NUT_DRIVER_KEY, {})
+    return dict(profile) if isinstance(profile, dict) else {}
+
+
+def _normalize_nut_discovery_rows(
+    variables: dict[str, str],
+    contract_profile: dict[str, object],
+) -> list[dict[str, str | bool]]:
+    rows: list[dict[str, str | bool]] = []
+    nut = contract_profile.get("nut", {})
+    if not isinstance(nut, dict):
+        return rows
+    mapped: set[str] = set()
+    consumed_raw_names: set[str] = set()
+    variable_specs = nut.get("variables", {})
+    if isinstance(variable_specs, dict):
+        for raw_name, spec in sorted(variable_specs.items(), key=lambda item: str(item[0])):
+            if not isinstance(spec, dict):
+                continue
+            canonical_key = str(spec.get("key", "")).strip()
+            if not canonical_key or raw_name not in variables:
+                continue
+            rows.append(
+                {
+                    "key": canonical_key,
+                    "raw_name": str(raw_name),
+                    "sample_value": str(variables.get(raw_name, "")),
+                    "selected": True,
+                }
+            )
+            mapped.add(canonical_key)
+            consumed_raw_names.add(str(raw_name))
+    if "ups.status" in variables:
+        status_specs = nut.get("status_map", {})
+        if isinstance(status_specs, dict):
+            for token, spec in sorted(status_specs.items(), key=lambda item: str(item[0])):
+                if not isinstance(spec, dict):
+                    continue
+                canonical_key = str(spec.get("key", "")).strip()
+                if not canonical_key or canonical_key in mapped:
+                    continue
+                rows.append(
+                    {
+                        "key": canonical_key,
+                        "raw_name": f"ups.status ({token})",
+                        "sample_value": str(variables.get("ups.status", "")),
+                        "selected": True,
+                    }
+                )
+                mapped.add(canonical_key)
+    sensitive_fragments = tuple(
+        fragment.lower() for fragment in _SENSITIVE_KEY_FRAGMENTS
+    )
+    for raw_name, sample_value in sorted(variables.items(), key=lambda item: str(item[0])):
+        raw_key = str(raw_name).strip()
+        if not raw_key:
+            continue
+        if raw_key in consumed_raw_names:
+            continue
+        lowered = raw_key.lower()
+        if any(fragment in lowered for fragment in sensitive_fragments):
+            continue
+        if lowered in _SENSITIVE_KEY_EXACT:
+            continue
+        if raw_key in mapped:
+            continue
+        rows.append(
+            {
+                "key": raw_key,
+                "raw_name": raw_key,
+                "sample_value": str(sample_value),
+                "selected": False,
+            }
+        )
+        mapped.add(raw_key)
+    return rows
 
 
 def _is_bitfield_sensor_key(sensor_key: str) -> bool:
@@ -355,7 +519,12 @@ def _catalog_sensor_rows_for_driver(
     *, apps_dir: str, driver_key: str
 ) -> list[dict[str, str]]:
     """Fetch normalized sensor rows from the shared catalog for UI rendering."""
-    return get_catalog_sensor_rows(driver_key=driver_key, apps_dir=apps_dir)
+    if driver_key == GENERIC_NUT_DRIVER_KEY:
+        return []
+    try:
+        return get_catalog_sensor_rows(driver_key=driver_key, apps_dir=apps_dir)
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        return []
 
 
 def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
@@ -384,6 +553,7 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
         id=device_id,
         source=source,
         host=host,
+        ups_name=(data.get("ups_name", [""])[0]).strip() or None,
         port=port,
         snmp_port=snmp_port,
         unit_id=unit_id,
@@ -411,6 +581,7 @@ def _clone_device(
         id=device.id,
         source=device.source,
         host=device.host,
+        ups_name=device.ups_name,
         port=device.port,
         snmp_port=device.snmp_port,
         unit_id=device.unit_id,
@@ -819,6 +990,9 @@ def start_web_server(
     get_ha_bridge_enabled: Callable[[], bool] | None = None,
     set_ha_bridge_enabled: Callable[[bool], None] | None = None,
     get_capability_profiles: Callable[[], dict[str, dict[str, object]]] | None = None,
+    discover_nut_variables: (
+        Callable[[str, int, str, bool], dict[str, str]] | None
+    ) = None,
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
@@ -856,6 +1030,8 @@ def start_web_server(
     ha_bridge_enabled_getter = get_ha_bridge_enabled or (lambda: False)
     ha_bridge_enabled_setter = set_ha_bridge_enabled or (lambda value: None)
     capability_profiles_getter = get_capability_profiles or (lambda: {})
+    nut_variable_discovery = discover_nut_variables or _default_discover_nut_variables
+    nut_starttls_supported = False
     profile_device_info_keys = {
         # Canonical device-info/identity-like fields used by existing contract adapters.
         "manufacturer",
@@ -958,10 +1134,10 @@ def start_web_server(
     ) -> bool:
         if not driver_key:
             return False
-        if driver_key.lower().startswith("nut"):
+        if driver_key.lower().startswith("nut") and driver_key != GENERIC_NUT_DRIVER_KEY:
             return False
         protocol = str((profile or {}).get("protocol", "")).strip().lower()
-        if protocol == "nut":
+        if protocol == "nut" and driver_key != GENERIC_NUT_DRIVER_KEY:
             return False
         return bool(profile)
 
@@ -1053,6 +1229,28 @@ def start_web_server(
             if key and not _is_bitfield_sensor_key(key):
                 keys.add(key)
         return sorted(keys)
+
+    def _extend_nut_sensor_keys(
+        driver_key: str,
+        keys: list[str],
+        *extra_sets: list[str] | set[str] | tuple[str, ...] | dict[str, Any] | None,
+    ) -> list[str]:
+        """Keep unknown persisted NUT keys editable for global/local profile edits."""
+        if driver_key != GENERIC_NUT_DRIVER_KEY:
+            return list(keys)
+        merged = {str(item).strip() for item in keys if str(item).strip()}
+        for extra in extra_sets:
+            if isinstance(extra, dict):
+                candidates = extra.keys()
+            elif isinstance(extra, (list, set, tuple)):
+                candidates = extra
+            else:
+                continue
+            for item in candidates:
+                key = str(item).strip()
+                if key and not _is_bitfield_sensor_key(key):
+                    merged.add(key)
+        return sorted(merged)
 
     def _profile_editor_context(
         *,
@@ -1149,6 +1347,12 @@ def start_web_server(
             available_sensor_keys = _profile_allowed_sensor_keys(
                 selected_driver,
                 contract_profile,
+            )
+            available_sensor_keys = _extend_nut_sensor_keys(
+                selected_driver,
+                available_sensor_keys,
+                merged_selected,
+                sensor_preferences if isinstance(sensor_preferences, dict) else None,
             )
         except ValueError as err:
             return {
@@ -1412,6 +1616,11 @@ def start_web_server(
                 "profile_uid": item.profile_uid,
                 "name": item.name,
                 "driver_key": item.driver_key,
+                "helper_text": (
+                    "Reusable NUT profile. Devices using it keep their own host and UPS name."
+                    if item.driver_key == GENERIC_NUT_DRIVER_KEY
+                    else ""
+                ),
                 "sensor_count": len(item.selected_sensors),
                 "usage_count": int(
                     len(devices_by_profile_uid.get(item.profile_uid, []))
@@ -1429,6 +1638,51 @@ def start_web_server(
             form_html=form_html
             if form_html is not None
             else _render_htmx_profiles_form(),
+        )
+
+    def _profile_builder_form_values_from_data(
+        data: dict[str, list[str]] | None,
+    ) -> dict[str, object]:
+        data = data or {}
+        return {
+            "host": (data.get("host", [""])[0]).strip(),
+            "ups_name": (data.get("ups_name", [""])[0]).strip(),
+            "port": (data.get("port", ["3493"])[0]).strip() or "3493",
+            "use_starttls": _bool_from_form(data, "use_starttls"),
+        }
+
+    def _render_htmx_profile_builder_results(
+        *,
+        error_message: str = "",
+        info_message: str = (
+            "Generated NUT profiles save against the generic reusable NUT runtime contract. Discovery host/IP and UPS name are not persisted."
+        ),
+        discovered_rows: list[dict[str, object]] | None = None,
+        profile_name: str = "",
+    ) -> str:
+        return templates.get_template("htmx/profile_builder_results.html").render(
+            error_message=error_message,
+            info_message=info_message,
+            discovered_rows=discovered_rows or [],
+            profile_name=profile_name,
+        )
+
+    def _render_htmx_profile_builder_panel(
+        *,
+        form_values: dict[str, object] | None = None,
+        discovery_html: str | None = None,
+    ) -> str:
+        form = form_values or _profile_builder_form_values_from_data(None)
+        return templates.get_template("htmx/panels/profile_builder_panel.html").render(
+            form=form,
+            nut_starttls_supported=nut_starttls_supported,
+            discovery_html=discovery_html
+            if discovery_html is not None
+            else _render_htmx_profile_builder_results(
+                info_message=(
+                    "Run a live NUT discovery to preview reusable NUT capabilities."
+                )
+            ),
         )
 
     def _render_htmx_devices_table(
@@ -1823,6 +2077,7 @@ def start_web_server(
                     "config": {
                         "id": str(device.id),
                         "host": str(device.host),
+                        "ups_name": str(device.ups_name or ""),
                         "port": int(device.port),
                         "snmp_port": int(device.snmp_port),
                         "unit_id": int(device.unit_id),
@@ -1897,6 +2152,7 @@ def start_web_server(
             "id": str(device.id),
             "source": str(device.source),
             "host": str(device.host),
+            "ups_name": str(device.ups_name or ""),
             "port": int(device.port),
             "snmp_port": int(device.snmp_port),
             "unit_id": int(device.unit_id),
@@ -2144,6 +2400,7 @@ def start_web_server(
                 )
             device_id = str(config_payload.get("id", "")).strip()
             host = str(config_payload.get("host", "")).strip()
+            ups_name = str(config_payload.get("ups_name", "")).strip() or None
             if not device_id or not host:
                 raise ValueError(
                     f"Invalid device entry at index {index}: config.id and config.host are required"
@@ -2270,6 +2527,7 @@ def start_web_server(
                 id=device_id,
                 source=driver_key,
                 host=host,
+                ups_name=ups_name,
                 port=port,
                 snmp_port=snmp_port,
                 unit_id=unit_id,
@@ -2481,6 +2739,7 @@ def start_web_server(
             "profile_uid": default_profile_uid,
             "profile_mode": "global" if default_profile_uid else "local",
             "host": "",
+            "ups_name": "",
             "port": "502",
             "snmp_port": "161",
             "unit_id": "1",
@@ -2513,6 +2772,7 @@ def start_web_server(
                 else "local"
             ),
             "host": device.host,
+            "ups_name": device.ups_name or "",
             "port": str(device.port),
             "snmp_port": str(device.snmp_port),
             "unit_id": str(device.unit_id),
@@ -2568,6 +2828,7 @@ def start_web_server(
                 "profile_mode": (data.get("profile_mode", ["local"])[0]).strip()
                 or "local",
                 "host": (data.get("host", [""])[0]).strip(),
+                "ups_name": (data.get("ups_name", [""])[0]).strip(),
                 "port": (data.get("port", [str(values["port"])])[0]).strip(),
                 "snmp_port": (
                     data.get("snmp_port", [str(values["snmp_port"])])[0]
@@ -2652,17 +2913,17 @@ def start_web_server(
 
         if local_mode:
             stored_local_payload = form_values.get("_local_profile_payload")
-            if isinstance(stored_local_payload, dict):
+            if isinstance(stored_local_payload, dict) and stored_local_payload:
                 base_payload = {
                     str(key): value for key, value in stored_local_payload.items()
                 }
             stored_local_selected = form_values.get("_local_selected_sensors")
-            if isinstance(stored_local_selected, list):
+            if isinstance(stored_local_selected, list) and stored_local_selected:
                 base_selected = [
                     str(item) for item in stored_local_selected if str(item)
                 ]
             stored_local_preferences = form_values.get("_local_sensor_preferences")
-            if isinstance(stored_local_preferences, dict):
+            if isinstance(stored_local_preferences, dict) and stored_local_preferences:
                 base_preferences = {
                     str(key): {
                         "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
@@ -2767,6 +3028,12 @@ def start_web_server(
                 available_sensor_keys = _profile_allowed_sensor_keys(
                     driver_key,
                     contract_profile,
+                )
+                available_sensor_keys = _extend_nut_sensor_keys(
+                    driver_key,
+                    available_sensor_keys,
+                    base_selected,
+                    base_preferences,
                 )
                 selected_set = {str(item) for item in base_selected if str(item)}
                 if not base_preferences:
@@ -2888,6 +3155,7 @@ def start_web_server(
             "selected_profile_uid": selected_profile_uid,
             "selected_profile_name": selected_profile.name if selected_profile else "",
             "selected_driver_key": driver_key,
+            "show_ups_name": driver_key == GENERIC_NUT_DRIVER_KEY,
             "profile_mode": profile_mode,
             "is_local_mode": local_mode,
             "poll_group_rows": poll_group_rows,
@@ -2911,6 +3179,7 @@ def start_web_server(
         device_id = _validate_device_id((data.get("id", [""])[0]).strip())
         source = (data.get("source", [""])[0]).strip()
         host = _validate_host((data.get("host", [""])[0]).strip())
+        ups_name = (data.get("ups_name", [""])[0]).strip() or None
         port = _validate_port(_int_or_default((data.get("port", [""])[0]), 502))
         snmp_port = _validate_port(
             _int_or_default((data.get("snmp_port", [""])[0]), 161)
@@ -3012,6 +3281,33 @@ def start_web_server(
                         contract_profile,
                     )
                 )
+                available_sensor_keys = set(
+                    _extend_nut_sensor_keys(
+                        source,
+                        sorted(available_sensor_keys),
+                        posted_selected,
+                        posted_preferences,
+                        profile.selected_sensors if profile is not None else None,
+                        (
+                            profile.sensor_preferences
+                            if profile is not None
+                            and isinstance(profile.sensor_preferences, dict)
+                            else None
+                        ),
+                        (
+                            existing_device.local_selected_sensors
+                            if existing_device is not None
+                            and isinstance(existing_device.local_selected_sensors, list)
+                            else None
+                        ),
+                        (
+                            existing_device.local_sensor_preferences
+                            if existing_device is not None
+                            and isinstance(existing_device.local_sensor_preferences, dict)
+                            else None
+                        ),
+                    )
+                )
                 poll_group_defaults = _sensor_poll_group_defaults_from_profile(
                     contract_profile
                 )
@@ -3097,6 +3393,7 @@ def start_web_server(
             id=device_id,
             source=source,
             host=host,
+            ups_name=ups_name,
             port=port,
             snmp_port=snmp_port,
             unit_id=unit_id,
@@ -3286,6 +3583,19 @@ def start_web_server(
             driver_key,
             contract_profile,
         )
+        sensor_keys = _extend_nut_sensor_keys(
+            driver_key,
+            sensor_keys,
+            posted_selected,
+            posted_preferences,
+            existing_profile.selected_sensors if existing_profile is not None else None,
+            (
+                existing_profile.sensor_preferences
+                if existing_profile is not None
+                and isinstance(existing_profile.sensor_preferences, dict)
+                else None
+            ),
+        )
         poll_group_defaults = _sensor_poll_group_defaults_from_profile(contract_profile)
         allowed_poll_groups = set(dict(defaults.get("poll_groups", {})))
         sensor_set = set(sensor_keys)
@@ -3457,6 +3767,10 @@ def start_web_server(
 
             if parsed_path.path == "/htmx/devices/partials/panel/profiles":
                 self._send_html(_render_htmx_profiles_panel())
+                return True
+
+            if parsed_path.path == "/htmx/devices/partials/panel/profile-builder":
+                self._send_html(_render_htmx_profile_builder_panel())
                 return True
 
             if parsed_path.path == "/htmx/devices/partials/table":
@@ -3945,6 +4259,191 @@ def start_web_server(
                                 toast_message=str(err),
                             )
                         },
+                    )
+                return True
+
+            if parsed_path.path == "/htmx/profile-builder/actions/discover":
+                form_values = _profile_builder_form_values_from_data(data)
+                host = str(form_values.get("host", "")).strip()
+                ups_name = str(form_values.get("ups_name", "")).strip()
+                port_text = str(form_values.get("port", "3493")).strip() or "3493"
+                use_starttls = bool(form_values.get("use_starttls", False))
+                try:
+                    _validate_host(host)
+                    if not ups_name:
+                        raise ValueError("UPS name is required")
+                    port = _validate_port(_int_or_default(port_text, 3493))
+                    if use_starttls and not nut_starttls_supported:
+                        raise ValueError(
+                            "STARTTLS discovery is not available with the selected NUT reader"
+                        )
+                    contract_profile = _generic_nut_contract(capability_profiles_getter())
+                    if not contract_profile:
+                        raise ValueError(
+                            "Generic NUT runtime contract is not available"
+                        )
+                    variables = nut_variable_discovery(
+                        host,
+                        port,
+                        ups_name,
+                        use_starttls,
+                    )
+                    discovered_rows = _normalize_nut_discovery_rows(
+                        variables,
+                        contract_profile,
+                    )
+                    if not discovered_rows:
+                        raise ValueError(
+                            "Discovery returned no reusable NUT capabilities for the selected UPS"
+                        )
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            discovered_rows=discovered_rows,
+                            profile_name=f"NUT {ups_name}",
+                        )
+                    )
+                except ValueError as err:
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            error_message=str(err),
+                            info_message="Correct the connection details and try discovery again.",
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                except (OSError, ImportError) as err:
+                    LOG.exception("Profile Builder NUT discovery reader unavailable: %s", err)
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            error_message="NUT discovery reader is unavailable in this runtime.",
+                            info_message="Contact an administrator to verify the NUT reader bundle in this deployment.",
+                        ),
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                return True
+
+            if parsed_path.path == "/htmx/profile-builder/actions/save":
+                db = _profile_db()
+                if db is None or not hasattr(db, "save_profile"):
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            error_message="Profile storage is not available",
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return True
+                discovered_keys = sorted(
+                    {
+                        str(item).strip()
+                        for item in data.get("discovered_sensor_key", [])
+                        if str(item).strip()
+                    }
+                )
+                try:
+                    contract_profile = _generic_nut_contract(capability_profiles_getter())
+                    if not contract_profile:
+                        raise ValueError(
+                            "Generic NUT runtime contract is not available"
+                        )
+                    if not discovered_keys:
+                        raise ValueError("No discovered NUT variables were submitted")
+
+                    profile_name = (data.get("profile_name", [""])[0]).strip()
+                    if not profile_name:
+                        raise ValueError("Profile name is required")
+                    if len(profile_name) > 120:
+                        raise ValueError("Profile name must be 120 characters or fewer")
+                    existing = _load_profiles()
+                    for item in existing:
+                        if item.name.lower() == profile_name.lower():
+                            raise ValueError(f"Profile name {profile_name} already exists")
+
+                    selected_sensors = sorted(
+                        {
+                            key
+                            for key in discovered_keys
+                            if _bool_from_form(data, f"sensor_mqtt__{key}")
+                        }
+                    )
+                    if not selected_sensors:
+                        raise ValueError("Select at least one NUT capability")
+
+                    defaults = _profile_default_payload(
+                        GENERIC_NUT_DRIVER_KEY,
+                        contract_profile,
+                    )
+                    payload = {
+                        "driver_key": GENERIC_NUT_DRIVER_KEY,
+                        "poll_groups": dict(defaults.get("poll_groups", {})),
+                        "key_precedence": dict(defaults.get("key_precedence", {})),
+                    }
+                    poll_group_defaults = _sensor_poll_group_defaults_from_profile(
+                        contract_profile
+                    )
+                    sensor_preferences = {
+                        key: {
+                            "mqtt_enabled": key in set(selected_sensors),
+                            "poll_group": str(
+                                poll_group_defaults.get(key, "slow")
+                            ),
+                        }
+                        for key in discovered_keys
+                    }
+                    profile = ProfileConfig(
+                        profile_uid=str(uuid4()),
+                        name=profile_name,
+                        driver_key=GENERIC_NUT_DRIVER_KEY,
+                        config_payload=payload,
+                        selected_sensors=selected_sensors,
+                        sensor_preferences=sensor_preferences,
+                        comments="Generated by Profile Builder",
+                        is_protected=False,
+                    )
+
+                    db.save_profile(profile)
+                    trigger_reload()
+                    saved_rows = [
+                        {
+                            "key": key,
+                            "raw_name": "saved",
+                            "sample_value": "",
+                            "selected": key in set(profile.selected_sensors),
+                        }
+                        for key in discovered_keys
+                    ]
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            info_message=(
+                                f"Saved reusable NUT profile {profile.name}. "
+                                "It is now available in the Profiles panel and device profile selector. "
+                                "Discovery host/IP, UPS name, credentials, and STARTTLS settings were not saved."
+                            ),
+                            discovered_rows=saved_rows,
+                            profile_name=profile.name,
+                        ),
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="success",
+                                toast_message=f"Saved profile {profile.name}",
+                            )
+                        },
+                    )
+                except (ValueError, TypeError, OSError) as err:
+                    rows = [
+                        {
+                            "key": key,
+                            "raw_name": "submitted",
+                            "sample_value": "",
+                            "selected": f"sensor_mqtt__{key}" in data,
+                        }
+                        for key in discovered_keys
+                    ]
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            error_message=str(err),
+                            discovered_rows=rows,
+                            profile_name=(data.get("profile_name", [""])[0]).strip(),
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
                     )
                 return True
 

@@ -36,7 +36,7 @@ from .ha_api import delete_stale_ups_entities
 from .log_buffer import BufferedLogHandler, LogBuffer
 from .metrics import MetricsStore
 from .model import DeviceConfig, ProfileConfig
-from .mqtt import MqttPublisher
+from .mqtt import MqttPublisher, discovery_unique_id
 from .pollers import (
     clear_catalog_poll_cache,
     get_idle_reconnect_seconds,
@@ -594,6 +594,7 @@ async def _device_loop(
         id=device.id,
         source=runtime_source,
         host=device.host,
+        ups_name=device.ups_name,
         port=device.port,
         snmp_port=device.snmp_port,
         unit_id=device.unit_id,
@@ -1192,6 +1193,7 @@ def _runtime_device_with_source(device: DeviceConfig, source: str) -> DeviceConf
         id=device.id,
         source=source,
         host=device.host,
+        ups_name=device.ups_name,
         port=device.port,
         snmp_port=device.snmp_port,
         unit_id=device.unit_id,
@@ -1290,6 +1292,47 @@ def _resolve_runtime_profile(
                 effective_profile=effective_profile,
                 payload=payload,
             )
+
+    if runtime_source == "nut_network_upsd":
+        nut_block = effective_profile.get("nut")
+        if isinstance(nut_block, dict):
+            variables = nut_block.get("variables")
+            if isinstance(variables, dict):
+                selected_for_runtime = (
+                    binding.selected_sensors
+                    if (
+                        binding is not None
+                        and str(device.profile_mode).lower() != "local"
+                    )
+                    else (
+                        device.local_selected_sensors
+                        if device.local_selected_sensors is not None
+                        else (
+                            binding.selected_sensors
+                            if binding is not None
+                            else []
+                        )
+                    )
+                )
+                added_passthrough = 0
+                for item in selected_for_runtime or []:
+                    key = str(item).strip()
+                    if not key or "." not in key:
+                        continue
+                    if key in variables:
+                        continue
+                    variables[key] = {
+                        "key": key,
+                        "poll_group": "slow",
+                        "type": "str",
+                    }
+                    added_passthrough += 1
+                if added_passthrough > 0:
+                    LOG.debug(
+                        "Profile resolution for %s: added %d selected NUT passthrough variables",
+                        device.id,
+                        added_passthrough,
+                    )
 
     # Get contract sensor keys
     available_keys = [
@@ -1907,6 +1950,7 @@ async def async_main() -> None:
             id=device.id,
             source=device.source,
             host=device.host,
+            ups_name=device.ups_name,
             port=device.port,
             snmp_port=device.snmp_port,
             unit_id=device.unit_id,
@@ -2337,7 +2381,7 @@ async def _prune_stale_ha_entities(
         identity = device.device_uid or device.id
         expected_device_identifiers.add(f"ups2mqtt_{identity}")
         for key in keys:
-            expected_unique_ids.add(f"ups2mqtt_{identity}_{key}")
+            expected_unique_ids.add(discovery_unique_id(identity, key))
 
     result = await delete_stale_ups_entities(
         config.ha_url,
