@@ -4164,6 +4164,21 @@ def start_web_server(
                 self.wfile.write(payload_csv)
                 return True
 
+            if parsed_path.path == "/htmx/maintenance/export/devices.csv":
+                export_csv = _generate_devices_csv(store.list_devices())
+                payload_csv = export_csv.encode("utf-8")
+                timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    f"attachment; filename=ups2mqtt-devices-{timestamp}.csv",
+                )
+                self.send_header("Content-Length", str(len(payload_csv)))
+                self.end_headers()
+                self.wfile.write(payload_csv)
+                return True
+
             if parsed_path.path == "/htmx/devices/partials/panel/devices":
                 self._send_html(
                     _render_htmx_devices_panel(
