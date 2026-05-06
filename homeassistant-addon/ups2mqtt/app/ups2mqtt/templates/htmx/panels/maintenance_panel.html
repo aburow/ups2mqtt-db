@@ -53,6 +53,17 @@
           <input type="hidden" name="action" value="remove_all_devices"/>
           <button class="btn btn-sm btn-outline-danger" type="submit">Remove All Devices</button>
         </form>
+        <form
+          class="m-0"
+          hx-post="/htmx/devices/actions/maintenance"
+          hx-target="#admin-panel"
+          hx-swap="innerHTML"
+          hx-indicator="#global-loading"
+          hx-confirm="Remove all profiles? This cannot be undone."
+        >
+          <input type="hidden" name="action" value="remove_all_profiles"/>
+          <button class="btn btn-sm btn-outline-danger" type="submit">Remove All Profiles</button>
+        </form>
       </div>
 
     </div>

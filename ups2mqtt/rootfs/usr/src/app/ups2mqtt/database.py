@@ -838,6 +838,16 @@ class Database:
         self._maybe_commit(conn)
         return deleted
 
+    def delete_all_profiles(self) -> int:
+        """Delete all profiles and clear device profile bindings."""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        deleted_count = int(cursor.execute("SELECT COUNT(*) FROM profiles").fetchone()[0])
+        cursor.execute("DELETE FROM profiles")
+        cursor.execute("UPDATE devices SET profile_uid = '', profile_mode = 'local'")
+        self._maybe_commit(conn)
+        return deleted_count
+
     def save_devices_bulk(self, devices: list[DeviceConfig]) -> None:
         """Save or update many devices."""
         for device in devices:

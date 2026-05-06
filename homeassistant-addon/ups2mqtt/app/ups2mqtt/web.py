@@ -126,6 +126,15 @@ def _int_or_default(raw: str, default: int) -> int:
         return default
 
 
+def _default_port_for_source(source: str) -> int:
+    normalized = str(source).strip().lower()
+    if normalized == GENERIC_NUT_DRIVER_KEY or "nut" in normalized:
+        return 3493
+    if normalized == GENERIC_APCUPSD_DRIVER_KEY or "apcupsd" in normalized:
+        return 3551
+    return 502
+
+
 def _bool_from_form(data: dict[str, list[str]], key: str) -> bool:
     value = (data.get(key, [""])[0]).strip().lower()
     return value in {"1", "true", "on", "yes"}
@@ -2277,6 +2286,16 @@ def start_web_server(
                 removed,
             )
             return True, f"Removed {removed} device(s)", ""
+        if action == "remove_all_profiles":
+            if db is None or not hasattr(db, "delete_all_profiles"):
+                return False, "", "Profile maintenance not available"
+            removed = int(db.delete_all_profiles())  # type: ignore[attr-defined]
+            trigger_reload()
+            AUDIT_LOG.info(
+                "maintenance action=remove_all_profiles status=success removed=%d",
+                removed,
+            )
+            return True, f"Removed {removed} profile(s)", ""
         if action == "set_log_level":
             level_name = data.get("runtime_log_level", [""])[0].strip().upper()
             if level_name not in set(RUNTIME_LOG_LEVELS):
@@ -2322,7 +2341,10 @@ def start_web_server(
                         id=_cell_by_header("ID", 0),
                         source=_cell_by_header("Source", 1),
                         host=_cell_by_header("Host", 2),
-                        port=int(_cell_by_header("Port", 3) or 502),
+                        port=_int_or_default(
+                            _cell_by_header("Port", 3),
+                            _default_port_for_source(_cell_by_header("Source", 1)),
+                        ),
                         snmp_port=int(_cell_by_header("SNMPPort", -1) or 161),
                         unit_id=int(_cell_by_header("Unit", 4) or 1),
                         snmp_community=(_cell_by_header("SNMP", 5) or "public"),
@@ -3143,14 +3165,17 @@ def start_web_server(
         default_profile_uid = (
             str(profile_rows[0]["profile_uid"]) if profile_rows else ""
         )
+        default_source = (
+            str(profile_rows[0]["driver_key"]) if profile_rows else ""
+        )
         return {
             "id": "",
-            "source": "",
+            "source": default_source,
             "profile_uid": default_profile_uid,
             "profile_mode": "global" if default_profile_uid else "local",
             "host": "",
             "ups_name": "",
-            "port": "502",
+            "port": str(_default_port_for_source(default_source)),
             "snmp_port": "161",
             "unit_id": "1",
             "snmp_community": "public",
@@ -3285,9 +3310,20 @@ def start_web_server(
         if profile_mode not in {"global", "local"}:
             profile_mode = "local"
 
+        previous_source = str(form_values.get("source", "") or "").strip()
         driver_key = (
             selected_profile.driver_key if selected_profile else source_fallback
         )
+        form_values["source"] = driver_key
+        current_port_text = str(form_values.get("port", "") or "").strip()
+        new_default_port = str(_default_port_for_source(str(driver_key or "")))
+        previous_default_port = str(_default_port_for_source(previous_source))
+        if not current_port_text or (
+            previous_source
+            and str(driver_key or "").strip() != previous_source
+            and current_port_text == previous_default_port
+        ):
+            form_values["port"] = new_default_port
         driver_key_text = str(driver_key or "").strip().lower()
         is_nut_driver = driver_key_text == GENERIC_NUT_DRIVER_KEY
         is_apcupsd_driver = driver_key_text == GENERIC_APCUPSD_DRIVER_KEY

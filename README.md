@@ -193,8 +193,8 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.1)
+## Latest release (v1.2.2)
 
-- Re-introduced a CSV export button in Maintenance next to CSV onboarding import.
-- Added a maintenance CSV export endpoint for current devices (`/htmx/maintenance/export/devices.csv`) using the existing CSV generator.
-- Preserved existing telemetry, MQTT, and Home Assistant behavior.
+- CSV import now preserves protocol-appropriate default ports for NUT (`3493`) and APCUPSD (`3551`) when CSV `Port` is blank or invalid.
+- Device edit/add form now defaults and updates `Port` based on selected profile/source (NUT/APCUPSD) while preserving custom ports.
+- Added `Remove All Profiles` maintenance action and button, including profile-binding reset on devices (`profile_uid` cleared, mode reset to local).
