@@ -88,7 +88,22 @@
           <input class="form-control form-control-sm" type="file" name="json_file" accept=".json,application/json" required />
           <button class="btn btn-sm btn-outline-secondary" type="submit">Restore from JSON Backup</button>
         </form>
+        <form
+          class="d-flex flex-wrap gap-2 align-items-center m-0"
+          hx-post="/htmx/maintenance/backup/import/profiles"
+          hx-target="#admin-panel"
+          hx-swap="innerHTML"
+          hx-indicator="#global-loading"
+          hx-encoding="multipart/form-data"
+          hx-confirm="Restore profiles only from JSON? Devices and settings will not be changed."
+        >
+          <input class="form-control form-control-sm" type="file" name="json_file" accept=".json,application/json" required />
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Restore Profiles from JSON</button>
+        </form>
       </div>
+      <p class="small text-muted mb-0">
+        Profiles-only restore imports reusable profiles and ignores devices, runtime settings, MQTT, telemetry, and logs.
+      </p>
     </div>
   </div>
 

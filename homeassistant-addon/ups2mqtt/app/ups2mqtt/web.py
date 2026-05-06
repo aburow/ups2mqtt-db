@@ -550,6 +550,19 @@ def _validate_poll_interval(
     return clamp_optional_poll_interval(poll_interval, minimum)
 
 
+def _parse_positive_int(raw: str) -> int | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
 def _normalize_timezone(value: str | None) -> str:
     candidate = str(value or "").strip() or DEFAULT_TIMEZONE
     try:
@@ -1434,6 +1447,34 @@ def start_web_server(
             "key_precedence": key_precedence_values,
         }
 
+    def _profile_fast_poll_interval_seconds(
+        *,
+        profile: ProfileConfig | None = None,
+        driver_key: str = "",
+    ) -> int:
+        if profile is not None and isinstance(profile.config_payload, dict):
+            poll_groups = profile.config_payload.get("poll_groups", {})
+            if isinstance(poll_groups, dict):
+                fast_value = _parse_positive_int(str(poll_groups.get("fast", "")))
+                if fast_value is not None:
+                    return _validate_poll_interval(
+                        fast_value,
+                        normalized_minimum_poll_interval,
+                    ) or normalized_minimum_poll_interval
+        source_key = (driver_key or (profile.driver_key if profile else "")).strip()
+        contract_profile = _eligible_profile_drivers().get(source_key)
+        if isinstance(contract_profile, dict):
+            defaults = _profile_default_payload(source_key, contract_profile)
+            poll_groups = defaults.get("poll_groups", {})
+            if isinstance(poll_groups, dict):
+                fast_value = _parse_positive_int(str(poll_groups.get("fast", "")))
+                if fast_value is not None:
+                    return _validate_poll_interval(
+                        fast_value,
+                        normalized_minimum_poll_interval,
+                    ) or normalized_minimum_poll_interval
+        return normalized_minimum_poll_interval
+
     def _profile_default_enabled_map(
         driver_key: str,
         contract_profile: dict[str, object],
@@ -2287,15 +2328,80 @@ def start_web_server(
             )
             return True, f"Removed {removed} device(s)", ""
         if action == "remove_all_profiles":
-            if db is None or not hasattr(db, "delete_all_profiles"):
+            db_handle = _profile_db()
+            if (
+                db_handle is None
+                or not hasattr(db_handle, "delete_all_profiles")
+                or not hasattr(db_handle, "load_profiles")
+            ):
                 return False, "", "Profile maintenance not available"
-            removed = int(db.delete_all_profiles())  # type: ignore[attr-defined]
+            profiles_by_uid: dict[str, ProfileConfig] = {
+                item.profile_uid: item
+                for item in db_handle.load_profiles()  # type: ignore[attr-defined]
+                if item.profile_uid
+            }
+            localized = 0
+            skipped_missing = 0
+            for existing_device in list(store.list_devices()):
+                if str(existing_device.profile_mode or "").strip().lower() != "global":
+                    continue
+                profile_uid = str(existing_device.profile_uid or "").strip()
+                if not profile_uid:
+                    skipped_missing += 1
+                    continue
+                binding = profiles_by_uid.get(profile_uid)
+                if binding is None:
+                    skipped_missing += 1
+                    continue
+                updated = existing_device
+                updated.local_profile_payload = (
+                    dict(binding.config_payload)
+                    if isinstance(binding.config_payload, dict)
+                    else None
+                )
+                updated.local_selected_sensors = [
+                    str(item) for item in (binding.selected_sensors or [])
+                ]
+                updated.local_sensor_preferences = (
+                    {
+                        str(key): {
+                            "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                            **(
+                                {
+                                    "poll_group": str(
+                                        values.get("poll_group", "")
+                                    ).strip()
+                                }
+                                if str(values.get("poll_group", "")).strip()
+                                else {}
+                            ),
+                        }
+                        for key, values in binding.sensor_preferences.items()
+                        if isinstance(key, str) and isinstance(values, dict)
+                    }
+                    if isinstance(binding.sensor_preferences, dict)
+                    else None
+                )
+                updated.profile_mode = "local"
+                updated.profile_uid = ""
+                store.upsert(updated)
+                localized += 1
+            removed = int(db_handle.delete_all_profiles())  # type: ignore[attr-defined]
             trigger_reload()
             AUDIT_LOG.info(
-                "maintenance action=remove_all_profiles status=success removed=%d",
+                "maintenance action=remove_all_profiles status=success localized=%d skipped_missing=%d removed=%d",
+                localized,
+                skipped_missing,
                 removed,
             )
-            return True, f"Removed {removed} profile(s)", ""
+            return (
+                True,
+                (
+                    f"Localized {localized} device(s), skipped {skipped_missing}, "
+                    f"removed {removed} profile(s)"
+                ),
+                "",
+            )
         if action == "set_log_level":
             level_name = data.get("runtime_log_level", [""])[0].strip().upper()
             if level_name not in set(RUNTIME_LOG_LEVELS):
@@ -3031,6 +3137,178 @@ def start_web_server(
 
         return len(devices_to_upsert) + skipped_equal
 
+    def _restore_profiles_from_json_data(json_data: str) -> dict[str, int]:
+        raw = json.loads(json_data)
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid import format: expected root JSON object")
+        if "schema" not in raw:
+            raise ValueError("Invalid schema: missing 'schema'")
+        schema = str(raw.get("schema", "")).strip()
+        if schema != BACKUP_SCHEMA_NAME:
+            raise ValueError(
+                f"Invalid schema: expected '{BACKUP_SCHEMA_NAME}', got '{schema or '(empty)'}'"
+            )
+        if "version" not in raw:
+            raise ValueError("Unsupported version: missing 'version'")
+        version_raw = raw.get("version")
+        try:
+            version = int(version_raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"Unsupported version: {version_raw}") from None
+        if version != BACKUP_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported version: {version} (expected {BACKUP_SCHEMA_VERSION})"
+            )
+        raw_profiles = raw.get("profiles", [])
+        if not isinstance(raw_profiles, list):
+            raise ValueError("Invalid schema: 'profiles' must be an array")
+
+        db = _profile_db()
+        if (
+            db is None
+            or not hasattr(db, "load_profiles")
+            or not hasattr(db, "save_profile")
+        ):
+            raise ValueError("Profile storage is not available")
+
+        existing_profiles = [item for item in db.load_profiles() if item.profile_uid]
+        existing_by_uid = {item.profile_uid: item for item in existing_profiles}
+        existing_by_name = {
+            item.name.strip().lower(): item for item in existing_profiles if item.name
+        }
+
+        restored = 0
+        updated = 0
+        skipped = 0
+        invalid = 0
+
+        with db.transaction():
+            for index, item in enumerate(raw_profiles, start=1):
+                if not isinstance(item, dict):
+                    invalid += 1
+                    LOG.warning(
+                        "profile restore skipped invalid entry index=%d reason=not_object",
+                        index,
+                    )
+                    continue
+                profile_uid_text = str(item.get("profile_uid", "") or "").strip()
+                profile_uid = profile_uid_text or str(uuid4())
+                name = str(item.get("name", "") or "").strip()
+                driver_key = str(item.get("driver_key", "") or "").strip()
+                config_payload = item.get("config_payload", {})
+                selected_sensors = item.get("selected_sensors", [])
+                sensor_preferences = item.get("sensor_preferences", {})
+                comments = str(item.get("comments", "") or "")
+
+                if not name or not driver_key:
+                    invalid += 1
+                    LOG.warning(
+                        "profile restore skipped invalid entry index=%d reason=missing_name_or_driver",
+                        index,
+                    )
+                    continue
+                if not isinstance(config_payload, dict):
+                    invalid += 1
+                    LOG.warning(
+                        "profile restore skipped invalid entry index=%d reason=invalid_config_payload",
+                        index,
+                    )
+                    continue
+                if not isinstance(selected_sensors, list):
+                    invalid += 1
+                    LOG.warning(
+                        "profile restore skipped invalid entry index=%d reason=invalid_selected_sensors",
+                        index,
+                    )
+                    continue
+                if not isinstance(sensor_preferences, dict):
+                    invalid += 1
+                    LOG.warning(
+                        "profile restore skipped invalid entry index=%d reason=invalid_sensor_preferences",
+                        index,
+                    )
+                    continue
+
+                sanitized_payload = dict(config_payload)
+                for unsafe_key in (
+                    "host",
+                    "port",
+                    "ups_name",
+                    "snmp_port",
+                    "snmp_community",
+                    "community",
+                    "username",
+                    "password",
+                    "token",
+                    "auth_password",
+                    "privacy_password",
+                    "endpoint",
+                ):
+                    sanitized_payload.pop(unsafe_key, None)
+
+                normalized_preferences = {
+                    str(key): {
+                        "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
+                        **(
+                            {"poll_group": str(values.get("poll_group", "")).strip()}
+                            if isinstance(values, dict)
+                            and str(values.get("poll_group", "")).strip()
+                            else {}
+                        ),
+                    }
+                    for key, values in sensor_preferences.items()
+                    if isinstance(key, str) and isinstance(values, dict)
+                }
+                profile = ProfileConfig(
+                    profile_uid=profile_uid,
+                    name=name,
+                    driver_key=driver_key,
+                    config_payload=sanitized_payload,
+                    selected_sensors=[str(value) for value in selected_sensors],
+                    sensor_preferences=normalized_preferences,
+                    comments=comments,
+                    is_protected=False,
+                )
+
+                existing_uid_profile = existing_by_uid.get(profile_uid)
+                if existing_uid_profile is not None and existing_uid_profile.is_protected:
+                    skipped += 1
+                    LOG.info(
+                        "profile restore skipped profile_uid=%s reason=protected_uid_conflict",
+                        profile_uid,
+                    )
+                    continue
+                existing_name_profile = existing_by_name.get(name.lower())
+                if (
+                    existing_name_profile is not None
+                    and existing_name_profile.profile_uid != profile_uid
+                ):
+                    skipped += 1
+                    LOG.info(
+                        "profile restore skipped name=%s reason=name_conflict existing_uid=%s incoming_uid=%s",
+                        name,
+                        existing_name_profile.profile_uid,
+                        profile_uid,
+                    )
+                    continue
+
+                db.save_profile(profile)
+                existing_by_uid[profile_uid] = profile
+                existing_by_name[name.lower()] = profile
+                if existing_uid_profile is None:
+                    restored += 1
+                else:
+                    updated += 1
+
+        if restored or updated:
+            trigger_reload()
+        return {
+            "restored": restored,
+            "updated": updated,
+            "skipped": skipped,
+            "invalid": invalid,
+        }
+
     def _hx_trigger_payload(
         *,
         refresh_devices: bool = False,
@@ -3179,7 +3457,8 @@ def start_web_server(
             "snmp_port": "161",
             "unit_id": "1",
             "snmp_community": "public",
-            "poll_interval": "",
+            "poll_interval": str(normalized_minimum_poll_interval),
+            "profile_fast_default": str(normalized_minimum_poll_interval),
             "name": "",
             "location": "",
             "debug_logging": False,
@@ -3215,6 +3494,7 @@ def start_web_server(
             "poll_interval": (
                 str(device.poll_interval) if device.poll_interval is not None else ""
             ),
+            "profile_fast_default": "",
             "name": device.name or "",
             "location": device.location or "",
             "debug_logging": bool(device.debug_logging),
@@ -3273,6 +3553,9 @@ def start_web_server(
                     data.get("snmp_community", [str(values["snmp_community"])])[0]
                 ).strip(),
                 "poll_interval": (data.get("poll_interval", [""])[0]).strip(),
+                "profile_fast_default": (
+                    data.get("profile_fast_default", [""])[0]
+                ).strip(),
                 "name": (data.get("name", [""])[0]).strip(),
                 "location": (data.get("location", [""])[0]).strip(),
                 "debug_logging": _bool_from_form(data, "debug_logging"),
@@ -3324,6 +3607,27 @@ def start_web_server(
             and current_port_text == previous_default_port
         ):
             form_values["port"] = new_default_port
+        previous_fast_default = _parse_positive_int(
+            str(form_values.get("profile_fast_default", "") or "")
+        )
+        selected_fast_default = _profile_fast_poll_interval_seconds(
+            profile=selected_profile,
+            driver_key=driver_key,
+        )
+        current_poll_text = str(form_values.get("poll_interval", "") or "").strip()
+        current_poll_value = _parse_positive_int(current_poll_text)
+        poll_interval_invalid = current_poll_value is None
+        if poll_interval_invalid:
+            form_values["poll_interval"] = str(selected_fast_default)
+        elif (
+            previous_source
+            and str(driver_key or "").strip() != previous_source
+            and previous_fast_default is not None
+            and current_poll_value == previous_fast_default
+            and current_poll_value != selected_fast_default
+        ):
+            form_values["poll_interval"] = str(selected_fast_default)
+        form_values["profile_fast_default"] = str(selected_fast_default)
         driver_key_text = str(driver_key or "").strip().lower()
         is_nut_driver = driver_key_text == GENERIC_NUT_DRIVER_KEY
         is_apcupsd_driver = driver_key_text == GENERIC_APCUPSD_DRIVER_KEY
@@ -3646,12 +3950,15 @@ def start_web_server(
             source=source,
         )
         poll_interval_raw = (data.get("poll_interval", [""])[0]).strip()
-        poll_interval: int | None = None
-        if poll_interval_raw:
-            poll_interval = _validate_poll_interval(
-                int(poll_interval_raw),
-                normalized_minimum_poll_interval,
-            )
+        if not poll_interval_raw:
+            raise ValueError("Poll interval is required")
+        poll_interval_value = _parse_positive_int(poll_interval_raw)
+        if poll_interval_value is None:
+            raise ValueError("Poll interval must be a positive whole number")
+        poll_interval = _validate_poll_interval(
+            poll_interval_value,
+            normalized_minimum_poll_interval,
+        )
 
         profile_uid = (data.get("profile_uid", [""])[0]).strip()
         profile_mode = (data.get("profile_mode", [""])[0]).strip().lower() or "local"
@@ -4527,6 +4834,57 @@ def start_web_server(
                             refresh_devices=True,
                             toast_level="success",
                             toast_message=f"Imported {imported} device(s) from JSON",
+                        )
+                    },
+                )
+                return True
+
+            if parsed_path.path == "/htmx/maintenance/backup/import/profiles":
+                json_data = (data.get("json_file", [""])[0]).strip()
+                if not json_data:
+                    self._send_html(
+                        _render_htmx_maintenance_panel(),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message="No JSON file provided",
+                            )
+                        },
+                    )
+                    return True
+                try:
+                    result = _restore_profiles_from_json_data(json_data)
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                ) as err:
+                    self._send_html(
+                        _render_htmx_maintenance_panel(),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message=f"Profile restore failed: {err}",
+                            )
+                        },
+                    )
+                    return True
+                self._send_html(
+                    _render_htmx_maintenance_panel(),
+                    headers={
+                        "HX-Trigger": _hx_trigger_payload(
+                            refresh_devices=False,
+                            toast_level="success",
+                            toast_message=(
+                                "Profiles restored: "
+                                f"created={int(result.get('restored', 0))}, "
+                                f"updated={int(result.get('updated', 0))}, "
+                                f"skipped={int(result.get('skipped', 0))}, "
+                                f"invalid={int(result.get('invalid', 0))}"
+                            ),
                         )
                     },
                 )

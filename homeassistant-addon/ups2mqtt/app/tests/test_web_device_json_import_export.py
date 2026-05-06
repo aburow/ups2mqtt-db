@@ -68,7 +68,7 @@ def _capability_profiles() -> dict[str, dict]:
             "protocol": "nut",
             "profile_id": "nut_network_upsd",
             "source": "nut",
-            "poll_groups": {"fast": {"interval_s": 15}, "slow": {"interval_s": 60}},
+            "poll_groups": {"fast": {"interval_s": 17}, "slow": {"interval_s": 60}},
             "nut": {
                 "status_map": {"OL": {"key": "load_on_source", "value": True}},
                 "variables": {
@@ -78,6 +78,19 @@ def _capability_profiles() -> dict[str, dict]:
                         "type": "float",
                     }
                 },
+            },
+        },
+        "apcupsd_network_nis": {
+            "protocol": "apcupsd",
+            "poll_groups": {"fast": {"interval_s": 19}, "slow": {"interval_s": 60}},
+            "apcupsd": {
+                "fields": {
+                    "STATUS": {
+                        "key": "status",
+                        "poll_group": "fast",
+                        "type": "str",
+                    }
+                }
             },
         },
     }
@@ -628,6 +641,134 @@ def test_csv_export_endpoint_removed(tmp_path: Path) -> None:
         server.server_close()
 
 
+def test_maintenance_remove_all_profiles_action_succeeds(tmp_path: Path) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="profile-a",
+                name="Profile A",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery.charge"],
+                sensor_preferences={
+                    "battery.charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
+                comments="",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="profile-b",
+                name="Profile B",
+                driver_key="apcupsd_network_nis",
+                config_payload={"driver_key": "apcupsd_network_nis"},
+                selected_sensors=["STATUS"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, headers = _post(
+            base_url,
+            "/htmx/devices/actions/maintenance",
+            {"action": "remove_all_profiles"},
+        )
+        assert status == HTTPStatus.OK
+        assert "Maintenance" in body
+        trigger = headers.get("HX-Trigger", "")
+        assert "Localized 0 device(s), skipped 0, removed 2 profile(s)" in trigger
+        assert db.load_profiles() == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_maintenance_remove_all_profiles_clears_device_profile_bindings(
+    tmp_path: Path,
+) -> None:
+    server, db, store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="profile-a",
+                name="Profile A",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery.charge"],
+                sensor_preferences={
+                    "battery.charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
+                comments="",
+                is_protected=False,
+            )
+        )
+        store.upsert(
+            DeviceConfig(
+                id="nut-1",
+                source="nut_network_upsd",
+                host="10.0.0.10",
+                port=3493,
+                profile_uid="profile-a",
+                profile_mode="global",
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, _headers = _post(
+            base_url,
+            "/htmx/devices/actions/maintenance",
+            {"action": "remove_all_profiles"},
+        )
+        assert status == HTTPStatus.OK
+        devices = db.load_devices()
+        assert len(devices) == 1
+        assert devices[0].profile_uid == ""
+        assert devices[0].profile_mode == "local"
+        assert devices[0].local_profile_payload == {"driver_key": "nut_network_upsd"}
+        assert devices[0].local_selected_sensors == ["battery.charge"]
+        assert devices[0].local_sensor_preferences == {
+            "battery.charge": {"mqtt_enabled": True, "poll_group": "fast"}
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_maintenance_remove_all_profiles_missing_binding_does_not_crash(
+    tmp_path: Path,
+) -> None:
+    server, db, store = _start_test_server(tmp_path)
+    try:
+        store.upsert(
+            DeviceConfig(
+                id="nut-missing",
+                source="nut_network_upsd",
+                host="10.0.0.11",
+                port=3493,
+                profile_uid="missing-profile-uid",
+                profile_mode="global",
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post(
+            base_url,
+            "/htmx/devices/actions/maintenance",
+            {"action": "remove_all_profiles"},
+        )
+        assert status == HTTPStatus.OK
+        trigger = headers.get("HX-Trigger", "")
+        assert "Localized 0 device(s), skipped 1, removed 0 profile(s)" in trigger
+        devices = db.load_devices()
+        assert len(devices) == 1
+        assert devices[0].profile_uid == ""
+        assert devices[0].profile_mode == "local"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_maintenance_shows_backup_restore_and_devices_hides_import_export(
     tmp_path: Path,
 ) -> None:
@@ -641,6 +782,7 @@ def test_maintenance_shows_backup_restore_and_devices_hides_import_export(
         assert "Backup and Restore" in maintenance_body
         assert "Download JSON Backup" in maintenance_body
         assert "Restore from JSON Backup" in maintenance_body
+        assert "Restore Profiles from JSON" in maintenance_body
         assert "Download CSV Import Template" in maintenance_body
         assert "Import CSV" in maintenance_body
 
@@ -669,6 +811,400 @@ def test_backup_import_rejects_missing_schema(tmp_path: Path) -> None:
         )
         assert status == HTTPStatus.BAD_REQUEST
         assert "missing 'schema'" in headers.get("HX-Trigger", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_restore_profiles_from_json_restores_profiles_only(tmp_path: Path) -> None:
+    server, db, store = _start_test_server(tmp_path)
+    try:
+        store.upsert(
+            DeviceConfig(
+                id="device-a",
+                source="nut_network_upsd",
+                host="10.0.0.9",
+                port=3493,
+                device_uid="dev-uid-a",
+                profile_uid="old-profile",
+                profile_mode="global",
+                local_profile_payload={"driver_key": "nut_network_upsd"},
+                local_selected_sensors=["battery.charge"],
+                local_sensor_preferences={
+                    "battery.charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
+            )
+        )
+        payload = _base_export_payload()
+        payload["profiles"] = [
+            {
+                "profile_uid": "nut-profile-1",
+                "name": "Restored NUT",
+                "driver_key": "nut_network_upsd",
+                "config_payload": {
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 15, "slow": 60},
+                },
+                "selected_sensors": ["input.current", "outlet.count"],
+                "sensor_preferences": {
+                    "input.current": {"mqtt_enabled": True, "poll_group": "fast"},
+                    "outlet.count": {"mqtt_enabled": True, "poll_group": "slow"},
+                },
+                "comments": "restored profile",
+                "is_protected": False,
+            }
+        ]
+        payload["devices"] = [
+            {
+                "device_uid": "should-not-import",
+                "name": "Ignored Device",
+                "driver_key": "apc_modbus_smt",
+                "profile_mode": "default",
+                "profile_uid": None,
+                "profile_name": "",
+                "config": {
+                    "id": "ignored",
+                    "host": "10.0.0.1",
+                    "port": 502,
+                    "unit_id": 1,
+                    "snmp_community": "public",
+                    "poll_interval": None,
+                    "debug_logging": False,
+                    "keep_connection_open": False,
+                    "discovery_enabled": True,
+                    "polling_enabled": True,
+                },
+                "local_profile_payload": None,
+                "local_selected_sensors": None,
+                "local_sensor_preferences": None,
+            }
+        ]
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post(
+            base_url,
+            "/htmx/maintenance/backup/import/profiles",
+            {"json_file": json.dumps(payload)},
+        )
+        assert status == HTTPStatus.OK
+        trigger = headers.get("HX-Trigger", "")
+        assert "Profiles restored: created=1" in trigger
+        profiles = db.load_profiles()
+        assert any(item.profile_uid == "nut-profile-1" for item in profiles)
+        devices = db.load_devices()
+        assert len(devices) == 1
+        assert devices[0].device_uid == "dev-uid-a"
+        assert devices[0].id == "device-a"
+        assert devices[0].profile_uid == "old-profile"
+        assert devices[0].profile_mode == "global"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_restore_profiles_from_json_skips_protected_uid_conflict(
+    tmp_path: Path,
+) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="protected-1",
+                name="Legacy APC",
+                driver_key="ups_snmp_apc_mib",
+                config_payload={"driver_key": "ups_snmp_apc_mib"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences=None,
+                comments="builtin",
+                is_protected=True,
+            )
+        )
+        payload = _base_export_payload()
+        payload["profiles"] = [
+            {
+                "profile_uid": "protected-1",
+                "name": "Legacy APC",
+                "driver_key": "ups_snmp_apc_mib",
+                "config_payload": {"driver_key": "ups_snmp_apc_mib", "x": 1},
+                "selected_sensors": ["runtime_remaining"],
+                "sensor_preferences": {},
+                "comments": "incoming overwrite",
+                "is_protected": False,
+            }
+        ]
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post(
+            base_url,
+            "/htmx/maintenance/backup/import/profiles",
+            {"json_file": json.dumps(payload)},
+        )
+        assert status == HTTPStatus.OK
+        assert "skipped=1" in headers.get("HX-Trigger", "")
+        existing = next(
+            item for item in db.load_profiles() if item.profile_uid == "protected-1"
+        )
+        assert existing.comments == "builtin"
+        assert existing.selected_sensors == ["battery_charge"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_restore_profiles_from_json_invalid_payload_returns_bad_request(
+    tmp_path: Path,
+) -> None:
+    server, _db, _store = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post(
+            base_url,
+            "/htmx/maintenance/backup/import/profiles",
+            {"json_file": "{bad json"},
+        )
+        assert status == HTTPStatus.BAD_REQUEST
+        assert "Profile restore failed" in headers.get("HX-Trigger", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_add_defaults_poll_interval_from_nut_profile_fast_group(
+    tmp_path: Path,
+) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 21, "slow": 60},
+                },
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url, "/htmx/devices/partials/modal?mode=add&profile_uid=nut-prof"
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="poll_interval" value="21"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_add_defaults_poll_interval_from_apcupsd_profile_fast_group(
+    tmp_path: Path,
+) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="apc-prof",
+                name="APCUPSD Prof",
+                driver_key="apcupsd_network_nis",
+                config_payload={
+                    "driver_key": "apcupsd_network_nis",
+                    "poll_groups": {"fast": 25, "slow": 60},
+                },
+                selected_sensors=["STATUS"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url, "/htmx/devices/partials/modal?mode=add&profile_uid=apc-prof"
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="poll_interval" value="25"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_edit_missing_poll_interval_uses_profile_fast_default(
+    tmp_path: Path,
+) -> None:
+    server, db, store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 23, "slow": 60},
+                },
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        store.upsert(
+            DeviceConfig(
+                id="nut-1",
+                source="nut_network_upsd",
+                host="10.0.0.10",
+                port=3493,
+                poll_interval=None,
+                profile_uid="nut-prof",
+                profile_mode="global",
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url, "/htmx/devices/partials/modal?mode=edit&id=nut-1"
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="poll_interval" value="23"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_load_profile_preserves_custom_poll_interval(
+    tmp_path: Path,
+) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 21, "slow": 60},
+                },
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url,
+            "/htmx/devices/partials/modal?mode=add&profile_uid=nut-prof&source=nut_network_upsd&host=10.0.0.7&poll_interval=33",
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="poll_interval" value="33"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_load_profile_updates_previous_default_interval_on_driver_change(
+    tmp_path: Path,
+) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 21, "slow": 60},
+                },
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body, _headers = _fetch(
+            base_url,
+            "/htmx/devices/partials/modal?mode=add&profile_uid=nut-prof&source=apcupsd_network_nis&host=10.0.0.7&poll_interval=19&profile_fast_default=19",
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="poll_interval" value="21"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_upsert_rejects_blank_poll_interval(tmp_path: Path) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post(
+            base_url,
+            "/htmx/devices/actions/upsert",
+            {
+                "id": "nut-blank",
+                "source": "nut_network_upsd",
+                "profile_uid": "nut-prof",
+                "profile_mode": "global",
+                "host": "10.0.0.2",
+                "port": "3493",
+                "poll_interval": "",
+            },
+        )
+        assert status == HTTPStatus.BAD_REQUEST
+        assert "Poll interval is required" in headers.get("HX-Trigger", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_upsert_rejects_invalid_poll_interval_values(tmp_path: Path) -> None:
+    server, db, _store = _start_test_server(tmp_path)
+    try:
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-prof",
+                name="NUT Prof",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery.charge"],
+                sensor_preferences=None,
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        for bad in ("0", "-1", "abc"):
+            status, _body, headers = _post(
+                base_url,
+                "/htmx/devices/actions/upsert",
+                {
+                    "id": f"nut-bad-{bad}",
+                    "source": "nut_network_upsd",
+                    "profile_uid": "nut-prof",
+                    "profile_mode": "global",
+                    "host": "10.0.0.2",
+                    "port": "3493",
+                    "poll_interval": bad,
+                },
+            )
+            assert status == HTTPStatus.BAD_REQUEST
+            assert "Poll interval must be a positive whole number" in headers.get(
+                "HX-Trigger", ""
+            )
     finally:
         server.shutdown()
         server.server_close()
@@ -816,7 +1352,7 @@ def test_upsert_device_persists_location_and_updates_location(tmp_path: Path) ->
             "port": "502",
             "unit_id": "1",
             "snmp_community": "public",
-            "poll_interval": "",
+            "poll_interval": "15",
             "name": "Form UPS",
             "location": "Closet 1",
             "discovery_enabled": "on",
@@ -839,7 +1375,7 @@ def test_upsert_device_persists_location_and_updates_location(tmp_path: Path) ->
             "port": "502",
             "unit_id": "1",
             "snmp_community": "public",
-            "poll_interval": "",
+            "poll_interval": "15",
             "name": "Form UPS",
             "location": "Closet 2",
             "discovery_enabled": "on",
