@@ -25,7 +25,9 @@ def _fetch(base_url: str, path: str) -> tuple[int, str]:
         return int(err.code), err.read().decode("utf-8")
 
 
-def _post(base_url: str, path: str, data: dict[str, str] | None = None) -> tuple[int, str]:
+def _post(
+    base_url: str, path: str, data: dict[str, str] | None = None
+) -> tuple[int, str]:
     encoded = urlencode(data or {}).encode("utf-8")
     request = Request(
         f"{base_url}{path}",

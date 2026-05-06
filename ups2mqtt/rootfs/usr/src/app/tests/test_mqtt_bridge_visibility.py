@@ -114,9 +114,7 @@ def test_bridge_discovery_cleared_when_disabled(monkeypatch) -> None:
     assert bridge_messages
     assert legacy_bridge_messages
     assert all(row["payload"] == "" and row["retain"] for row in bridge_messages)
-    assert all(
-        row["payload"] == "" and row["retain"] for row in legacy_bridge_messages
-    )
+    assert all(row["payload"] == "" and row["retain"] for row in legacy_bridge_messages)
 
 
 def test_disabling_bridge_does_not_block_device_entity_discovery(monkeypatch) -> None:
@@ -124,9 +122,7 @@ def test_disabling_bridge_does_not_block_device_entity_discovery(monkeypatch) ->
     monkeypatch.setattr(
         mqtt_module,
         "resolve_enabled_defaults",
-        lambda source, keys, apps_dir, authoritative=True: {
-            key: True for key in keys
-        },
+        lambda source, keys, apps_dir, authoritative=True: {key: True for key in keys},
     )
     monkeypatch.setattr(mqtt_module, "resolve_icon", lambda source, key, apps_dir: None)
     publisher = mqtt_module.MqttPublisher(_make_config(ha_bridge_enabled=False))
@@ -151,9 +147,7 @@ def test_disabling_bridge_does_not_block_device_entity_discovery(monkeypatch) ->
     assert all(row["payload"] == "" for row in bridge_messages)
     assert all(row["payload"] == "" for row in legacy_bridge_messages)
 
-    device_topic = (
-        "homeassistant/sensor/ups2mqtt_uid-ups-a_input_voltage/config"
-    )
+    device_topic = "homeassistant/sensor/ups2mqtt_uid-ups-a_input_voltage/config"
     device_messages = [row for row in published if row["topic"] == device_topic]
     assert device_messages
     assert any(row["payload"] for row in device_messages)

@@ -68,4 +68,3 @@ def test_get_apcupsd_status_decodes_length_prefixed_records(
     assert out["HOSTNAME"] == "devbox"
     assert out["BCHARGE"] == "100.0 Percent"
     assert all("\x00" not in key for key in out)
-

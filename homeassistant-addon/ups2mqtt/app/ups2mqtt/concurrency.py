@@ -144,7 +144,9 @@ class AdjustableConcurrencyLimiter:
                             if not queue:
                                 self._waiters.pop(source_key, None)
                                 self._source_order = deque(
-                                    item for item in self._source_order if item != source_key
+                                    item
+                                    for item in self._source_order
+                                    if item != source_key
                                 )
                     self._grant_waiters_locked()
                 self._cond.notify_all()

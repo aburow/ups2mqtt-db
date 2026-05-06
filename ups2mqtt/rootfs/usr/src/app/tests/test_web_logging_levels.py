@@ -145,7 +145,9 @@ def test_invalid_csv_row_still_emits_warning(
             for record in caplog.records
             if record.name == "ups2mqtt.web" and record.levelname == "WARNING"
         ]
-        assert any("Skipping malformed CSV line" in message for message in warning_messages)
+        assert any(
+            "Skipping malformed CSV line" in message for message in warning_messages
+        )
     finally:
         server.shutdown()
         server.server_close()
@@ -193,9 +195,7 @@ def test_prefixed_ingress_path_resolves_htmx_route(tmp_path: Path) -> None:
 
 
 def test_root_redirect_without_ingress_request_uses_direct_path(tmp_path: Path) -> None:
-    server = _start_test_server_with_base_path(
-        tmp_path, "/api/hassio_ingress/mock"
-    )
+    server = _start_test_server_with_base_path(tmp_path, "/api/hassio_ingress/mock")
     try:
         status, headers, _ = _fetch_no_redirect(server.server_port, "/")
         assert status == HTTPStatus.SEE_OTHER
@@ -206,9 +206,7 @@ def test_root_redirect_without_ingress_request_uses_direct_path(tmp_path: Path) 
 
 
 def test_root_redirect_with_ingress_header_uses_ingress_path(tmp_path: Path) -> None:
-    server = _start_test_server_with_base_path(
-        tmp_path, "/api/hassio_ingress/mock"
-    )
+    server = _start_test_server_with_base_path(tmp_path, "/api/hassio_ingress/mock")
     connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
     try:
         connection.request(

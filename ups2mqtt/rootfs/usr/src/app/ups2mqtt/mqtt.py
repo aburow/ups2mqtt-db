@@ -164,7 +164,9 @@ class MqttPublisher:
         cached_state = self._device_state_cache.get(identity, {})
         cached_metadata = self._device_metadata.get(identity, {})
         entities = sorted(
-            key for key in cached_state.keys() if isinstance(key, str) and key != "_meta"
+            key
+            for key in cached_state.keys()
+            if isinstance(key, str) and key != "_meta"
         )
         return {
             "identity": identity,
@@ -188,9 +190,7 @@ class MqttPublisher:
             ],
         }
 
-    def _sensor_metadata_for_source(
-        self, source: str
-    ) -> dict[str, dict[str, str]]:
+    def _sensor_metadata_for_source(self, source: str) -> dict[str, dict[str, str]]:
         cached = self._sensor_meta_cache.get(source)
         if cached is not None:
             return cached
@@ -326,9 +326,7 @@ class MqttPublisher:
         """Publish discovery message for the bridge itself."""
         unique_id = BRIDGE_UNIQUE_ID
         config_topic = f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
-        legacy_config_topic = (
-            f"{self._config.mqtt_discovery_prefix}/sensor/{LEGACY_BRIDGE_UNIQUE_ID}/config"
-        )
+        legacy_config_topic = f"{self._config.mqtt_discovery_prefix}/sensor/{LEGACY_BRIDGE_UNIQUE_ID}/config"
         if not bool(self._config.ha_bridge_enabled):
             # Clear retained discovery for current and legacy bridge topics.
             self._client.publish(config_topic, payload="", qos=1, retain=True)
@@ -459,9 +457,7 @@ class MqttPublisher:
             for namespace in (HA_ID_NAMESPACE, LEGACY_HA_ID_NAMESPACE):
                 for token in {str(key), discovery_metric_token(key)}:
                     unique_id = f"{namespace}_{identity}_{token}"
-                    config_topic = (
-                        f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
-                    )
+                    config_topic = f"{self._config.mqtt_discovery_prefix}/sensor/{unique_id}/config"
                     self._client.publish(config_topic, payload="", qos=1, retain=True)
         return True
 

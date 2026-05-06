@@ -50,11 +50,13 @@ def test_resolve_runtime_profile_keeps_selected_nut_raw_key_available() -> None:
             "battery.voltage": {"mqtt_enabled": True},
         },
     )
-    runtime_source, effective_profile, discovery_keys, _signature = _resolve_runtime_profile(
-        device=device,
-        capability_profiles={"nut_network_upsd": _nut_profile()},
-        profile_bindings={"p1": binding},
-        apps_dir=None,
+    runtime_source, effective_profile, discovery_keys, _signature = (
+        _resolve_runtime_profile(
+            device=device,
+            capability_profiles={"nut_network_upsd": _nut_profile()},
+            profile_bindings={"p1": binding},
+            apps_dir=None,
+        )
     )
 
     assert runtime_source == "nut_network_upsd"
@@ -83,11 +85,13 @@ def test_resolve_runtime_profile_does_not_add_unselected_nut_raw_key() -> None:
         selected_sensors=["battery_charge"],
         sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
     )
-    _runtime_source, effective_profile, discovery_keys, _signature = _resolve_runtime_profile(
-        device=device,
-        capability_profiles={"nut_network_upsd": _nut_profile()},
-        profile_bindings={"p1": binding},
-        apps_dir=None,
+    _runtime_source, effective_profile, discovery_keys, _signature = (
+        _resolve_runtime_profile(
+            device=device,
+            capability_profiles={"nut_network_upsd": _nut_profile()},
+            profile_bindings={"p1": binding},
+            apps_dir=None,
+        )
     )
 
     assert "battery.voltage" not in discovery_keys

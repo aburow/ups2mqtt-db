@@ -119,7 +119,7 @@ _DRIVER_ENUM_SENSOR_VALUE_MAPS: dict[str, dict[str, dict[str, str]]] = {
             "2": "maintain_fail",
             "3": "maintaining",
         },
-    }
+    },
 }
 
 _BITFIELD_FLAG_MAPS: dict[str, dict[int, tuple[str, str]]] = {
@@ -509,7 +509,9 @@ class CapabilityRepository:
             (driver_key,),
         ).fetchall()
 
-        keyed: dict[str, dict[str, Any]] = {str(item["key"]): dict(item) for item in result}
+        keyed: dict[str, dict[str, Any]] = {
+            str(item["key"]): dict(item) for item in result
+        }
         for row in overrides:
             sensor_key = str(row["sensor_key"])
             if int(row["is_deleted"] or 0):
@@ -714,7 +716,10 @@ class CapabilityRepository:
                     payload = json.loads(str(row["spec_json"] or "{}"))
                 except (TypeError, ValueError, json.JSONDecodeError):
                     payload = {}
-                if isinstance(payload, dict) and payload.get("warn_unmapped_bitfield") is False:
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("warn_unmapped_bitfield") is False
+                ):
                     continue
             out.add(sensor_key)
         return out
@@ -996,7 +1001,9 @@ class CapabilityRepository:
         )
         conn.commit()
 
-    def _apply_overrides(self, driver_key: str, profile: dict[str, Any]) -> dict[str, Any]:
+    def _apply_overrides(
+        self, driver_key: str, profile: dict[str, Any]
+    ) -> dict[str, Any]:
         out = deepcopy(profile)
         conn = self._db._get_conn()
         cursor = conn.cursor()
@@ -1071,7 +1078,9 @@ class CapabilityRepository:
 
         protocol = str(profile.get("protocol", ""))
         if protocol == "modbus":
-            candidates = profile.get("registers", []) if mapping_kind == "modbus" else []
+            candidates = (
+                profile.get("registers", []) if mapping_kind == "modbus" else []
+            )
         elif protocol == "snmp":
             candidates = profile.get("oids", {}) if mapping_kind == "snmp" else {}
         elif protocol == "hybrid":
@@ -1194,7 +1203,9 @@ class CapabilityRepository:
                 ),
             )
 
-    def _seed_drivers(self, cursor: sqlite3.Cursor, drivers: dict[str, dict[str, Any]]) -> None:
+    def _seed_drivers(
+        self, cursor: sqlite3.Cursor, drivers: dict[str, dict[str, Any]]
+    ) -> None:
         for driver_key, payload in sorted(drivers.items()):
             descriptor = DRIVER_REGISTRY.get(driver_key)
             profile = payload.get("profile")
@@ -1204,7 +1215,9 @@ class CapabilityRepository:
             if not isinstance(catalog, dict):
                 catalog = {}
 
-            protocol = str(profile.get("protocol") or (descriptor.transport if descriptor else ""))
+            protocol = str(
+                profile.get("protocol") or (descriptor.transport if descriptor else "")
+            )
             cursor.execute(
                 """
                 INSERT INTO capability_drivers(
@@ -1223,7 +1236,9 @@ class CapabilityRepository:
                     str(descriptor.vendor_display or "") if descriptor else "",
                     str(descriptor.family_display or "") if descriptor else "",
                     str(descriptor.source_display or "") if descriptor else "",
-                    _stable_json(list(descriptor.search_aliases or []) if descriptor else []),
+                    _stable_json(
+                        list(descriptor.search_aliases or []) if descriptor else []
+                    ),
                 ),
             )
             cursor.execute(
@@ -1705,7 +1720,6 @@ class CapabilityRepository:
         if existing:
             return existing
         return _load_metric_contracts_from_bundle()
-
 
 
 def configure_capability_repository(db: Database) -> CapabilityRepository:

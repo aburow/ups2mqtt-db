@@ -98,7 +98,11 @@ class DeviceStore:
                         str(key): {
                             "mqtt_enabled": bool(values.get("mqtt_enabled", True)),
                             **(
-                                {"poll_group": str(values.get("poll_group", "")).strip()}
+                                {
+                                    "poll_group": str(
+                                        values.get("poll_group", "")
+                                    ).strip()
+                                }
                                 if str(values.get("poll_group", "")).strip()
                                 else {}
                             ),

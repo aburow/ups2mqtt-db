@@ -31,7 +31,9 @@ def _fetch(base_url: str, path: str) -> tuple[int, str, dict[str, str]]:
         return int(err.code), err.read().decode("utf-8"), dict(err.headers.items())
 
 
-def _post(base_url: str, path: str, data: dict[str, str]) -> tuple[int, str, dict[str, str]]:
+def _post(
+    base_url: str, path: str, data: dict[str, str]
+) -> tuple[int, str, dict[str, str]]:
     encoded = urlencode(data).encode("utf-8")
     request = Request(
         f"{base_url}{path}",
@@ -70,7 +72,11 @@ def _capability_profiles() -> dict[str, dict]:
             "nut": {
                 "status_map": {"OL": {"key": "load_on_source", "value": True}},
                 "variables": {
-                    "battery.charge": {"key": "battery_charge", "poll_group": "fast", "type": "float"}
+                    "battery.charge": {
+                        "key": "battery_charge",
+                        "poll_group": "fast",
+                        "type": "float",
+                    }
                 },
             },
         },
@@ -107,16 +113,23 @@ def _base_export_payload() -> dict:
     }
 
 
-def test_export_global_profile_device_includes_uid_and_profile_snapshot(tmp_path: Path) -> None:
+def test_export_global_profile_device_includes_uid_and_profile_snapshot(
+    tmp_path: Path,
+) -> None:
     server, db, store = _start_test_server(tmp_path)
     try:
         profile = ProfileConfig(
             profile_uid="profile-1",
             name="Global Profile A",
             driver_key="apc_modbus_smt",
-            config_payload={"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+            config_payload={
+                "driver_key": "apc_modbus_smt",
+                "poll_groups": {"slow": 60},
+            },
             selected_sensors=["runtime_remaining"],
-            sensor_preferences={"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+            sensor_preferences={
+                "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+            },
             comments="test",
             is_protected=False,
         )
@@ -153,7 +166,9 @@ def test_export_global_profile_device_includes_uid_and_profile_snapshot(tmp_path
         server.server_close()
 
 
-def test_import_global_profile_into_empty_db_preserves_uids_and_binding(tmp_path: Path) -> None:
+def test_import_global_profile_into_empty_db_preserves_uids_and_binding(
+    tmp_path: Path,
+) -> None:
     server, db, _store = _start_test_server(tmp_path)
     try:
         payload = _base_export_payload()
@@ -162,9 +177,14 @@ def test_import_global_profile_into_empty_db_preserves_uids_and_binding(tmp_path
                 "profile_uid": "profile-1",
                 "name": "Global Profile A",
                 "driver_key": "apc_modbus_smt",
-                "config_payload": {"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+                "config_payload": {
+                    "driver_key": "apc_modbus_smt",
+                    "poll_groups": {"slow": 60},
+                },
                 "selected_sensors": ["runtime_remaining"],
-                "sensor_preferences": {"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+                "sensor_preferences": {
+                    "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+                },
                 "comments": "",
                 "is_protected": False,
             }
@@ -203,14 +223,19 @@ def test_import_global_profile_into_empty_db_preserves_uids_and_binding(tmp_path
         assert status == HTTPStatus.OK
         devices = db.load_devices()
         profiles = db.load_profiles()
-        assert any(item.device_uid == "device-1" and item.profile_uid == "profile-1" for item in devices)
+        assert any(
+            item.device_uid == "device-1" and item.profile_uid == "profile-1"
+            for item in devices
+        )
         assert any(item.profile_uid == "profile-1" for item in profiles)
     finally:
         server.shutdown()
         server.server_close()
 
 
-def test_import_reuses_existing_profile_when_uid_missing_and_name_driver_match(tmp_path: Path) -> None:
+def test_import_reuses_existing_profile_when_uid_missing_and_name_driver_match(
+    tmp_path: Path,
+) -> None:
     server, db, _store = _start_test_server(tmp_path)
     try:
         db.save_profile(
@@ -218,9 +243,14 @@ def test_import_reuses_existing_profile_when_uid_missing_and_name_driver_match(t
                 profile_uid="existing-profile",
                 name="Global Profile A",
                 driver_key="apc_modbus_smt",
-                config_payload={"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+                config_payload={
+                    "driver_key": "apc_modbus_smt",
+                    "poll_groups": {"slow": 60},
+                },
                 selected_sensors=["runtime_remaining"],
-                sensor_preferences={"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+                sensor_preferences={
+                    "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+                },
                 comments="",
                 is_protected=False,
             )
@@ -258,7 +288,9 @@ def test_import_reuses_existing_profile_when_uid_missing_and_name_driver_match(t
             {"json_file": json.dumps(payload)},
         )
         assert status == HTTPStatus.OK
-        imported = next(item for item in db.load_devices() if item.device_uid == "device-1")
+        imported = next(
+            item for item in db.load_devices() if item.device_uid == "device-1"
+        )
         assert imported.profile_uid == "existing-profile"
     finally:
         server.shutdown()
@@ -298,7 +330,11 @@ def test_export_import_preserves_optional_ups_name(tmp_path: Path) -> None:
             {"json_file": json.dumps(exported)},
         )
         assert status == HTTPStatus.OK
-        imported = next(item for item in import_db.load_devices() if item.device_uid == "device-nut-1")
+        imported = next(
+            item
+            for item in import_db.load_devices()
+            if item.device_uid == "device-nut-1"
+        )
         assert imported.ups_name == "devups"
     finally:
         import_server.shutdown()
@@ -312,9 +348,14 @@ def test_import_conflicting_profile_uid_does_not_overwrite(tmp_path: Path) -> No
             profile_uid="profile-1",
             name="Global Profile A",
             driver_key="apc_modbus_smt",
-            config_payload={"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+            config_payload={
+                "driver_key": "apc_modbus_smt",
+                "poll_groups": {"slow": 60},
+            },
             selected_sensors=["runtime_remaining"],
-            sensor_preferences={"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+            sensor_preferences={
+                "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+            },
             comments="",
             is_protected=False,
         )
@@ -325,9 +366,14 @@ def test_import_conflicting_profile_uid_does_not_overwrite(tmp_path: Path) -> No
                 "profile_uid": "profile-1",
                 "name": "Global Profile A",
                 "driver_key": "apc_modbus_smt",
-                "config_payload": {"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 30}},
+                "config_payload": {
+                    "driver_key": "apc_modbus_smt",
+                    "poll_groups": {"slow": 30},
+                },
                 "selected_sensors": ["runtime_remaining", "output_voltage"],
-                "sensor_preferences": {"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+                "sensor_preferences": {
+                    "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+                },
                 "comments": "changed",
                 "is_protected": False,
             }
@@ -339,7 +385,9 @@ def test_import_conflicting_profile_uid_does_not_overwrite(tmp_path: Path) -> No
             {"json_file": json.dumps(payload)},
         )
         assert status == HTTPStatus.BAD_REQUEST
-        unchanged = next(item for item in db.load_profiles() if item.profile_uid == "profile-1")
+        unchanged = next(
+            item for item in db.load_profiles() if item.profile_uid == "profile-1"
+        )
         assert unchanged.comments == ""
         assert unchanged.config_payload["poll_groups"]["slow"] == 60
     finally:
@@ -354,9 +402,14 @@ def test_export_import_local_profile_preserves_local_fields(tmp_path: Path) -> N
             profile_uid="profile-1",
             name="Global Profile A",
             driver_key="apc_modbus_smt",
-            config_payload={"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+            config_payload={
+                "driver_key": "apc_modbus_smt",
+                "poll_groups": {"slow": 60},
+            },
             selected_sensors=["runtime_remaining"],
-            sensor_preferences={"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+            sensor_preferences={
+                "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+            },
             comments="",
             is_protected=False,
         )
@@ -369,9 +422,15 @@ def test_export_import_local_profile_preserves_local_fields(tmp_path: Path) -> N
                 device_uid="device-local",
                 profile_uid="profile-1",
                 profile_mode="local",
-                local_profile_payload={"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 45}, "key_precedence": {}},
+                local_profile_payload={
+                    "driver_key": "apc_modbus_smt",
+                    "poll_groups": {"slow": 45},
+                    "key_precedence": {},
+                },
                 local_selected_sensors=["runtime_remaining"],
-                local_sensor_preferences={"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+                local_sensor_preferences={
+                    "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+                },
             )
         )
         base_url = f"http://127.0.0.1:{export_server.server_port}"
@@ -391,9 +450,17 @@ def test_export_import_local_profile_preserves_local_fields(tmp_path: Path) -> N
             {"json_file": json.dumps(exported)},
         )
         assert status == HTTPStatus.OK
-        imported = next(item for item in import_db.load_devices() if item.device_uid == "device-local")
+        imported = next(
+            item
+            for item in import_db.load_devices()
+            if item.device_uid == "device-local"
+        )
         assert imported.profile_mode == "local"
-        assert imported.local_profile_payload == {"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 45}, "key_precedence": {}}
+        assert imported.local_profile_payload == {
+            "driver_key": "apc_modbus_smt",
+            "poll_groups": {"slow": 45},
+            "key_precedence": {},
+        }
         assert imported.local_selected_sensors == ["runtime_remaining"]
         assert imported.local_sensor_preferences == {
             "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
@@ -403,8 +470,12 @@ def test_export_import_local_profile_preserves_local_fields(tmp_path: Path) -> N
         import_server.server_close()
 
 
-def test_export_import_default_profile_device_stays_default_mode(tmp_path: Path) -> None:
-    export_server, _export_db, export_store = _start_test_server(tmp_path / "export-default")
+def test_export_import_default_profile_device_stays_default_mode(
+    tmp_path: Path,
+) -> None:
+    export_server, _export_db, export_store = _start_test_server(
+        tmp_path / "export-default"
+    )
     try:
         export_store.upsert(
             DeviceConfig(
@@ -427,7 +498,9 @@ def test_export_import_default_profile_device_stays_default_mode(tmp_path: Path)
         export_server.shutdown()
         export_server.server_close()
 
-    import_server, import_db, _import_store = _start_test_server(tmp_path / "import-default")
+    import_server, import_db, _import_store = _start_test_server(
+        tmp_path / "import-default"
+    )
     try:
         base_url = f"http://127.0.0.1:{import_server.server_port}"
         status, _body, _headers = _post(
@@ -436,7 +509,11 @@ def test_export_import_default_profile_device_stays_default_mode(tmp_path: Path)
             {"json_file": json.dumps(exported)},
         )
         assert status == HTTPStatus.OK
-        imported = next(item for item in import_db.load_devices() if item.device_uid == "device-default")
+        imported = next(
+            item
+            for item in import_db.load_devices()
+            if item.device_uid == "device-default"
+        )
         assert imported.profile_mode == "default"
         assert imported.profile_uid == ""
         assert imported.source == "apc_modbus_smt"
@@ -454,9 +531,14 @@ def test_import_mismatched_driver_profile_is_rejected(tmp_path: Path) -> None:
                 "profile_uid": "profile-1",
                 "name": "Profile A",
                 "driver_key": "apc_modbus_smt",
-                "config_payload": {"driver_key": "apc_modbus_smt", "poll_groups": {"slow": 60}},
+                "config_payload": {
+                    "driver_key": "apc_modbus_smt",
+                    "poll_groups": {"slow": 60},
+                },
                 "selected_sensors": ["runtime_remaining"],
-                "sensor_preferences": {"runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}},
+                "sensor_preferences": {
+                    "runtime_remaining": {"mqtt_enabled": True, "poll_group": "slow"}
+                },
                 "comments": "",
                 "is_protected": False,
             }
@@ -522,7 +604,9 @@ def test_csv_import_template_route_returns_headers_only(tmp_path: Path) -> None:
     server, _db, _store = _start_test_server(tmp_path)
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
-        status, body, headers = _fetch(base_url, "/htmx/maintenance/import/template.csv")
+        status, body, headers = _fetch(
+            base_url, "/htmx/maintenance/import/template.csv"
+        )
         assert status == HTTPStatus.OK
         assert headers.get("Content-Type", "").startswith("text/csv")
         assert body == (
@@ -676,7 +760,9 @@ def test_legacy_non_htmx_post_action_returns_not_found(tmp_path: Path) -> None:
     server, _db, _store = _start_test_server(tmp_path)
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
-        status, _body, _headers = _post(base_url, "/", {"action": "toggle_debug", "id": "dev-1"})
+        status, _body, _headers = _post(
+            base_url, "/", {"action": "toggle_debug", "id": "dev-1"}
+        )
         assert status == HTTPStatus.NOT_FOUND
     finally:
         server.shutdown()
@@ -712,7 +798,7 @@ def test_devices_table_includes_location_column_and_dash_for_empty_location(
         assert status == HTTPStatus.OK
         assert "<th>Location</th>" in body
         assert "Rack A" in body
-        assert "text-muted\">-</span>" in body
+        assert 'text-muted">-</span>' in body
     finally:
         server.shutdown()
         server.server_close()
@@ -771,7 +857,9 @@ def test_upsert_device_persists_location_and_updates_location(tmp_path: Path) ->
 
 
 def test_json_export_import_preserves_location(tmp_path: Path) -> None:
-    export_server, _export_db, export_store = _start_test_server(tmp_path / "export-location")
+    export_server, _export_db, export_store = _start_test_server(
+        tmp_path / "export-location"
+    )
     try:
         export_store.upsert(
             DeviceConfig(
@@ -793,7 +881,9 @@ def test_json_export_import_preserves_location(tmp_path: Path) -> None:
         export_server.shutdown()
         export_server.server_close()
 
-    import_server, import_db, _import_store = _start_test_server(tmp_path / "import-location")
+    import_server, import_db, _import_store = _start_test_server(
+        tmp_path / "import-location"
+    )
     try:
         base_url = f"http://127.0.0.1:{import_server.server_port}"
         status, _body, _headers = _post(
@@ -803,7 +893,9 @@ def test_json_export_import_preserves_location(tmp_path: Path) -> None:
         )
         assert status == HTTPStatus.OK
         imported = next(
-            item for item in import_db.load_devices() if item.device_uid == "device-loc-json"
+            item
+            for item in import_db.load_devices()
+            if item.device_uid == "device-loc-json"
         )
         assert imported.location == "Warehouse 5"
     finally:

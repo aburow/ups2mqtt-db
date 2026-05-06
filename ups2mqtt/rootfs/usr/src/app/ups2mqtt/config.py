@@ -372,7 +372,9 @@ def load_config(options_path: str | None = None) -> AppConfig:
         web_host=str(raw_options.get("web_host", "0.0.0.0")),
         web_port=int(raw_options.get("web_port", 8099)),
         web_base_path=_normalize_web_base_path(
-            _env_or_default("UPS2MQTT_WEB_BASE_PATH", raw_options.get("web_base_path", "/"))
+            _env_or_default(
+                "UPS2MQTT_WEB_BASE_PATH", raw_options.get("web_base_path", "/")
+            )
         ),
         devices=devices,
         raw=raw_options,

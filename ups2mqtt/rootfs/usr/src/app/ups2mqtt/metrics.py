@@ -261,15 +261,9 @@ class MetricsStore:
                     metric.cadence_total_ms / metric.cadence_count
                 )
                 metric.cadence_last_ms = cadence_ms
-                if (
-                    metric.cadence_min_ms is None
-                    or cadence_ms < metric.cadence_min_ms
-                ):
+                if metric.cadence_min_ms is None or cadence_ms < metric.cadence_min_ms:
                     metric.cadence_min_ms = cadence_ms
-                if (
-                    metric.cadence_max_ms is None
-                    or cadence_ms > metric.cadence_max_ms
-                ):
+                if metric.cadence_max_ms is None or cadence_ms > metric.cadence_max_ms:
                     metric.cadence_max_ms = cadence_ms
             self._last_start_monotonic[device_id] = now_monotonic
             metric.polls_started += 1
@@ -331,14 +325,14 @@ class MetricsStore:
             source_metric.active += 1
             if source_metric.queued > 0:
                 source_metric.queued -= 1
-            started_queue = self._source_queue_started.setdefault(
-                source_key, deque()
-            )
+            started_queue = self._source_queue_started.setdefault(source_key, deque())
             while started_queue and now_monotonic - started_queue[0] > 3600:
                 started_queue.popleft()
             if started_queue:
                 age_ms = max(0.0, (now_monotonic - started_queue.popleft()) * 1000.0)
-                source_metric.max_queue_age_ms = max(source_metric.max_queue_age_ms, age_ms)
+                source_metric.max_queue_age_ms = max(
+                    source_metric.max_queue_age_ms, age_ms
+                )
             if wait_ms is not None:
                 wait_value = max(0.0, float(wait_ms))
                 source_metric.last_wait_ms = wait_value

@@ -99,7 +99,11 @@ def test_poll_nut_sync_surfaces_err_response(monkeypatch: pytest.MonkeyPatch) ->
     profile = {
         "nut": {
             "variables": {
-                "battery.charge": {"key": "battery_charge", "poll_group": "fast", "type": "float"}
+                "battery.charge": {
+                    "key": "battery_charge",
+                    "poll_group": "fast",
+                    "type": "float",
+                }
             }
         }
     }
@@ -186,9 +190,21 @@ def test_poll_apcupsd_sync_parses_status_lines(monkeypatch: pytest.MonkeyPatch) 
     profile = {
         "apcupsd": {
             "fields": {
-                "LINEV": {"key": "input_voltage", "poll_group": "fast", "type": "float"},
-                "BCHARGE": {"key": "battery_charge", "poll_group": "fast", "type": "float"},
-                "TIMELEFT": {"key": "runtime_remaining", "poll_group": "fast", "type": "float"},
+                "LINEV": {
+                    "key": "input_voltage",
+                    "poll_group": "fast",
+                    "type": "float",
+                },
+                "BCHARGE": {
+                    "key": "battery_charge",
+                    "poll_group": "fast",
+                    "type": "float",
+                },
+                "TIMELEFT": {
+                    "key": "runtime_remaining",
+                    "poll_group": "fast",
+                    "type": "float",
+                },
                 "VENDORX": {"key": "VENDORX", "poll_group": "slow", "type": "str"},
             }
         }

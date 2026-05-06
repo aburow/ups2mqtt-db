@@ -211,7 +211,9 @@ def test_apc_snmp_metadata_refresh_batches_identity_and_probe_oids(monkeypatch) 
     assert f"{pollers.UIO_SENSOR_STATUS_TEMP_C_BASE}.1.1" in calls[0]
     assert cache.metadata["model"] == "Smart-UPS"
     assert cache.metadata["serial_number"] == "SN123"
-    assert cache.detection["temp_1_oid"] == f"{pollers.UIO_SENSOR_STATUS_TEMP_C_BASE}.1.1"
+    assert (
+        cache.detection["temp_1_oid"] == f"{pollers.UIO_SENSOR_STATUS_TEMP_C_BASE}.1.1"
+    )
     assert cache.detection["frequency_oid"] == pollers.SMARTUPS_OID_INPUT_FREQUENCY
 
 

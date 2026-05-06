@@ -211,7 +211,9 @@ def _load_bundled_generic_nut_profile() -> dict[str, Any]:
 
 
 def _load_bundled_generic_profile(driver_key: str) -> dict[str, Any]:
-    bundled_path = Path(__file__).resolve().parents[1] / "capabilities" / "capabilities.json"
+    bundled_path = (
+        Path(__file__).resolve().parents[1] / "capabilities" / "capabilities.json"
+    )
     if not bundled_path.exists():
         return {}
     try:

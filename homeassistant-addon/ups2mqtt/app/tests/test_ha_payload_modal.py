@@ -61,7 +61,9 @@ def _start_test_server(
     return server, callback_calls
 
 
-def test_devices_table_renders_ha_payload_button_for_each_device(tmp_path: Path) -> None:
+def test_devices_table_renders_ha_payload_button_for_each_device(
+    tmp_path: Path,
+) -> None:
     devices = [
         DeviceConfig(
             id="ups-a",
@@ -86,12 +88,8 @@ def test_devices_table_renders_ha_payload_button_for_each_device(tmp_path: Path)
         status, body = _fetch(base_url, "/htmx/devices/partials/table")
         assert status == HTTPStatus.OK
         assert body.count("Data") == 2
-        assert (
-            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-a"' in body
-        )
-        assert (
-            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-b"' in body
-        )
+        assert 'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-a"' in body
+        assert 'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-b"' in body
         assert 'hx-target="#device-modal-content"' in body
         assert '@click="modalOpen = true"' in body
     finally:
@@ -99,7 +97,9 @@ def test_devices_table_renders_ha_payload_button_for_each_device(tmp_path: Path)
         server.server_close()
 
 
-def test_ha_payload_modal_known_device_renders_readable_cached_html(tmp_path: Path) -> None:
+def test_ha_payload_modal_known_device_renders_readable_cached_html(
+    tmp_path: Path,
+) -> None:
     device = DeviceConfig(
         id="ups-1",
         source="cyberpower_modbus_single_phase",
@@ -183,7 +183,10 @@ def test_ha_payload_modal_known_device_with_empty_cache_renders_empty_state(
         assert status == HTTPStatus.OK
         assert "Home Assistant Payload Preview" in body
         assert "UPS Empty" in body
-        assert "No cached Home Assistant payload data is available for this device yet." in body
+        assert (
+            "No cached Home Assistant payload data is available for this device yet."
+            in body
+        )
         assert '<div class="card">' in body
         assert calls["republish_discovery"] == 0
         assert calls["reload"] == 0
@@ -219,7 +222,9 @@ def test_ha_payload_modal_unknown_device_htmx_request_returns_modal_message(
         server.server_close()
 
 
-def test_metrics_panel_renders_ha_payload_data_button_with_device_id(tmp_path: Path) -> None:
+def test_metrics_panel_renders_ha_payload_data_button_with_device_id(
+    tmp_path: Path,
+) -> None:
     device = DeviceConfig(
         id="ups-metrics-1",
         source="cyberpower_modbus_single_phase",
@@ -262,8 +267,7 @@ def test_metrics_panel_renders_ha_payload_data_button_with_device_id(tmp_path: P
         status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
         assert status == HTTPStatus.OK
         assert (
-            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-metrics-1"'
-            in body
+            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-metrics-1"' in body
         )
         assert 'hx-target="#device-modal-content"' in body
         assert '@click="modalOpen = true"' in body

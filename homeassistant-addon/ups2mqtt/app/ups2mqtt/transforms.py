@@ -408,7 +408,10 @@ def apply_catalog_transforms(
             value_cache[output_key] = transformed_value
             # For required status/code sensors, publish human-readable text on
             # the primary key as well (e.g. output_source, battery_status).
-            if transform_name == "enum_map" and source_key in _CODE_SENSOR_KEYS_REQUIRE_MAP:
+            if (
+                transform_name == "enum_map"
+                and source_key in _CODE_SENSOR_KEYS_REQUIRE_MAP
+            ):
                 output[source_key] = transformed_value
                 value_cache[source_key] = transformed_value
             LOG.debug(

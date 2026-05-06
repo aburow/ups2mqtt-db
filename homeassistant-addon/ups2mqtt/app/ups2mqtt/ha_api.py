@@ -27,7 +27,7 @@ def _map_legacy_unique_id_to_new(unique_id: str) -> str | None:
     if unique_id == LEGACY_BRIDGE_UNIQUE_ID:
         return BRIDGE_UNIQUE_ID
     if unique_id.startswith(legacy_prefix):
-        return f"{HA_ID_NAMESPACE}_{unique_id[len(legacy_prefix):]}"
+        return f"{HA_ID_NAMESPACE}_{unique_id[len(legacy_prefix) :]}"
     return None
 
 
@@ -36,7 +36,7 @@ def _map_legacy_identifier_to_new(identifier: str) -> str | None:
         return BRIDGE_UNIQUE_ID
     prefix = f"{LEGACY_HA_ID_NAMESPACE}_"
     if identifier.startswith(prefix):
-        return f"{HA_ID_NAMESPACE}_{identifier[len(prefix):]}"
+        return f"{HA_ID_NAMESPACE}_{identifier[len(prefix) :]}"
     return None
 
 

@@ -26,7 +26,9 @@ def _write_options(path: Path, *, ha_bridge_enabled: bool | None = None) -> None
 def test_ha_bridge_enabled_defaults_false(tmp_path: Path, monkeypatch) -> None:
     options_path = tmp_path / "options.json"
     _write_options(options_path)
-    monkeypatch.setenv("UPS2MQTT_RUNTIME_SETTINGS_PATH", str(tmp_path / "settings.yaml"))
+    monkeypatch.setenv(
+        "UPS2MQTT_RUNTIME_SETTINGS_PATH", str(tmp_path / "settings.yaml")
+    )
     monkeypatch.delenv("UPS2MQTT_HA_BRIDGE_ENABLED", raising=False)
 
     config = load_config(str(options_path))

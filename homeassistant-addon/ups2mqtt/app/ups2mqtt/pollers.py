@@ -517,9 +517,7 @@ def _try_individual_reads(
 
     for descriptor in descriptors:
         if failures >= max_failures_per_cycle:
-            warning = (
-                f"Aborted remaining individual Modbus reads after {failures} failures in this cycle"
-            )
+            warning = f"Aborted remaining individual Modbus reads after {failures} failures in this cycle"
             LOG.warning("[%s] %s", device.id, warning)
             return warning
 
@@ -798,10 +796,7 @@ def _snmp_get_many_sync(
                 dispatcher,
                 CommunityData(community),
                 target,
-                *[
-                    ObjectType(ObjectIdentity(oid))
-                    for oid in requested_oids
-                ],
+                *[ObjectType(ObjectIdentity(oid)) for oid in requested_oids],
                 lookupMib=False,
             )
             if error_indication or error_status:
@@ -830,12 +825,16 @@ def _snmp_get_many_sync(
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(_run())
-    return concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(
-        lambda: asyncio.run(_run())
-    ).result()
+    return (
+        concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        .submit(lambda: asyncio.run(_run()))
+        .result()
+    )
 
 
-def _snmp_get_sync(host: str, community: str, oid: str, *, port: int = 161) -> str | None:
+def _snmp_get_sync(
+    host: str, community: str, oid: str, *, port: int = 161
+) -> str | None:
     normalized_oid = str(oid).lstrip(".")
     return _snmp_get_many_sync(host, community, [normalized_oid], port=port).get(
         normalized_oid
@@ -956,8 +955,7 @@ def get_runtime_metadata(device: DeviceConfig) -> dict[str, str]:
                     metadata["sw_version"] = metadata["firmware_version"]
     elif device.source.startswith("cyberpower_modbus"):
         key = (
-            f"{device.source}|{device.host}|{device.snmp_port}|"
-            f"{device.snmp_community}"
+            f"{device.source}|{device.host}|{device.snmp_port}|{device.snmp_community}"
         )
         with _CYBERPOWER_SNMP_CACHE_LOCK:
             cache = _CYBERPOWER_SNMP_CACHE.get(key)
@@ -1087,9 +1085,7 @@ def _maybe_refresh_apc_snmp_metadata(device: DeviceConfig) -> _ApcSnmpCache:
         metadata["hw_version"] = firmware_date
 
     detection = {
-        key: _first_parseable_oid_from_candidates(
-            raw_values, candidates, parsers[key]
-        )
+        key: _first_parseable_oid_from_candidates(raw_values, candidates, parsers[key])
         for key, candidates in detection_candidates.items()
     }
 
@@ -1251,7 +1247,9 @@ def _filter_modbus_registers_by_catalog(
     all_registers = profile.get("registers", [])
     if not isinstance(all_registers, list):
         return []
-    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(device, transport="modbus")
+    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(
+        device, transport="modbus"
+    )
     if not all_catalog_keys:
         return [item for item in all_registers if isinstance(item, dict)]
 
@@ -1262,7 +1260,11 @@ def _filter_modbus_registers_by_catalog(
         key = str(item.get("key", "")).strip()
         if not key:
             continue
-        if key in enabled_keys or key not in all_catalog_keys or key.lower().endswith("_bf"):
+        if (
+            key in enabled_keys
+            or key not in all_catalog_keys
+            or key.lower().endswith("_bf")
+        ):
             out.append(item)
     return out
 
@@ -1274,12 +1276,12 @@ def _filter_snmp_oids_by_catalog(
     all_oids = profile.get("oids", {})
     if not isinstance(all_oids, dict):
         return {}
-    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(device, transport="snmp")
+    enabled_keys, all_catalog_keys = _catalog_keys_for_transport(
+        device, transport="snmp"
+    )
     if not all_catalog_keys:
         return {
-            str(key): spec
-            for key, spec in all_oids.items()
-            if isinstance(spec, dict)
+            str(key): spec for key, spec in all_oids.items() if isinstance(spec, dict)
         }
 
     out: dict[str, Any] = {}
@@ -2085,10 +2087,9 @@ async def _poll_multi_source(
             modbus_fallback,
             snmp_fallback,
         )
-        active_fields = (
-            [{"source": "modbus"}] * modbus_fallback
-            + [{"source": "snmp"}] * snmp_fallback
-        )
+        active_fields = [{"source": "modbus"}] * modbus_fallback + [
+            {"source": "snmp"}
+        ] * snmp_fallback
 
     # STEP 2: Split by transport
     modbus_fields: list[dict[str, Any]] = []
