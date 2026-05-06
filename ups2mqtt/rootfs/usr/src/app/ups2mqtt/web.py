@@ -68,7 +68,11 @@ CSV_IMPORT_HEADERS = [
 # Cache reference managed by catalog module.
 APC_CATALOG_CACHE: dict[str, dict[str, list[dict[str, str]]]] = {}
 _NUTPOLLER_MODULE = None
+_APCUPSD_MODULE = None
 GENERIC_NUT_DRIVER_KEY = "nut_network_upsd"
+GENERIC_APCUPSD_DRIVER_KEY = "apcupsd_network_nis"
+PROFILE_BUILDER_NUT_DEFAULT_PORT = "3493"
+PROFILE_BUILDER_APCUPSD_DEFAULT_PORT = "3551"
 
 
 def _escape(value: str) -> str:
@@ -143,14 +147,29 @@ def _nut_interface_root() -> Path:
     return _repo_root().parent / "nut-interface"
 
 
+def _apcupsd_interface_root() -> Path:
+    return _repo_root().parent / "apcupsd-interface"
+
+
 def _bundled_nutpoller_path() -> Path:
     return Path(__file__).resolve().parent / "vendor" / "nutpoller.py"
+
+
+def _bundled_apcupsd_path() -> Path:
+    return Path(__file__).resolve().parent / "vendor" / "apcupsd_nis.py"
 
 
 def _nutpoller_candidate_paths() -> list[Path]:
     return [
         _bundled_nutpoller_path(),
         _nut_interface_root() / "nutpoller.py",
+    ]
+
+
+def _apcupsd_candidate_paths() -> list[Path]:
+    return [
+        _bundled_apcupsd_path(),
+        _apcupsd_interface_root() / "apcupsd_nis.py",
     ]
 
 
@@ -177,6 +196,32 @@ def _load_base_nutpoller_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     _NUTPOLLER_MODULE = module
+    return module
+
+
+def _load_apcupsd_module():
+    global _APCUPSD_MODULE
+    if _APCUPSD_MODULE is not None:
+        return _APCUPSD_MODULE
+    module_path: Path | None = None
+    for candidate in _apcupsd_candidate_paths():
+        if candidate.exists():
+            module_path = candidate
+            break
+    if module_path is None:
+        candidate_paths = ", ".join(str(path) for path in _apcupsd_candidate_paths())
+        raise FileNotFoundError(
+            f"APCUPSD reader not found. Checked: {candidate_paths}"
+        )
+    spec = importlib.util.spec_from_file_location(
+        "ups2mqtt_profile_builder_apcupsd",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load APCUPSD reader from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _APCUPSD_MODULE = module
     return module
 
 
@@ -219,6 +264,14 @@ def _generic_nut_contract(
 ) -> dict[str, object]:
     raw = capability_profiles or {}
     profile = raw.get(GENERIC_NUT_DRIVER_KEY, {})
+    return dict(profile) if isinstance(profile, dict) else {}
+
+
+def _generic_apcupsd_contract(
+    capability_profiles: dict[str, dict[str, object]] | None,
+) -> dict[str, object]:
+    raw = capability_profiles or {}
+    profile = raw.get(GENERIC_APCUPSD_DRIVER_KEY, {})
     return dict(profile) if isinstance(profile, dict) else {}
 
 
@@ -294,6 +347,126 @@ def _normalize_nut_discovery_rows(
         )
         mapped.add(raw_key)
     return rows
+
+
+def _default_discover_apcupsd_variables(
+    host: str,
+    port: int,
+) -> dict[str, str]:
+    module = _load_apcupsd_module()
+    result = module.get_apcupsd_status(host=host, port=port, timeout=5.0)
+    if not isinstance(result, dict):
+        raise ValueError("APCUPSD discovery failed")
+    cleaned = {
+        str(key).strip(): str(value).strip()
+        for key, value in result.items()
+        if str(key).strip()
+    }
+    if not cleaned:
+        raise ValueError("Discovery returned no APCUPSD fields for the selected endpoint")
+    return cleaned
+
+
+def _profile_builder_default_port(connection_type: str) -> str:
+    return (
+        PROFILE_BUILDER_APCUPSD_DEFAULT_PORT
+        if connection_type == "apcupsd"
+        else PROFILE_BUILDER_NUT_DEFAULT_PORT
+    )
+
+
+def _normalize_apcupsd_discovery_rows(
+    variables: dict[str, str],
+    contract_profile: dict[str, object],
+) -> list[dict[str, str | bool]]:
+    rows: list[dict[str, str | bool]] = []
+    apcupsd = contract_profile.get("apcupsd", {})
+    if not isinstance(apcupsd, dict):
+        return rows
+    mapped: set[str] = set()
+    consumed_raw_names: set[str] = set()
+    field_specs = apcupsd.get("fields", {})
+    if isinstance(field_specs, dict):
+        for raw_name, spec in sorted(field_specs.items(), key=lambda item: str(item[0])):
+            if not isinstance(spec, dict):
+                continue
+            canonical_key = str(spec.get("key", "")).strip()
+            if not canonical_key or raw_name not in variables:
+                continue
+            rows.append(
+                {
+                    "key": canonical_key,
+                    "raw_name": str(raw_name),
+                    "sample_value": str(variables.get(raw_name, "")),
+                    "selected": True,
+                }
+            )
+            mapped.add(canonical_key)
+            consumed_raw_names.add(str(raw_name))
+    sensitive_fragments = tuple(
+        fragment.lower() for fragment in _SENSITIVE_KEY_FRAGMENTS
+    )
+    for raw_name, sample_value in sorted(variables.items(), key=lambda item: str(item[0])):
+        raw_key = str(raw_name).strip()
+        if not raw_key:
+            continue
+        if raw_key in consumed_raw_names:
+            continue
+        lowered = raw_key.lower()
+        if any(fragment in lowered for fragment in sensitive_fragments):
+            continue
+        if lowered in _SENSITIVE_KEY_EXACT:
+            continue
+        if raw_key in mapped:
+            continue
+        rows.append(
+            {
+                "key": raw_key,
+                "raw_name": raw_key,
+                "sample_value": str(sample_value),
+                "selected": False,
+            }
+        )
+        mapped.add(raw_key)
+    return rows
+
+
+def _apcupsd_raw_to_canonical_map(
+    contract_profile: dict[str, object],
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    apcupsd = contract_profile.get("apcupsd", {})
+    if not isinstance(apcupsd, dict):
+        return mapping
+    field_specs = apcupsd.get("fields", {})
+    if not isinstance(field_specs, dict):
+        return mapping
+    for raw_name, spec in field_specs.items():
+        raw_key = str(raw_name).strip()
+        if not raw_key or not isinstance(spec, dict):
+            continue
+        canonical_key = str(spec.get("key", "")).strip()
+        if not canonical_key:
+            continue
+        mapping[raw_key] = canonical_key
+        mapping[canonical_key] = canonical_key
+    return mapping
+
+
+def _normalize_apcupsd_submitted_keys(
+    keys: list[str],
+    contract_profile: dict[str, object],
+) -> list[str]:
+    mapping = _apcupsd_raw_to_canonical_map(contract_profile)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        candidate = mapping.get(str(key).strip(), str(key).strip())
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized
 
 
 def _is_bitfield_sensor_key(sensor_key: str) -> bool:
@@ -519,7 +692,7 @@ def _catalog_sensor_rows_for_driver(
     *, apps_dir: str, driver_key: str
 ) -> list[dict[str, str]]:
     """Fetch normalized sensor rows from the shared catalog for UI rendering."""
-    if driver_key == GENERIC_NUT_DRIVER_KEY:
+    if driver_key in {GENERIC_NUT_DRIVER_KEY, GENERIC_APCUPSD_DRIVER_KEY}:
         return []
     try:
         return get_catalog_sensor_rows(driver_key=driver_key, apps_dir=apps_dir)
@@ -993,6 +1166,9 @@ def start_web_server(
     discover_nut_variables: (
         Callable[[str, int, str, bool], dict[str, str]] | None
     ) = None,
+    discover_apcupsd_variables: (
+        Callable[[str, int], dict[str, str]] | None
+    ) = None,
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
@@ -1031,6 +1207,9 @@ def start_web_server(
     ha_bridge_enabled_setter = set_ha_bridge_enabled or (lambda value: None)
     capability_profiles_getter = get_capability_profiles or (lambda: {})
     nut_variable_discovery = discover_nut_variables or _default_discover_nut_variables
+    apcupsd_variable_discovery = (
+        discover_apcupsd_variables or _default_discover_apcupsd_variables
+    )
     nut_starttls_supported = False
     profile_device_info_keys = {
         # Canonical device-info/identity-like fields used by existing contract adapters.
@@ -1235,8 +1414,8 @@ def start_web_server(
         keys: list[str],
         *extra_sets: list[str] | set[str] | tuple[str, ...] | dict[str, Any] | None,
     ) -> list[str]:
-        """Keep unknown persisted NUT keys editable for global/local profile edits."""
-        if driver_key != GENERIC_NUT_DRIVER_KEY:
+        """Keep unknown persisted profile keys editable for runtime-generic drivers."""
+        if driver_key not in {GENERIC_NUT_DRIVER_KEY, GENERIC_APCUPSD_DRIVER_KEY}:
             return list(keys)
         merged = {str(item).strip() for item in keys if str(item).strip()}
         for extra in extra_sets:
@@ -1644,27 +1823,58 @@ def start_web_server(
         data: dict[str, list[str]] | None,
     ) -> dict[str, object]:
         data = data or {}
+        connection_type = (data.get("connection_type", ["nut"])[0]).strip().lower()
+        if connection_type not in {"nut", "apcupsd"}:
+            connection_type = "nut"
+        previous_connection_type = (
+            data.get("current_connection_type", [connection_type])[0]
+        ).strip().lower()
+        if previous_connection_type not in {"nut", "apcupsd"}:
+            previous_connection_type = connection_type
+        default_port = _profile_builder_default_port(connection_type)
+        previous_default_port = _profile_builder_default_port(previous_connection_type)
+        submitted_port = (data.get("port", [""])[0]).strip()
+        effective_port = submitted_port or default_port
+        if (
+            submitted_port
+            and previous_connection_type != connection_type
+            and submitted_port == previous_default_port
+        ):
+            effective_port = default_port
         return {
+            "connection_type": connection_type,
             "host": (data.get("host", [""])[0]).strip(),
             "ups_name": (data.get("ups_name", [""])[0]).strip(),
-            "port": (data.get("port", ["3493"])[0]).strip() or "3493",
+            "port": effective_port,
             "use_starttls": _bool_from_form(data, "use_starttls"),
         }
 
     def _render_htmx_profile_builder_results(
         *,
         error_message: str = "",
-        info_message: str = (
-            "Generated NUT profiles save against the generic reusable NUT runtime contract. Discovery host/IP and UPS name are not persisted."
-        ),
+        info_message: str | None = None,
         discovered_rows: list[dict[str, object]] | None = None,
         profile_name: str = "",
+        connection_type: str = "nut",
+        driver_key: str = GENERIC_NUT_DRIVER_KEY,
     ) -> str:
+        resolved_info_message = info_message
+        if resolved_info_message is None:
+            if connection_type == "apcupsd":
+                resolved_info_message = (
+                    "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract. Discovery host/IP and port are not persisted."
+                )
+            else:
+                resolved_info_message = (
+                    "Generated NUT profiles save against the generic reusable NUT runtime contract. Discovery host/IP and UPS name are not persisted."
+                )
         return templates.get_template("htmx/profile_builder_results.html").render(
             error_message=error_message,
-            info_message=info_message,
+            info_message=resolved_info_message,
             discovered_rows=discovered_rows or [],
             profile_name=profile_name,
+            connection_type=connection_type,
+            driver_key=driver_key,
         )
 
     def _render_htmx_profile_builder_panel(
@@ -1680,8 +1890,14 @@ def start_web_server(
             if discovery_html is not None
             else _render_htmx_profile_builder_results(
                 info_message=(
-                    "Run a live NUT discovery to preview reusable NUT capabilities."
-                )
+                    "Run a live NUT or APCUPSD discovery to preview reusable capabilities."
+                ),
+                connection_type=str(form.get("connection_type", "nut")),
+                driver_key=(
+                    GENERIC_APCUPSD_DRIVER_KEY
+                    if str(form.get("connection_type", "nut")) == "apcupsd"
+                    else GENERIC_NUT_DRIVER_KEY
+                ),
             ),
         )
 
@@ -3770,7 +3986,11 @@ def start_web_server(
                 return True
 
             if parsed_path.path == "/htmx/devices/partials/panel/profile-builder":
-                self._send_html(_render_htmx_profile_builder_panel())
+                self._send_html(
+                    _render_htmx_profile_builder_panel(
+                        form_values=_profile_builder_form_values_from_data(params)
+                    )
+                )
                 return True
 
             if parsed_path.path == "/htmx/devices/partials/table":
@@ -4263,43 +4483,84 @@ def start_web_server(
                 return True
 
             if parsed_path.path == "/htmx/profile-builder/actions/discover":
-                form_values = _profile_builder_form_values_from_data(data)
-                host = str(form_values.get("host", "")).strip()
-                ups_name = str(form_values.get("ups_name", "")).strip()
-                port_text = str(form_values.get("port", "3493")).strip() or "3493"
-                use_starttls = bool(form_values.get("use_starttls", False))
+                posted_connection_type = (
+                    data.get("connection_type", ["nut"])[0]
+                    if data
+                    else "nut"
+                )
+                connection_type = str(posted_connection_type).strip().lower()
+                if connection_type not in {"nut", "apcupsd"}:
+                    connection_type = "nut"
+                host = (
+                    str(data.get("host", [""])[0]).strip()
+                    if data
+                    else ""
+                )
+                ups_name = (
+                    str(data.get("ups_name", [""])[0]).strip()
+                    if data
+                    else ""
+                )
+                default_port = _profile_builder_default_port(connection_type)
+                posted_port = (
+                    str(data.get("port", [""])[0]).strip()
+                    if data
+                    else ""
+                )
+                port_text = posted_port or default_port
+                use_starttls = _bool_from_form(data or {}, "use_starttls")
                 try:
                     _validate_host(host)
-                    if not ups_name:
-                        raise ValueError("UPS name is required")
-                    port = _validate_port(_int_or_default(port_text, 3493))
-                    if use_starttls and not nut_starttls_supported:
-                        raise ValueError(
-                            "STARTTLS discovery is not available with the selected NUT reader"
+                    port = _validate_port(_int_or_default(port_text, int(default_port)))
+                    if connection_type == "apcupsd":
+                        contract_profile = _generic_apcupsd_contract(
+                            capability_profiles_getter()
                         )
-                    contract_profile = _generic_nut_contract(capability_profiles_getter())
-                    if not contract_profile:
-                        raise ValueError(
-                            "Generic NUT runtime contract is not available"
+                        if not contract_profile:
+                            raise ValueError(
+                                "Generic APCUPSD runtime contract is not available"
+                            )
+                        variables = apcupsd_variable_discovery(host, port)
+                        discovered_rows = _normalize_apcupsd_discovery_rows(
+                            variables,
+                            contract_profile,
                         )
-                    variables = nut_variable_discovery(
-                        host,
-                        port,
-                        ups_name,
-                        use_starttls,
-                    )
-                    discovered_rows = _normalize_nut_discovery_rows(
-                        variables,
-                        contract_profile,
-                    )
+                        profile_name_default = f"APCUPSD {host}"
+                        driver_key = GENERIC_APCUPSD_DRIVER_KEY
+                    else:
+                        if not ups_name:
+                            raise ValueError("UPS name is required")
+                        if use_starttls and not nut_starttls_supported:
+                            raise ValueError(
+                                "STARTTLS discovery is not available with the selected NUT reader"
+                            )
+                        contract_profile = _generic_nut_contract(
+                            capability_profiles_getter()
+                        )
+                        if not contract_profile:
+                            raise ValueError(
+                                "Generic NUT runtime contract is not available"
+                            )
+                        variables = nut_variable_discovery(
+                            host,
+                            port,
+                            ups_name,
+                            use_starttls,
+                        )
+                        discovered_rows = _normalize_nut_discovery_rows(
+                            variables,
+                            contract_profile,
+                        )
+                        profile_name_default = f"NUT {ups_name}"
+                        driver_key = GENERIC_NUT_DRIVER_KEY
                     if not discovered_rows:
-                        raise ValueError(
-                            "Discovery returned no reusable NUT capabilities for the selected UPS"
-                        )
+                        raise ValueError("Discovery returned no reusable capabilities")
                     self._send_html(
                         _render_htmx_profile_builder_results(
                             discovered_rows=discovered_rows,
-                            profile_name=f"NUT {ups_name}",
+                            profile_name=profile_name_default,
+                            connection_type=connection_type,
+                            driver_key=driver_key,
                         )
                     )
                 except ValueError as err:
@@ -4307,15 +4568,39 @@ def start_web_server(
                         _render_htmx_profile_builder_results(
                             error_message=str(err),
                             info_message="Correct the connection details and try discovery again.",
+                            connection_type=connection_type,
+                            driver_key=(
+                                GENERIC_APCUPSD_DRIVER_KEY
+                                if connection_type == "apcupsd"
+                                else GENERIC_NUT_DRIVER_KEY
+                            ),
                         ),
-                        status=HTTPStatus.BAD_REQUEST,
+                        status=HTTPStatus.OK,
                     )
                 except (OSError, ImportError) as err:
-                    LOG.exception("Profile Builder NUT discovery reader unavailable: %s", err)
+                    LOG.exception(
+                        "Profile Builder %s discovery reader unavailable: %s",
+                        connection_type,
+                        err,
+                    )
                     self._send_html(
                         _render_htmx_profile_builder_results(
-                            error_message="NUT discovery reader is unavailable in this runtime.",
-                            info_message="Contact an administrator to verify the NUT reader bundle in this deployment.",
+                            error_message=(
+                                "APCUPSD discovery reader is unavailable in this runtime."
+                                if connection_type == "apcupsd"
+                                else "NUT discovery reader is unavailable in this runtime."
+                            ),
+                            info_message=(
+                                "Contact an administrator to verify the APCUPSD reader bundle in this deployment."
+                                if connection_type == "apcupsd"
+                                else "Contact an administrator to verify the NUT reader bundle in this deployment."
+                            ),
+                            connection_type=connection_type,
+                            driver_key=(
+                                GENERIC_APCUPSD_DRIVER_KEY
+                                if connection_type == "apcupsd"
+                                else GENERIC_NUT_DRIVER_KEY
+                            ),
                         ),
                         status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
@@ -4339,13 +4624,22 @@ def start_web_server(
                     }
                 )
                 try:
-                    contract_profile = _generic_nut_contract(capability_profiles_getter())
-                    if not contract_profile:
-                        raise ValueError(
-                            "Generic NUT runtime contract is not available"
+                    driver_key = (data.get("driver_key", [""])[0]).strip()
+                    connection_type = (data.get("connection_type", ["nut"])[0]).strip().lower()
+                    if driver_key == GENERIC_APCUPSD_DRIVER_KEY:
+                        contract_profile = _generic_apcupsd_contract(
+                            capability_profiles_getter()
                         )
+                    else:
+                        driver_key = GENERIC_NUT_DRIVER_KEY
+                        connection_type = "nut"
+                        contract_profile = _generic_nut_contract(
+                            capability_profiles_getter()
+                        )
+                    if not contract_profile:
+                        raise ValueError("Runtime contract is not available")
                     if not discovered_keys:
-                        raise ValueError("No discovered NUT variables were submitted")
+                        raise ValueError("No discovered variables were submitted")
 
                     profile_name = (data.get("profile_name", [""])[0]).strip()
                     if not profile_name:
@@ -4357,31 +4651,47 @@ def start_web_server(
                         if item.name.lower() == profile_name.lower():
                             raise ValueError(f"Profile name {profile_name} already exists")
 
-                    selected_sensors = sorted(
+                    selected_input_keys = sorted(
                         {
                             key
                             for key in discovered_keys
                             if _bool_from_form(data, f"sensor_mqtt__{key}")
                         }
                     )
+                    if driver_key == GENERIC_APCUPSD_DRIVER_KEY:
+                        discovered_keys = _normalize_apcupsd_submitted_keys(
+                            discovered_keys,
+                            contract_profile,
+                        )
+                        selected_sensors = _normalize_apcupsd_submitted_keys(
+                            selected_input_keys,
+                            contract_profile,
+                        )
+                    else:
+                        selected_sensors = selected_input_keys
                     if not selected_sensors:
-                        raise ValueError("Select at least one NUT capability")
+                        raise ValueError(
+                            "Select at least one APCUPSD capability"
+                            if driver_key == GENERIC_APCUPSD_DRIVER_KEY
+                            else "Select at least one NUT capability"
+                        )
 
                     defaults = _profile_default_payload(
-                        GENERIC_NUT_DRIVER_KEY,
+                        driver_key,
                         contract_profile,
                     )
                     payload = {
-                        "driver_key": GENERIC_NUT_DRIVER_KEY,
+                        "driver_key": driver_key,
                         "poll_groups": dict(defaults.get("poll_groups", {})),
                         "key_precedence": dict(defaults.get("key_precedence", {})),
                     }
                     poll_group_defaults = _sensor_poll_group_defaults_from_profile(
                         contract_profile
                     )
+                    selected_set = set(selected_sensors)
                     sensor_preferences = {
                         key: {
-                            "mqtt_enabled": key in set(selected_sensors),
+                            "mqtt_enabled": key in selected_set,
                             "poll_group": str(
                                 poll_group_defaults.get(key, "slow")
                             ),
@@ -4391,7 +4701,7 @@ def start_web_server(
                     profile = ProfileConfig(
                         profile_uid=str(uuid4()),
                         name=profile_name,
-                        driver_key=GENERIC_NUT_DRIVER_KEY,
+                        driver_key=driver_key,
                         config_payload=payload,
                         selected_sensors=selected_sensors,
                         sensor_preferences=sensor_preferences,
@@ -4413,12 +4723,14 @@ def start_web_server(
                     self._send_html(
                         _render_htmx_profile_builder_results(
                             info_message=(
-                                f"Saved reusable NUT profile {profile.name}. "
+                                f"Saved reusable {('APCUPSD' if driver_key == GENERIC_APCUPSD_DRIVER_KEY else 'NUT')} profile {profile.name}. "
                                 "It is now available in the Profiles panel and device profile selector. "
-                                "Discovery host/IP, UPS name, credentials, and STARTTLS settings were not saved."
+                                "Discovery host/IP, port, UPS name, credentials, and STARTTLS settings were not saved."
                             ),
                             discovered_rows=saved_rows,
                             profile_name=profile.name,
+                            connection_type=connection_type,
+                            driver_key=driver_key,
                         ),
                         headers={
                             "HX-Trigger": _hx_trigger_payload(
@@ -4427,7 +4739,7 @@ def start_web_server(
                             )
                         },
                     )
-                except (ValueError, TypeError, OSError) as err:
+                except (ValueError, TypeError) as err:
                     rows = [
                         {
                             "key": key,
@@ -4442,8 +4754,30 @@ def start_web_server(
                             error_message=str(err),
                             discovered_rows=rows,
                             profile_name=(data.get("profile_name", [""])[0]).strip(),
+                            connection_type=(data.get("connection_type", ["nut"])[0]).strip().lower() or "nut",
+                            driver_key=(data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]).strip() or GENERIC_NUT_DRIVER_KEY,
                         ),
-                        status=HTTPStatus.BAD_REQUEST,
+                        status=HTTPStatus.OK,
+                    )
+                except OSError as err:
+                    LOG.exception("Profile Builder save failed: %s", err)
+                    self._send_html(
+                        _render_htmx_profile_builder_results(
+                            error_message="Profile save failed due to a runtime storage error.",
+                            discovered_rows=[
+                                {
+                                    "key": key,
+                                    "raw_name": "submitted",
+                                    "sample_value": "",
+                                    "selected": f"sensor_mqtt__{key}" in data,
+                                }
+                                for key in discovered_keys
+                            ],
+                            profile_name=(data.get("profile_name", [""])[0]).strip(),
+                            connection_type=(data.get("connection_type", ["nut"])[0]).strip().lower() or "nut",
+                            driver_key=(data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]).strip() or GENERIC_NUT_DRIVER_KEY,
+                        ),
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
                 return True
 

@@ -10,7 +10,7 @@
 
     {% if discovered_rows %}
     <div class="d-flex justify-content-between align-items-center">
-      <h3 class="h6 m-0">Discovered NUT Capabilities</h3>
+      <h3 class="h6 m-0">Discovered {{ "APCUPSD" if connection_type == "apcupsd" else "NUT" }} Capabilities</h3>
       <span class="small text-muted">{{ discovered_rows|length }} capability/capabilities</span>
     </div>
 
@@ -25,9 +25,11 @@
         <div class="col-12 col-md-6">
           <label class="form-label small mb-1">Reusable Profile Name</label>
           <input class="form-control form-control-sm" name="profile_name" value="{{ profile_name }}" required/>
-          <div class="form-text">The saved profile keeps only selected reusable NUT capabilities and preferences.</div>
+          <div class="form-text">The saved profile keeps only selected reusable capabilities and preferences.</div>
         </div>
       </div>
+      <input type="hidden" name="connection_type" value="{{ connection_type }}"/>
+      <input type="hidden" name="driver_key" value="{{ driver_key }}"/>
 
       <div class="table-responsive">
         <table class="table table-sm table-striped align-middle mb-0">
@@ -35,7 +37,7 @@
             <tr>
               <th>Select</th>
               <th>Capability</th>
-              <th>Raw NUT Source</th>
+              <th>Raw Source</th>
               <th>Sample Value</th>
             </tr>
           </thead>

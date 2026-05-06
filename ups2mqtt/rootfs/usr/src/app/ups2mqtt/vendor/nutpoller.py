@@ -128,7 +128,7 @@ def poll_ups(host, port, ups_name, timeout=5.0):
         finally:
             sock.close()
 
-    except Exception as e:
+    except (OSError, UnicodeDecodeError, ValueError) as e:
         return PollResult(
             host=host,
             port=port,

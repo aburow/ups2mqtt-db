@@ -14,6 +14,7 @@ from .icon_resolver import resolve_enabled_defaults
 
 _DEFAULT_SLOW_INTERVAL = 60
 _GENERIC_NUT_DRIVER_KEY = "nut_network_upsd"
+_GENERIC_APCUPSD_DRIVER_KEY = "apcupsd_network_nis"
 
 
 def _sanitize_poll_groups(raw: Any) -> dict[str, dict[str, int]]:
@@ -66,6 +67,18 @@ def _collect_metric_keys(profile: dict[str, Any]) -> set[str]:
             if isinstance(spec, dict) and isinstance(spec.get("key"), str)
         }
         return var_keys | status_keys
+    if protocol == "apcupsd":
+        apcupsd = profile.get("apcupsd", {})
+        if not isinstance(apcupsd, dict):
+            return set()
+        fields = apcupsd.get("fields", {})
+        if not isinstance(fields, dict):
+            return set()
+        return {
+            str(spec.get("key"))
+            for spec in fields.values()
+            if isinstance(spec, dict) and isinstance(spec.get("key"), str)
+        }
     if protocol == "multi_source":
         keys: set[str] = set()
         active_sources = profile.get("active_sources", {})
@@ -174,6 +187,10 @@ def load_capabilities(
         bundled_nut = _load_bundled_generic_nut_profile()
         if bundled_nut:
             payload["profiles"][_GENERIC_NUT_DRIVER_KEY] = bundled_nut
+    if _GENERIC_APCUPSD_DRIVER_KEY not in profiles:
+        bundled_apcupsd = _load_bundled_generic_profile(_GENERIC_APCUPSD_DRIVER_KEY)
+        if bundled_apcupsd:
+            payload["profiles"][_GENERIC_APCUPSD_DRIVER_KEY] = bundled_apcupsd
     if metric_contracts:
         payload["metric_contracts"] = metric_contracts
     validation_errors = list(runtime_errors)
@@ -190,6 +207,10 @@ def load_capabilities(
 
 
 def _load_bundled_generic_nut_profile() -> dict[str, Any]:
+    return _load_bundled_generic_profile(_GENERIC_NUT_DRIVER_KEY)
+
+
+def _load_bundled_generic_profile(driver_key: str) -> dict[str, Any]:
     bundled_path = Path(__file__).resolve().parents[1] / "capabilities" / "capabilities.json"
     if not bundled_path.exists():
         return {}
@@ -198,7 +219,7 @@ def _load_bundled_generic_nut_profile() -> dict[str, Any]:
     except (OSError, ValueError, json.JSONDecodeError):
         return {}
     profiles = raw.get("profiles", {}) if isinstance(raw, dict) else {}
-    profile = profiles.get(_GENERIC_NUT_DRIVER_KEY, {}) if isinstance(profiles, dict) else {}
+    profile = profiles.get(driver_key, {}) if isinstance(profiles, dict) else {}
     return dict(profile) if isinstance(profile, dict) else {}
 
 
@@ -262,6 +283,19 @@ def source_keys(profile: dict[str, Any]) -> list[str]:
         status_map = nut.get("status_map", {})
         if isinstance(status_map, dict):
             for spec in status_map.values():
+                if isinstance(spec, dict) and isinstance(spec.get("key"), str):
+                    key = str(spec["key"])
+                    if key not in set(keys):
+                        keys.append(key)
+        return keys
+    if protocol == "apcupsd":
+        keys: list[str] = []
+        apcupsd = profile.get("apcupsd", {})
+        if not isinstance(apcupsd, dict):
+            return keys
+        fields = apcupsd.get("fields", {})
+        if isinstance(fields, dict):
+            for spec in fields.values():
                 if isinstance(spec, dict) and isinstance(spec.get("key"), str):
                     key = str(spec["key"])
                     if key not in set(keys):

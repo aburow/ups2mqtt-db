@@ -11,11 +11,11 @@
   </div>
 
   <div class="alert alert-info py-2 mb-0">
-    NUT-only reusable profile generation is available in this pass. APCUPSD discovery remains deferred because ups2mqtt has no APCUPSD runtime protocol path.
+    Build reusable profiles from live NUT or APCUPSD discovery without storing endpoint details in profile templates.
   </div>
 
   <div class="small text-muted">
-    Discovery uses live NUT connection details only to list reusable capabilities. Saved profiles keep selected capability choices, not host/IP, UPS name, credentials, or STARTTLS settings.
+    Discovery uses live connection details only to list reusable capabilities. Saved profiles keep selected capability choices, not host/IP, port, UPS name, credentials, or STARTTLS settings.
   </div>
 
   <div class="card">
@@ -25,25 +25,52 @@
           <div class="small fw-semibold mb-2">Connection Type</div>
           <div class="d-flex flex-column gap-2">
             <label class="form-check">
-              <input class="form-check-input" type="radio" name="profile_builder_connection_type" checked disabled/>
+              <input
+                class="form-check-input"
+                type="radio"
+                name="connection_type"
+                value="nut"
+                {% if form.connection_type != "apcupsd" %}checked{% endif %}
+                hx-get="/htmx/devices/partials/panel/profile-builder"
+                hx-trigger="change"
+                hx-target="#profile-builder-panel"
+                hx-swap="outerHTML"
+                hx-include="#profile-builder-discovery-form"
+                hx-indicator="#global-loading"
+              />
               <span class="form-check-label">NUT</span>
             </label>
             <label class="form-check">
-              <input class="form-check-input" type="radio" name="profile_builder_connection_type" disabled/>
-              <span class="form-check-label text-muted">APCUPSD</span>
+              <input
+                class="form-check-input"
+                type="radio"
+                name="connection_type"
+                value="apcupsd"
+                {% if form.connection_type == "apcupsd" %}checked{% endif %}
+                hx-get="/htmx/devices/partials/panel/profile-builder"
+                hx-trigger="change"
+                hx-target="#profile-builder-panel"
+                hx-swap="outerHTML"
+                hx-include="#profile-builder-discovery-form"
+                hx-indicator="#global-loading"
+              />
+              <span class="form-check-label">APCUPSD</span>
             </label>
-            <div class="small text-muted">APCUPSD discovery is deferred because ups2mqtt has no APCUPSD runtime protocol path.</div>
+            <div class="small text-muted">NUT uses host, UPS name, and port. APCUPSD uses host and port.</div>
           </div>
         </div>
       </div>
 
       <form
+        id="profile-builder-discovery-form"
         class="d-flex flex-column gap-3"
         hx-post="/htmx/profile-builder/actions/discover"
         hx-target="#profile-builder-discovery-results"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
       >
+        <input type="hidden" name="current_connection_type" value="{{ form.connection_type }}"/>
+        <input type="hidden" name="connection_type" value="{{ form.connection_type }}"/>
         <div class="row g-2">
           <div class="col-12 col-md-5">
             <label class="form-label small mb-1">Host or IP Address</label>
@@ -52,8 +79,8 @@
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">UPS Name</label>
-            <input class="form-control form-control-sm" name="ups_name" value="{{ form.ups_name }}" required/>
-            <div class="form-text">Used only for this discovery request. Devices using the saved profile keep their own UPS name.</div>
+            <input class="form-control form-control-sm" name="ups_name" value="{{ form.ups_name }}"/>
+            <div class="form-text">Required for NUT discovery only. Never stored in reusable profiles.</div>
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label small mb-1">Port</label>
@@ -61,17 +88,17 @@
           </div>
         </div>
 
-        {% if nut_starttls_supported %}
+        {% if form.connection_type != "apcupsd" and nut_starttls_supported %}
         <div class="form-check">
           <input class="form-check-input" type="checkbox" name="use_starttls" id="profile-builder-use-starttls" {% if form.use_starttls %}checked{% endif %}/>
           <label class="form-check-label" for="profile-builder-use-starttls">Use STARTTLS</label>
         </div>
-        {% else %}
+        {% elif form.connection_type != "apcupsd" %}
         <div class="small text-muted">STARTTLS is not available with the selected NUT discovery reader.</div>
         {% endif %}
 
         <div class="d-flex justify-content-end">
-          <button class="btn btn-sm btn-primary" type="submit">Discover Variables</button>
+          <button class="btn btn-sm btn-primary" type="submit">Discover Fields</button>
         </div>
       </form>
     </div>

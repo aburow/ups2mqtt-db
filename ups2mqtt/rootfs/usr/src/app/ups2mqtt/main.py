@@ -1293,27 +1293,21 @@ def _resolve_runtime_profile(
                 payload=payload,
             )
 
+    selected_for_runtime = (
+        binding.selected_sensors
+        if (binding is not None and str(device.profile_mode).lower() != "local")
+        else (
+            device.local_selected_sensors
+            if device.local_selected_sensors is not None
+            else (binding.selected_sensors if binding is not None else [])
+        )
+    )
+
     if runtime_source == "nut_network_upsd":
         nut_block = effective_profile.get("nut")
         if isinstance(nut_block, dict):
             variables = nut_block.get("variables")
             if isinstance(variables, dict):
-                selected_for_runtime = (
-                    binding.selected_sensors
-                    if (
-                        binding is not None
-                        and str(device.profile_mode).lower() != "local"
-                    )
-                    else (
-                        device.local_selected_sensors
-                        if device.local_selected_sensors is not None
-                        else (
-                            binding.selected_sensors
-                            if binding is not None
-                            else []
-                        )
-                    )
-                )
                 added_passthrough = 0
                 for item in selected_for_runtime or []:
                     key = str(item).strip()
@@ -1330,6 +1324,28 @@ def _resolve_runtime_profile(
                 if added_passthrough > 0:
                     LOG.debug(
                         "Profile resolution for %s: added %d selected NUT passthrough variables",
+                        device.id,
+                        added_passthrough,
+                    )
+    if runtime_source == "apcupsd_network_nis":
+        apcupsd_block = effective_profile.get("apcupsd")
+        if isinstance(apcupsd_block, dict):
+            fields = apcupsd_block.get("fields")
+            if isinstance(fields, dict):
+                added_passthrough = 0
+                for item in selected_for_runtime or []:
+                    key = str(item).strip()
+                    if not key or key in fields:
+                        continue
+                    fields[key] = {
+                        "key": key,
+                        "poll_group": "slow",
+                        "type": "str",
+                    }
+                    added_passthrough += 1
+                if added_passthrough > 0:
+                    LOG.debug(
+                        "Profile resolution for %s: added %d selected APCUPSD passthrough fields",
                         device.id,
                         added_passthrough,
                     )

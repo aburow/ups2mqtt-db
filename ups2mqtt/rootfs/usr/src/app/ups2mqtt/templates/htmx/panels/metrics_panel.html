@@ -125,15 +125,25 @@
               </td>
               <td>{{ row.updated_utc }}</td>
               <td>
-                <button
-                  class="btn btn-sm btn-outline-danger"
-                  hx-post="/htmx/devices/actions/metrics/clear"
-                  hx-vals='{"scope":"device","device_uid":"{{ row.device_uid }}"}'
-                  hx-target="#admin-panel"
-                  hx-swap="innerHTML"
-                  hx-indicator="#global-loading"
-                  hx-confirm="Clear metrics for {{ row.name }}?"
-                >Clear</button>
+                <div class="d-flex gap-2">
+                  <button
+                    class="btn btn-sm btn-outline-primary"
+                    hx-get="/htmx/devices/partials/modal/ha-payload?id={{ row.device_id }}"
+                    hx-target="#device-modal-content"
+                    hx-swap="innerHTML"
+                    hx-indicator="#global-loading"
+                    @click="modalOpen = true"
+                  >Data</button>
+                  <button
+                    class="btn btn-sm btn-outline-danger"
+                    hx-post="/htmx/devices/actions/metrics/clear"
+                    hx-vals='{"scope":"device","device_uid":"{{ row.device_uid }}"}'
+                    hx-target="#admin-panel"
+                    hx-swap="innerHTML"
+                    hx-indicator="#global-loading"
+                    hx-confirm="Clear metrics for {{ row.name }}?"
+                  >Clear</button>
+                </div>
               </td>
             </tr>
             {% else %}

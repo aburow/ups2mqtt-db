@@ -8,6 +8,7 @@ import concurrent.futures
 import inspect
 import logging
 import shlex
+import re
 import socket
 import threading
 import time
@@ -18,6 +19,7 @@ from pymodbus.client import ModbusTcpClient
 
 from .capability_repository import get_capability_repository
 from .model import DeviceConfig
+from .vendor.apcupsd_nis import get_apcupsd_status
 
 LOG = logging.getLogger("ups2mqtt.pollers")
 _HYBRID_COLLISION_LOGGED: set[str] = set()
@@ -1858,6 +1860,60 @@ def _poll_nut_sync(
     return out
 
 
+def _apcupsd_coerce(raw: str, declared_type: str) -> int | float | str | bool:
+    dtype = declared_type.lower()
+    text = str(raw).strip()
+    if dtype in {"int", "float"}:
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        if not match:
+            return text
+        number = match.group(0)
+        if dtype == "int":
+            try:
+                return int(float(number))
+            except (TypeError, ValueError):
+                return text
+        try:
+            return float(number)
+        except (TypeError, ValueError):
+            return text
+    if dtype == "bool":
+        return text.lower() in {"1", "true", "yes", "on", "online"}
+    return text
+
+
+def _poll_apcupsd_sync(
+    device: DeviceConfig, profile: dict[str, Any], poll_groups: set[str] | None = None
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    allowed_groups = poll_groups or {"slow"}
+    apcupsd = profile.get("apcupsd", {})
+    if not isinstance(apcupsd, dict):
+        return out
+    fields = apcupsd.get("fields", {})
+    if not isinstance(fields, dict):
+        return out
+    host = str(device.host or "").strip()
+    if not host:
+        return out
+    port = int(device.port or 3551)
+    raw_values = get_apcupsd_status(host=host, port=port, timeout=5.0)
+    for raw_name, spec in fields.items():
+        if not isinstance(spec, dict):
+            continue
+        poll_group = str(spec.get("poll_group", "slow"))
+        if poll_group not in allowed_groups:
+            continue
+        key = spec.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        raw = raw_values.get(str(raw_name))
+        if raw is None:
+            continue
+        out[key] = _apcupsd_coerce(raw, str(spec.get("type", "str")))
+    return out
+
+
 def _merge_hybrid_values(
     device: DeviceConfig,
     profile: dict[str, Any],
@@ -2140,4 +2196,6 @@ async def poll_device(
         return await _poll_multi_source(device, profile, groups)
     if protocol == "nut":
         return await asyncio.to_thread(_poll_nut_sync, device, profile, groups)
+    if protocol == "apcupsd":
+        return await asyncio.to_thread(_poll_apcupsd_sync, device, profile, groups)
     raise ValueError(f"Unsupported protocol for source {device.source}: {protocol}")

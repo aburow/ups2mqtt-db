@@ -3561,6 +3561,95 @@
       "protocol": "nut",
       "source": "nut"
     },
+    "apcupsd_network_nis": {
+      "normalization": {
+        "battery_charge": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "%"
+        },
+        "input_voltage": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "V"
+        },
+        "output_load": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "%"
+        },
+        "runtime_remaining": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "min"
+        },
+        "output_voltage": {
+          "multiplier": 1.0,
+          "offset": 0.0,
+          "unit": "V"
+        }
+      },
+      "apcupsd": {
+        "fields": {
+          "BCHARGE": {
+            "key": "battery_charge",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "LINEV": {
+            "key": "input_voltage",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "LOADPCT": {
+            "key": "output_load",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "TIMELEFT": {
+            "key": "runtime_remaining",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "OUTPUTV": {
+            "key": "output_voltage",
+            "poll_group": "fast",
+            "type": "float"
+          },
+          "STATUS": {
+            "key": "status",
+            "poll_group": "fast",
+            "type": "str"
+          },
+          "MODEL": {
+            "key": "model",
+            "poll_group": "slow",
+            "type": "str"
+          },
+          "SERIALNO": {
+            "key": "serial_number",
+            "poll_group": "slow",
+            "type": "str"
+          },
+          "FIRMWARE": {
+            "key": "sw_version",
+            "poll_group": "slow",
+            "type": "str"
+          }
+        }
+      },
+      "poll_groups": {
+        "fast": {
+          "interval_s": 15
+        },
+        "slow": {
+          "interval_s": 60
+        }
+      },
+      "profile_id": "apcupsd_network_nis",
+      "protocol": "apcupsd",
+      "source": "apcupsd"
+    },
     "ups_snmp_apc_mib": {
       "oids": {
         "battery_charge": {

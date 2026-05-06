@@ -184,9 +184,16 @@ Before release, run the Python checks from each app runtime directory:
 
 ```sh
 (cd ups2mqtt/rootfs/usr/src/app && uv run --group lint ruff check ups2mqtt tests)
+(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint ruff format --check ups2mqtt tests)
+(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint grain check --all)
 (cd ups2mqtt/rootfs/usr/src/app && uv run pytest -q tests)
 (cd homeassistant-addon/ups2mqtt/app && uv run --group lint ruff check ups2mqtt tests)
+(cd homeassistant-addon/ups2mqtt/app && uv run --group lint ruff format --check ups2mqtt tests)
+(cd homeassistant-addon/ups2mqtt/app && uv run --group lint grain check --all)
 (cd homeassistant-addon/ups2mqtt/app && uv run pytest -q tests)
+(cd homeassistant-addon/ups2mqtt/app && uv run --group lint yamllint -s ../config.yaml ../../../repository.yaml ../../../standalone/docker-compose.yml)
+(cd homeassistant-addon/ups2mqtt/app && HOME=$(pwd)/.tools/semgrep-home uv run --group lint semgrep --config auto ups2mqtt tests scripts)
+(cd homeassistant-addon/ups2mqtt/app && uv run --group lint sqlfluff lint capabilities/capability_snapshot.sql capabilities/capability_snapshot.20260425_193125.bak.sql)
 make runtime-check
 ```
 

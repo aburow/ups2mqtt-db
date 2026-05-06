@@ -45,6 +45,24 @@ _NUT_PROFILE = {
     },
 }
 
+_APCUPSD_PROFILE = {
+    "protocol": "apcupsd",
+    "profile_id": "apcupsd_network_nis",
+    "source": "apcupsd",
+    "poll_groups": {
+        "fast": {"interval_s": 15},
+        "slow": {"interval_s": 60},
+    },
+    "apcupsd": {
+        "fields": {
+            "BCHARGE": {"key": "battery_charge", "poll_group": "fast", "type": "float"},
+            "LINEV": {"key": "input_voltage", "poll_group": "fast", "type": "float"},
+            "LOADPCT": {"key": "output_load", "poll_group": "fast", "type": "float"},
+            "TIMELEFT": {"key": "runtime_remaining", "poll_group": "fast", "type": "float"},
+        }
+    },
+}
+
 
 def _fetch(base_url: str, path: str) -> tuple[int, str]:
     request = Request(f"{base_url}{path}")
@@ -73,6 +91,7 @@ def _post(base_url: str, path: str, data: dict[str, str]) -> tuple[int, str]:
 def _start_test_server(
     tmp_path: Path,
     discover_nut_variables=None,
+    discover_apcupsd_variables=None,
 ):
     db = Database(str(tmp_path / "test.db"))
     store = DeviceStore([], db)
@@ -80,15 +99,19 @@ def _start_test_server(
         host="127.0.0.1",
         port=0,
         store=store,
-        get_source_names=lambda: ["cyberpower_modbus_single_phase", "nut_network_upsd"],
+        get_source_names=lambda: ["cyberpower_modbus_single_phase", "nut_network_upsd", "apcupsd_network_nis"],
         log_buffer=LogBuffer(),
         get_capability_status=lambda: {},
         trigger_capability_reload=lambda: None,
         trigger_republish_discovery=lambda: None,
         get_metrics_snapshot=lambda: {},
         trigger_reload=lambda: None,
-        get_capability_profiles=lambda: {"nut_network_upsd": dict(_NUT_PROFILE)},
+        get_capability_profiles=lambda: {
+            "nut_network_upsd": dict(_NUT_PROFILE),
+            "apcupsd_network_nis": dict(_APCUPSD_PROFILE),
+        },
         discover_nut_variables=discover_nut_variables,
+        discover_apcupsd_variables=discover_apcupsd_variables,
     )
     return server
 
@@ -115,9 +138,59 @@ def test_profile_builder_panel_renders_via_existing_panel_route(tmp_path: Path) 
         assert 'id="profile-builder-panel"' in body
         assert 'hx-post="/htmx/profile-builder/actions/discover"' in body
         assert 'id="profile-builder-discovery-results"' in body
-        assert "APCUPSD discovery is deferred" in body
+        assert 'name="connection_type" value="nut"' in body
+        assert "Build reusable profiles from live NUT or APCUPSD discovery" in body
         assert "Saved profiles keep selected capability choices" in body
         assert "Used only for this discovery request." in body
+        assert 'name="port"' in body
+        assert 'value="3493"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_panel_apcupsd_defaults_port_to_3551(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(
+            base_url,
+            "/htmx/devices/partials/panel/profile-builder?connection_type=apcupsd",
+        )
+        assert status == HTTPStatus.OK
+        assert 'value="3551"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_panel_preserves_explicit_port_from_context(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(
+            base_url,
+            "/htmx/devices/partials/panel/profile-builder?connection_type=apcupsd&port=4011",
+        )
+        assert status == HTTPStatus.OK
+        assert 'value="4011"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_panel_switches_default_port_when_connection_type_changes(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(
+            base_url,
+            "/htmx/devices/partials/panel/profile-builder?current_connection_type=nut&connection_type=apcupsd&port=3493",
+        )
+        assert status == HTTPStatus.OK
+        assert 'value="3551"' in body
     finally:
         server.shutdown()
         server.server_close()
@@ -153,7 +226,7 @@ def test_profile_builder_validation_errors_do_not_attempt_discovery(tmp_path: Pa
             "/htmx/profile-builder/actions/discover",
             {"host": "", "ups_name": ""},
         )
-        assert status == HTTPStatus.BAD_REQUEST
+        assert status == HTTPStatus.OK
         assert "Host is required" in body
         assert discovery_calls == []
     finally:
@@ -215,7 +288,84 @@ def test_profile_builder_mocked_nut_discovery_renders_selectable_variables_and_p
         assert "<code>load_on_source</code>" in body
         assert 'type="checkbox"' in body
         assert "Save Profile" in body
-        assert "generic reusable NUT runtime contract" in body
+        assert "selected reusable capabilities and preferences" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_discovery_honors_explicit_port_after_connection_type_toggle(
+    tmp_path: Path,
+) -> None:
+    discovery_calls: list[tuple[str, int, str, bool]] = []
+
+    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+        discovery_calls.append((host, port, ups_name, use_starttls))
+        return {
+            "battery.charge": "100",
+            "ups.status": "OL",
+        }
+
+    server = _start_test_server(tmp_path, discover_nut_variables=_discover)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/discover",
+            {
+                "current_connection_type": "apcupsd",
+                "connection_type": "nut",
+                "host": "192.0.2.10",
+                "ups_name": "devups",
+                "port": "3551",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert discovery_calls == [("192.0.2.10", 3551, "devups", False)]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_mocked_apcupsd_discovery_renders_selectable_fields(
+    tmp_path: Path,
+) -> None:
+    discovery_calls: list[tuple[str, int]] = []
+
+    def _discover(host: str, port: int) -> dict[str, str]:
+        discovery_calls.append((host, port))
+        return {
+            "BCHARGE": "100.0 Percent",
+            "LINEV": "238.0 Volts",
+            "TIMELEFT": "24.0 Minutes",
+            "VENDORX": "custom",
+        }
+
+    server = _start_test_server(
+        tmp_path,
+        discover_apcupsd_variables=_discover,
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/discover",
+            {
+                "connection_type": "apcupsd",
+                "host": "192.0.2.40",
+                "port": "3551",
+                "ups_name": "",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert discovery_calls == [("192.0.2.40", 3551)]
+        assert "Discovered APCUPSD Capabilities" in body
+        assert "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract." in body
+        assert "<code>battery_charge</code>" in body
+        assert "<code>VENDORX</code>" in body
+        assert "Raw Source" in body
+        assert 'name="driver_key" value="apcupsd_network_nis"' in body
+        assert 'name="connection_type" value="apcupsd"' in body
     finally:
         server.shutdown()
         server.server_close()
@@ -239,7 +389,7 @@ def test_profile_builder_save_persists_reusable_nut_profile_without_connection_d
         )
         assert status == HTTPStatus.OK
         assert "Saved reusable NUT profile NUT Builder Profile" in body
-        assert "Discovery host/IP, UPS name, credentials, and STARTTLS settings were not saved." in body
+        assert "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved." in body
 
         db = Database(str(tmp_path / "test.db"))
         profiles = db.load_profiles()
@@ -248,6 +398,95 @@ def test_profile_builder_save_persists_reusable_nut_profile_without_connection_d
         assert saved.selected_sensors == ["battery_charge"]
         assert "host" not in saved.config_payload
         assert "ups_name" not in saved.config_payload
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_save_persists_reusable_apcupsd_profile_without_endpoint_details(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/save",
+            {
+                "connection_type": "apcupsd",
+                "driver_key": "apcupsd_network_nis",
+                "profile_name": "APCUPSD Builder Profile",
+                "discovered_sensor_key": "battery_charge",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert "Saved reusable APCUPSD profile APCUPSD Builder Profile" in body
+        assert "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved." in body
+
+        db = Database(str(tmp_path / "test.db"))
+        profiles = db.load_profiles()
+        saved = next(item for item in profiles if item.name == "APCUPSD Builder Profile")
+        assert saved.driver_key == "apcupsd_network_nis"
+        assert saved.selected_sensors == ["battery_charge"]
+        assert "host" not in saved.config_payload
+        assert "port" not in saved.config_payload
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_save_normalizes_raw_apcupsd_keys_to_canonical(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/save",
+            {
+                "connection_type": "apcupsd",
+                "driver_key": "apcupsd_network_nis",
+                "profile_name": "APCUPSD Raw Key Profile",
+                "discovered_sensor_key": "BCHARGE",
+                "sensor_key__BCHARGE": "1",
+                "sensor_mqtt__BCHARGE": "1",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert "Saved reusable APCUPSD profile APCUPSD Raw Key Profile" in body
+
+        db = Database(str(tmp_path / "test.db"))
+        profiles = db.load_profiles()
+        saved = next(item for item in profiles if item.name == "APCUPSD Raw Key Profile")
+        assert saved.selected_sensors == ["battery_charge"]
+        assert "BCHARGE" not in saved.selected_sensors
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_save_apcupsd_rejects_empty_selection(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/save",
+            {
+                "connection_type": "apcupsd",
+                "driver_key": "apcupsd_network_nis",
+                "profile_name": "APCUPSD Empty Selection",
+                "discovered_sensor_key": "BCHARGE",
+                "sensor_key__BCHARGE": "1",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert "Select at least one APCUPSD capability" in body
     finally:
         server.shutdown()
         server.server_close()

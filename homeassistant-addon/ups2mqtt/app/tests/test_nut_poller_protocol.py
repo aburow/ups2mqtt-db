@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from ups2mqtt.model import DeviceConfig
-from ups2mqtt.pollers import _nut_read_lines, _poll_nut_sync
+from ups2mqtt.pollers import _nut_read_lines, _poll_apcupsd_sync, _poll_nut_sync
 
 
 def test_nut_read_lines_sends_list_var_before_reading_banner() -> None:
@@ -164,3 +164,38 @@ def test_poll_nut_sync_emits_selected_raw_dotted_variable(
 
     assert out["battery.voltage"] == "27.4"
     assert "battery_charge" not in out
+
+
+def test_poll_apcupsd_sync_parses_status_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ups2mqtt.pollers.get_apcupsd_status",
+        lambda **kwargs: {
+            "APC": "001,051,1306",
+            "LINEV": "238.0 Volts",
+            "BCHARGE": "100.0 Percent",
+            "TIMELEFT": "24.0 Minutes",
+            "VENDORX": "custom",
+        },
+    )
+    device = DeviceConfig(
+        id="device-1",
+        source="apcupsd_network_nis",
+        host="127.0.0.1",
+        port=3551,
+    )
+    profile = {
+        "apcupsd": {
+            "fields": {
+                "LINEV": {"key": "input_voltage", "poll_group": "fast", "type": "float"},
+                "BCHARGE": {"key": "battery_charge", "poll_group": "fast", "type": "float"},
+                "TIMELEFT": {"key": "runtime_remaining", "poll_group": "fast", "type": "float"},
+                "VENDORX": {"key": "VENDORX", "poll_group": "slow", "type": "str"},
+            }
+        }
+    }
+    out = _poll_apcupsd_sync(device, profile, {"fast"})
+
+    assert out["input_voltage"] == 238.0
+    assert out["battery_charge"] == 100.0
+    assert out["runtime_remaining"] == 24.0
+    assert "VENDORX" not in out

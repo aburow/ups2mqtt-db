@@ -217,3 +217,56 @@ def test_ha_payload_modal_unknown_device_htmx_request_returns_modal_message(
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_metrics_panel_renders_ha_payload_data_button_with_device_id(tmp_path: Path) -> None:
+    device = DeviceConfig(
+        id="ups-metrics-1",
+        source="cyberpower_modbus_single_phase",
+        host="10.0.0.20",
+        device_uid="uid-ups-metrics-1",
+        name="Metrics UPS",
+    )
+    metrics_snapshot = {
+        "generated_at_utc": "2026-05-06T00:00:00Z",
+        "devices": {
+            "uid-ups-metrics-1": {
+                "polls_started": 1,
+                "polls_succeeded": 1,
+                "polls_failed": 0,
+                "polls_timed_out": 0,
+                "values": 4,
+                "last_status": "success",
+            }
+        },
+        "totals": {},
+    }
+
+    db = Database(str(tmp_path / "test.db"))
+    store = DeviceStore([device], db)
+    server = start_web_server(
+        host="127.0.0.1",
+        port=0,
+        store=store,
+        get_source_names=lambda: ["cyberpower_modbus_single_phase"],
+        log_buffer=LogBuffer(),
+        get_capability_status=lambda: {},
+        trigger_capability_reload=lambda: None,
+        trigger_republish_discovery=lambda: None,
+        get_metrics_snapshot=lambda: metrics_snapshot,
+        trigger_reload=lambda: None,
+        get_cached_ha_payload_preview=lambda _device: {},
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
+        assert status == HTTPStatus.OK
+        assert (
+            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-metrics-1"'
+            in body
+        )
+        assert 'hx-target="#device-modal-content"' in body
+        assert '@click="modalOpen = true"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
