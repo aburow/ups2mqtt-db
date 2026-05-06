@@ -193,10 +193,8 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.3)
+## Latest release (v1.2.4)
 
-- Added profile-only maintenance restore: `Restore Profiles from JSON` imports reusable profiles without importing or mutating devices or runtime settings.
-- `Remove All Profiles` now localizes global-profile devices first (copies effective profile payload, selected sensors, and sensor preferences to local overrides) before deleting reusable profiles.
-- Device modal now derives poll interval defaults from profile `poll_groups.fast` where available, repairs missing poll interval form values safely, and preserves custom user-entered intervals.
-- Device upsert now rejects blank/invalid poll interval values with HTMX-friendly validation errors to prevent bad saves.
-- Minor maintenance/profile workflow defect fixes and focused regression test coverage updates.
+- Resolved Home Assistant add-on direct Prometheus access gap by adding optional metrics direct-port support (`8100/tcp` by default).
+- Added add-on `metrics_port` option (default `8100`) and wired it to runtime (`UPS2MQTT_METRICS_PORT`) so Prometheus can scrape the metrics-only listener directly.
+- Updated add-on docs for direct metrics exposure and scrape paths (`/metrics` and `/metrics/prometheus`).

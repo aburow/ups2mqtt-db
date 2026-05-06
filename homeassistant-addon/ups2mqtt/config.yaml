@@ -1,6 +1,6 @@
 ---
 name: "ups2mqtt"
-version: "1.2.3"
+version: "1.2.4"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
@@ -22,8 +22,10 @@ arch:
   - armv7
 ports:
   8099/tcp: null
+  8100/tcp: null
 ports_description:
   8099/tcp: "Optional direct web access for troubleshooting"
+  8100/tcp: "Optional direct Prometheus metrics access"
 map:
   - addon_config:rw
   - ssl
@@ -47,6 +49,7 @@ options:
   web_enabled: true
   web_host: 0.0.0.0
   web_port: 8099
+  metrics_port: 8100
   expose_direct_port: false
   log_level: INFO
   ha_bridge_enabled: false
@@ -84,6 +87,7 @@ schema:
   web_enabled: bool
   web_host: str
   web_port: int(1,65535)
+  metrics_port: int(1,65535)
   expose_direct_port: bool
   log_level: list(DEBUG|INFO|WARNING|ERROR|CRITICAL)
   ha_bridge_enabled: bool

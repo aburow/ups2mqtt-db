@@ -10,6 +10,14 @@ options = json.loads(Path('/data/options.json').read_text(encoding='utf-8'))
 print(str(options.get('log_level', 'INFO')))
 PY
 )"
+export UPS2MQTT_METRICS_PORT="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+options = json.loads(Path('/data/options.json').read_text(encoding='utf-8'))
+print(int(options.get('metrics_port', 8100)))
+PY
+)"
 
 # Keep the Supervisor ingress prefix available for HA panel requests. The web
 # handler detects direct-port requests and serves them from /.

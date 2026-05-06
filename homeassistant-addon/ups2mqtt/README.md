@@ -5,7 +5,9 @@ This directory contains Home Assistant Community App/add-on packaging for `ups2m
 ## Highlights
 
 - Ingress-enabled (`ingress: true`, `ingress_port: 8099`)
-- Optional direct port mapping (`8099/tcp`) for troubleshooting
+- Optional direct port mappings:
+  - `8099/tcp` for admin UI troubleshooting
+  - `8100/tcp` for metrics-only Prometheus scraping (`/metrics` or `/metrics/prometheus`)
 - Uses add-on options as configuration source (`/data/options.json`)
 - Persists runtime state in `/data`
 - HTMX-only web UI surface (legacy non-HTMX page/action routes removed)
