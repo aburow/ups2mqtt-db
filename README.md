@@ -44,15 +44,19 @@ and makes them available for:
 - automations (e.g. shutdown triggers, alerts)
 - dashboards
 
+With optional telemetry feeds for:
+- Prometheus
+- Influx V3
+
 ---
 
 ## Why use this?
 
-Many UPS systems expose data via SNMP, or vendor-specific tools, but:
+Other UPS systems expose data via SNMP, or vendor-specific tools, but:
 
-- they don’t integrate cleanly with Home Assistant  
-- they lack real-time automation hooks  
-- or they require heavyweight software stacks  
+- they don’t integrate cleanly with Home Assistant
+- they are vendor specific
+- or they require heavyweight software stacks
 
 **ups2mqtt** provides a lightweight bridge that:
 - publishes UPS data to MQTT in a structured format  
@@ -81,15 +85,16 @@ Once connected, you can:
 
 - Notify when power is lost or restored  
 - Safely shut down servers during extended outages  
-- Monitor battery health over time  
-- Track power quality and load  
+- Monitor battery health over time (not available with all UPS types)
+- Track power quality and load (not available with all UPS types)
 
 ---
 
 ## Design goals
 
 - Minimal dependencies  
-- Works alongside existing UPS tooling  
+- Works alongside existing UPS tooling
+- Leverage existing tooling permanently or as a migration path
 - MQTT-first (no tight coupling to Home Assistant)  
 - Simple to deploy (Docker / add-on)
 
@@ -100,11 +105,11 @@ Once connected, you can:
 `ups2mqtt` is designed for mixed UPS environments and supports multiple deployment models.
 
 ### Supported UPS / Protocol Coverage
-- APC Smart-UPS (legacy Modbus + legacy SNMP): supported
-- APC SMT series: supported
-- CyberPower Modbus devices: supported
-- RFC1628 UPS-MIB devices: broadly compatible (model-specific behavior may vary)
-- APC PDU: limited support
+- **NUT (network upsd)**: supported, including multiple UPS names behind one NUT host:port.
+- **APCUPSD (NIS/network)**: supported.
+- **SNMP (UPS-MIB / APC / CyberPower profiles)**: supported (model/MIB coverage varies by device).
+- **Modbus (APC/CyberPower profile-based support)**: supported.
+- **APC PDU**: supported where protocol/profile mappings exist; field coverage depends on device/MIB/register implementation.
 
 ### Runtime / Platform
 - Python runtime: 3.13+
@@ -112,10 +117,19 @@ Once connected, you can:
 - Home Assistant Community App: supported via Ingress-enabled add-on path (`homeassistant-addon/ups2mqtt/`)
 
 ### Home Assistant / MQTT
-- MQTT discovery: supported (tested with Home Assistant + Mosquitto)
-- Home Assistant token: optional, only needed for stale-entity cleanup flows
+- MQTT discovery: supported
+- Home Assistant token: optional, used for stale-entity cleanup flows
 - Ingress UI: supported in add-on mode
 - Direct web port (add-on): optional troubleshooting mode
+
+### Optional Telemetry Outputs
+- **Prometheus scrape endpoint**: supported (selected numeric values only)
+- Metrics listener: `:8100`
+- Paths: `/metrics/prometheus` and `/metrics`
+- **InfluxDB v3 line protocol export**: supported (optional, disabled by default)
+- Endpoint used: `/api/v3/write_lp`
+- Export scope: selected numeric values only
+- Non-blocking design: bounded queue + background worker; exporter failures do not block polling/MQTT/HA flows
 
 ### Architecture Support (Home Assistant Add-on)
 - `amd64`
@@ -124,7 +138,8 @@ Once connected, you can:
 
 ### Notes
 - Compatibility depends on UPS firmware behavior, MIB/register implementation fidelity, and network quality.
-- For unsupported or partially supported models, telemetry coverage can be incomplete even when connectivity succeeds.
+- Telemetry coverage can be partial on unsupported or vendor-variant models even when connectivity succeeds.
+- MQTT/Home Assistant remain the primary output path; Prometheus/Influx are optional.
 
 ---
 
@@ -184,24 +199,3 @@ The metrics panel includes a top-level `Clear All Errors` action that clears onl
 - Added optional, non-blocking InfluxDB v3 telemetry export (`/api/v3/write_lp`) with bounded queue + background worker isolation from polling/MQTT/HA paths.
 - Added standalone and add-on configuration options for Prometheus/Influx telemetry, including safe defaults and docs/examples.
 - Preserved existing MQTT/Home Assistant behavior as primary output; telemetry exporters remain optional and disabled by default.
-
-## Development checks
-
-Before release, run the Python checks from each app runtime directory:
-
-```sh
-(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint ruff check ups2mqtt tests)
-(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint ruff format --check ups2mqtt tests)
-(cd ups2mqtt/rootfs/usr/src/app && uv run --group lint grain check --all)
-(cd ups2mqtt/rootfs/usr/src/app && uv run pytest -q tests)
-(cd homeassistant-addon/ups2mqtt/app && uv run --group lint ruff check ups2mqtt tests)
-(cd homeassistant-addon/ups2mqtt/app && uv run --group lint ruff format --check ups2mqtt tests)
-(cd homeassistant-addon/ups2mqtt/app && uv run --group lint grain check --all)
-(cd homeassistant-addon/ups2mqtt/app && uv run pytest -q tests)
-(cd homeassistant-addon/ups2mqtt/app && uv run --group lint yamllint -s ../config.yaml ../../../repository.yaml ../../../standalone/docker-compose.yml)
-(cd homeassistant-addon/ups2mqtt/app && HOME=$(pwd)/.tools/semgrep-home uv run --group lint semgrep --config auto ups2mqtt tests scripts)
-(cd homeassistant-addon/ups2mqtt/app && uv run --group lint sqlfluff lint capabilities/capability_snapshot.sql capabilities/capability_snapshot.20260425_193125.bak.sql)
-make runtime-check
-```
-
-From the repository root, `make build` is an alias for the standalone Docker Compose build and uses BuildKit by default.
