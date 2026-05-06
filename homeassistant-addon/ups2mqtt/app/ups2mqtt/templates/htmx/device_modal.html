@@ -78,22 +78,30 @@
             </div>
             {% endif %}
 
+            {% if show_port_field %}
             <div class="col-6 col-md-2">
               <label class="form-label small mb-1">Port</label>
               <input class="form-control form-control-sm" name="port" value="{{ form.port }}"/>
             </div>
+            {% endif %}
+            {% if show_unit_id_field %}
             <div class="col-6 col-md-2">
               <label class="form-label small mb-1">Unit ID</label>
               <input class="form-control form-control-sm" name="unit_id" value="{{ form.unit_id }}"/>
             </div>
+            {% endif %}
+            {% if show_snmp_community_field %}
             <div class="col-12 col-md-3">
               <label class="form-label small mb-1">SNMP Community</label>
               <input class="form-control form-control-sm" name="snmp_community" value="{{ form.snmp_community }}"/>
             </div>
+            {% endif %}
+            {% if show_snmp_port_field %}
             <div class="col-6 col-md-2">
               <label class="form-label small mb-1">SNMP Port</label>
               <input class="form-control form-control-sm" name="snmp_port" value="{{ form.snmp_port }}"/>
             </div>
+            {% endif %}
             <div class="col-6 col-md-2">
               <label class="form-label small mb-1">Poll Interval</label>
               <input class="form-control form-control-sm" name="poll_interval" value="{{ form.poll_interval }}"/>

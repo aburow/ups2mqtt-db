@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from copy import deepcopy
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 import json
 import logging
 import os
@@ -51,6 +51,7 @@ from .pollers import (
 )
 from .store import DeviceStore
 from .transforms import apply_catalog_transforms
+from .telemetry_influx import InfluxV3TelemetryExporter
 from .versions import APP_VERSION
 from .web import start_web_server
 
@@ -590,6 +591,25 @@ def _maybe_emit_device_debug(
     _emit_device_debug(device_id, values)
 
 
+def _enqueue_influx_telemetry(
+    exporter: InfluxV3TelemetryExporter | None,
+    *,
+    device: DeviceConfig,
+    runtime_source: str,
+    values: dict[str, Any],
+) -> None:
+    if exporter is None or not values:
+        return
+    try:
+        exporter.enqueue_device_values(
+            device=device,
+            runtime_source=runtime_source,
+            values=values,
+        )
+    except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        LOG.debug("Influx enqueue failed for %s: %s", device.id, err)
+
+
 async def _device_loop(
     device,
     runtime_source: str,
@@ -604,6 +624,7 @@ async def _device_loop(
     type_limiter: AdaptiveTypeLimiter | None = None,
     apps_dir: str | None = None,
     slot_offset_seconds: float = 0.0,
+    influx_exporter: InfluxV3TelemetryExporter | None = None,
 ) -> None:
     perf_sample_every = 20
     perf_cycles = 0
@@ -840,6 +861,12 @@ async def _device_loop(
                     mqtt_values,
                     discovery_keys=discovery_keys,
                 )
+                _enqueue_influx_telemetry(
+                    influx_exporter,
+                    device=runtime_device,
+                    runtime_source=runtime_source,
+                    values=mqtt_values,
+                )
                 publish_elapsed = max(0.0, monotonic() - publish_started)
                 if published:
                     LOG.info(
@@ -1024,6 +1051,7 @@ async def _reconcile_device_tasks(
     apps_dir: str | None = None,
     ha_url: str | None = None,
     ha_token: str | None = None,
+    influx_exporter: InfluxV3TelemetryExporter | None = None,
 ) -> None:
     def _clear_stale_discovery_keys(
         runtime_device: DeviceConfig,
@@ -1216,6 +1244,7 @@ async def _reconcile_device_tasks(
                 type_limiter=type_limiter,
                 apps_dir=apps_dir,
                 slot_offset_seconds=slot_offsets.get(uid, 0.0),
+                influx_exporter=influx_exporter,
             )
         )
         running[uid] = (device, runtime_signature, task)
@@ -1777,6 +1806,23 @@ def _apply_sensor_poll_group_overrides(
                 spec["poll_group"] = group
                 updated += 1
 
+    def _apply_to_keyed_mapping(mapping: Any) -> None:
+        nonlocal updated
+        if not isinstance(mapping, dict):
+            return
+        for _name, spec in mapping.items():
+            if not isinstance(spec, dict):
+                continue
+            key = str(spec.get("key", "")).strip()
+            if not key:
+                continue
+            group = expanded_overrides.get(key)
+            if not group:
+                continue
+            if str(spec.get("poll_group", "slow")) != group:
+                spec["poll_group"] = group
+                updated += 1
+
     def _apply_to_blocks(blocks: Any) -> None:
         nonlocal updated
         if not isinstance(blocks, list):
@@ -1809,6 +1855,12 @@ def _apply_sensor_poll_group_overrides(
     _apply_to_registers(effective_profile.get("registers", []))
     _apply_to_blocks(effective_profile.get("register_blocks", []))
     _apply_to_oids(effective_profile.get("oids", {}))
+    nut_section = effective_profile.get("nut", {})
+    if isinstance(nut_section, dict):
+        _apply_to_keyed_mapping(nut_section.get("variables", {}))
+    apcupsd_section = effective_profile.get("apcupsd", {})
+    if isinstance(apcupsd_section, dict):
+        _apply_to_keyed_mapping(apcupsd_section.get("fields", {}))
     for transport in ("modbus", "snmp"):
         section = effective_profile.get(transport, {})
         if not isinstance(section, dict):
@@ -2116,6 +2168,7 @@ async def async_main() -> None:
     endpoint_semaphores: dict[str, asyncio.Semaphore] = {}
 
     web_server = None
+    metrics_server = None
     if config.web_enabled:
         web_server = start_web_server(
             host=config.web_host,
@@ -2161,10 +2214,32 @@ async def async_main() -> None:
             get_ha_bridge_enabled=_get_ha_bridge_enabled,
             set_ha_bridge_enabled=_set_ha_bridge_enabled,
             get_cached_ha_payload_preview=mqtt.get_cached_ha_payload_preview,
+            get_prometheus_samples=mqtt.get_prometheus_numeric_samples,
         )
+        metrics_port = int(os.environ.get("UPS2MQTT_METRICS_PORT", "8100"))
+        metrics_host = str(os.environ.get("UPS2MQTT_METRICS_HOST", config.web_host))
+        metrics_server = start_web_server(
+            host=metrics_host,
+            port=metrics_port,
+            web_base_path="/",
+            minimum_poll_interval=config.poll_interval,
+            store=store,
+            get_source_names=lambda: sorted(profile_state["profiles"].keys()),
+            log_buffer=log_buffer,
+            get_capability_status=lambda: {},
+            trigger_capability_reload=lambda: None,
+            trigger_republish_discovery=lambda: None,
+            get_metrics_snapshot=metrics.snapshot,
+            trigger_reload=lambda: None,
+            get_prometheus_samples=mqtt.get_prometheus_numeric_samples,
+            metrics_only=True,
+        )
+        LOG.info("Metrics-only listener enabled on %s:%d", metrics_host, metrics_port)
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}
     adaptive_concurrency_task: asyncio.Task | None = None
+    influx_exporter: InfluxV3TelemetryExporter | None = None
+    influx_task: asyncio.Task | None = None
     event_loop_lag_task = asyncio.create_task(_run_event_loop_lag_monitor(metrics))
     if config.adaptive_concurrency_enabled:
         adaptive_concurrency_task = asyncio.create_task(
@@ -2177,6 +2252,32 @@ async def async_main() -> None:
             )
         )
         LOG.info("Adaptive global concurrency controller started")
+    if config.telemetry_influx_enabled:
+        if (
+            config.telemetry_influx_api != "v3"
+            or not config.telemetry_influx_url
+            or not config.telemetry_influx_database
+        ):
+            LOG.warning(
+                "Influx telemetry disabled due to invalid configuration (requires api=v3, url, and database)"
+            )
+        else:
+            influx_exporter = InfluxV3TelemetryExporter(
+                url=config.telemetry_influx_url,
+                database=config.telemetry_influx_database,
+                token=config.telemetry_influx_token,
+                measurement=config.telemetry_influx_measurement,
+                timeout_seconds=config.telemetry_influx_timeout_seconds,
+                queue_size=config.telemetry_influx_queue_size,
+                flush_interval_seconds=config.telemetry_influx_flush_interval_seconds,
+                batch_max_points=config.telemetry_influx_batch_max_points,
+                accept_partial=config.telemetry_influx_accept_partial,
+            )
+            influx_task = asyncio.create_task(influx_exporter.run())
+            LOG.info(
+                "Influx telemetry exporter started (endpoint=%s)",
+                influx_exporter.endpoint_for_log,
+            )
     discovery_registry: dict[str, set[str]] = {}
     try:
         profile_bindings = {
@@ -2343,6 +2444,7 @@ async def async_main() -> None:
                     apps_dir=config.apps_dir,
                     ha_url=config.ha_url,
                     ha_token=config.ha_token,
+                    influx_exporter=influx_exporter,
                 )
                 _metrics_prune_to_store_devices()
                 await _prune_stale_ha_entities(
@@ -2355,6 +2457,8 @@ async def async_main() -> None:
     finally:
         if adaptive_concurrency_task is not None:
             adaptive_concurrency_task.cancel()
+        if influx_task is not None:
+            influx_task.cancel()
         event_loop_lag_task.cancel()
         for device, _runtime_signature, task in running.values():
             task.cancel()
@@ -2362,6 +2466,12 @@ async def async_main() -> None:
         if web_server is not None:
             web_server.shutdown()
             web_server.server_close()
+        if metrics_server is not None:
+            metrics_server.shutdown()
+            metrics_server.server_close()
+        if influx_task is not None:
+            with suppress(asyncio.CancelledError):
+                await influx_task
         mqtt.close()
         logging.getLogger().removeHandler(buffered_handler)
 

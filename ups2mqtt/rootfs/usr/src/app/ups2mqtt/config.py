@@ -348,6 +348,94 @@ def load_config(options_path: str | None = None) -> AppConfig:
             raw_options.get("adaptive_concurrency_target_p95_wait_ms", 1000),
         ),
     )
+    telemetry_influx_enabled = _coerce_bool(
+        _env_or_default(
+            "UPS2MQTT_TELEMETRY_INFLUX_ENABLED",
+            raw_options.get("telemetry_influx_enabled", False),
+        ),
+        default=False,
+    )
+    telemetry_influx_url = str(
+        _env_or_default(
+            "UPS2MQTT_TELEMETRY_INFLUX_URL",
+            raw_options.get("telemetry_influx_url", ""),
+        )
+    ).strip()
+    telemetry_influx_api = (
+        str(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_API",
+                raw_options.get("telemetry_influx_api", "v3"),
+            )
+        )
+        .strip()
+        .lower()
+        or "v3"
+    )
+    telemetry_influx_database = str(
+        _env_or_default(
+            "UPS2MQTT_TELEMETRY_INFLUX_DATABASE",
+            raw_options.get("telemetry_influx_database", ""),
+        )
+    ).strip()
+    telemetry_influx_token = _clean_optional(
+        _env_or_default(
+            "UPS2MQTT_TELEMETRY_INFLUX_TOKEN",
+            raw_options.get("telemetry_influx_token", ""),
+        )
+    )
+    telemetry_influx_measurement = (
+        str(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_MEASUREMENT",
+                raw_options.get("telemetry_influx_measurement", "ups2mqtt"),
+            )
+        ).strip()
+        or "ups2mqtt"
+    )
+    telemetry_influx_timeout_seconds = max(
+        0.1,
+        float(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_TIMEOUT_SECONDS",
+                raw_options.get("telemetry_influx_timeout_seconds", 2.0),
+            )
+        ),
+    )
+    telemetry_influx_queue_size = max(
+        1,
+        int(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_QUEUE_SIZE",
+                raw_options.get("telemetry_influx_queue_size", 1000),
+            )
+        ),
+    )
+    telemetry_influx_flush_interval_seconds = max(
+        0.1,
+        float(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_FLUSH_INTERVAL_SECONDS",
+                raw_options.get("telemetry_influx_flush_interval_seconds", 5.0),
+            )
+        ),
+    )
+    telemetry_influx_batch_max_points = max(
+        1,
+        int(
+            _env_or_default(
+                "UPS2MQTT_TELEMETRY_INFLUX_BATCH_MAX_POINTS",
+                raw_options.get("telemetry_influx_batch_max_points", 500),
+            )
+        ),
+    )
+    telemetry_influx_accept_partial = _coerce_bool(
+        _env_or_default(
+            "UPS2MQTT_TELEMETRY_INFLUX_ACCEPT_PARTIAL",
+            raw_options.get("telemetry_influx_accept_partial", True),
+        ),
+        default=True,
+    )
 
     return AppConfig(
         mqtt_enabled=bool(raw_options.get("mqtt_enabled", True)),
@@ -385,4 +473,15 @@ def load_config(options_path: str | None = None) -> AppConfig:
             _env_or_default("UPS2MQTT_HA_TOKEN", raw_options.get("ha_token"))
         ),
         ha_bridge_enabled=ha_bridge_enabled,
+        telemetry_influx_enabled=telemetry_influx_enabled,
+        telemetry_influx_url=telemetry_influx_url,
+        telemetry_influx_api=telemetry_influx_api,
+        telemetry_influx_database=telemetry_influx_database,
+        telemetry_influx_token=telemetry_influx_token,
+        telemetry_influx_measurement=telemetry_influx_measurement,
+        telemetry_influx_timeout_seconds=telemetry_influx_timeout_seconds,
+        telemetry_influx_queue_size=telemetry_influx_queue_size,
+        telemetry_influx_flush_interval_seconds=telemetry_influx_flush_interval_seconds,
+        telemetry_influx_batch_max_points=telemetry_influx_batch_max_points,
+        telemetry_influx_accept_partial=telemetry_influx_accept_partial,
     )

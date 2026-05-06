@@ -170,6 +170,62 @@ def test_poll_nut_sync_emits_selected_raw_dotted_variable(
     assert "battery_charge" not in out
 
 
+def test_poll_nut_sync_emits_selected_raw_pdu_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server_sock, client_sock = socket.socketpair()
+    server_sock.settimeout(1.0)
+    client_sock.settimeout(1.0)
+
+    def _server() -> None:
+        data = b""
+        while not data.endswith(b"\n"):
+            data += server_sock.recv(1024)
+        server_sock.sendall(b"BEGIN LIST VAR apc_pdu1\n")
+        server_sock.sendall(b'VAR apc_pdu1 input.current "1.80"\n')
+        server_sock.sendall(b'VAR apc_pdu1 outlet.count "0"\n')
+        server_sock.sendall(b"END LIST VAR apc_pdu1\n")
+        server_sock.close()
+
+    thread = threading.Thread(target=_server, daemon=True)
+    thread.start()
+
+    def _fake_connect(addr, timeout):
+        return client_sock
+
+    monkeypatch.setattr("ups2mqtt.pollers.socket.create_connection", _fake_connect)
+    device = DeviceConfig(
+        id="device-1",
+        source="nut_network_upsd",
+        host="127.0.0.1",
+        port=3493,
+        ups_name="apc_pdu1",
+    )
+    profile = {
+        "nut": {
+            "variables": {
+                "input.current": {
+                    "key": "input.current",
+                    "poll_group": "fast",
+                    "type": "str",
+                },
+                "outlet.count": {
+                    "key": "outlet.count",
+                    "poll_group": "fast",
+                    "type": "str",
+                },
+            },
+            "status_map": {},
+        }
+    }
+
+    out = _poll_nut_sync(device, profile, {"fast"})
+    thread.join(timeout=1.0)
+
+    assert out["input.current"] == "1.80"
+    assert out["outlet.count"] == "0"
+
+
 def test_poll_apcupsd_sync_parses_status_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "ups2mqtt.pollers.get_apcupsd_status",

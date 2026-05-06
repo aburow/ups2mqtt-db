@@ -98,3 +98,40 @@ def test_resolve_runtime_profile_does_not_add_unselected_nut_raw_key() -> None:
     nut = effective_profile.get("nut", {})
     variables = nut.get("variables", {}) if isinstance(nut, dict) else {}
     assert "battery.voltage" not in variables
+
+
+def test_resolve_runtime_profile_applies_fast_poll_group_to_selected_nut_raw_keys() -> None:
+    device = DeviceConfig(
+        id="ups-1",
+        source="nut_network_upsd",
+        host="192.0.2.10",
+        profile_uid="p1",
+        profile_mode="global",
+    )
+    binding = ProfileConfig(
+        profile_uid="p1",
+        name="NUT PDU",
+        driver_key="nut_network_upsd",
+        config_payload={"driver_key": "nut_network_upsd"},
+        selected_sensors=["input.current", "outlet.count"],
+        sensor_preferences={
+            "input.current": {"mqtt_enabled": True, "poll_group": "fast"},
+            "outlet.count": {"mqtt_enabled": True, "poll_group": "fast"},
+        },
+    )
+
+    _runtime_source, effective_profile, discovery_keys, _signature = (
+        _resolve_runtime_profile(
+            device=device,
+            capability_profiles={"nut_network_upsd": _nut_profile()},
+            profile_bindings={"p1": binding},
+            apps_dir=None,
+        )
+    )
+
+    assert "input.current" in discovery_keys
+    assert "outlet.count" in discovery_keys
+    nut = effective_profile.get("nut", {})
+    variables = nut.get("variables", {}) if isinstance(nut, dict) else {}
+    assert variables["input.current"]["poll_group"] == "fast"
+    assert variables["outlet.count"]["poll_group"] == "fast"

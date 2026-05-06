@@ -5,8 +5,9 @@
       <button
         type="button"
         class="btn btn-sm btn-outline-secondary"
+        @click="modalOpen = true"
         hx-get="/htmx/profiles/partials/form"
-        hx-target="#profile-form-container"
+        hx-target="#device-modal-content"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
       >New</button>
@@ -34,7 +35,7 @@
     <form
       class="d-flex flex-column gap-3"
       hx-post="{{ save_action_path }}"
-      hx-target="#admin-panel"
+      hx-target="#device-modal-content"
       hx-swap="innerHTML"
       hx-indicator="#global-loading"
     >
@@ -61,7 +62,7 @@
               type="button"
               class="btn btn-sm btn-outline-secondary"
               hx-get="/htmx/profiles/partials/form"
-              hx-target="#profile-form-container"
+              hx-target="#device-modal-content"
               hx-swap="innerHTML"
               hx-include="closest form"
               hx-indicator="#global-loading"
@@ -70,6 +71,62 @@
           </div>
         </div>
       </div>
+
+      {% if rediscover_enabled %}
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="small fw-semibold mb-1">Rediscover Available Fields</div>
+          <div class="small text-muted mb-2">Endpoint details are used only for this request and are not saved in the profile.</div>
+          <input type="hidden" name="rediscover_connection_type" value="{{ rediscover_connection_type }}"/>
+          <div class="row g-2">
+            <div class="col-12 col-md-4">
+              <label class="form-label small mb-1">Host</label>
+              <input
+                class="form-control form-control-sm"
+                name="rediscover_host"
+                value="{{ rediscover_host }}"
+                {% if rediscover_disabled %}readonly{% endif %}
+              />
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label small mb-1">Port</label>
+              <input
+                class="form-control form-control-sm"
+                type="number"
+                min="1"
+                max="65535"
+                name="rediscover_port"
+                value="{{ rediscover_port }}"
+                {% if rediscover_disabled %}readonly{% endif %}
+              />
+            </div>
+            {% if rediscover_connection_type == "nut" %}
+            <div class="col-12 col-md-5">
+              <label class="form-label small mb-1">UPS Name</label>
+              <input
+                class="form-control form-control-sm"
+                name="rediscover_ups_name"
+                value="{{ rediscover_ups_name }}"
+                {% if rediscover_disabled %}readonly{% endif %}
+              />
+            </div>
+            {% endif %}
+          </div>
+          <div class="mt-2">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              hx-post="/htmx/profiles/actions/rediscover"
+              hx-target="#device-modal-content"
+              hx-swap="innerHTML"
+              hx-include="closest form"
+              hx-indicator="#global-loading"
+              {% if rediscover_disabled %}disabled{% endif %}
+            >Rediscover</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
 
       <div class="card">
         <div class="card-body py-2">
@@ -141,6 +198,7 @@
       </div>
 
       <div class="d-flex justify-content-end gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Cancel</button>
         {% if can_save_profile %}
         <button class="btn btn-sm btn-primary" type="submit">Save Profile</button>
         {% else %}

@@ -178,12 +178,12 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.1.2)
+## Latest release (v1.2.0)
 
-- SNMP endpoint locks now key on SNMP host + `snmp_port` so active SNMP locking matches runtime polling endpoints.
-- NUT endpoint locking keeps host/port/UPS-name identity for multi-UPS NUT servers.
-- Profile Builder and profile/device sensor editing support per-sensor fast/slow poll-group controls.
-- Targeted endpoint-lock tests were added and full lint cleanup was applied across addon/runtime trees.
+- Added optional Prometheus telemetry endpoint support for selected numeric values on a metrics-only listener (`/metrics/prometheus` and `/metrics` on port `8100`).
+- Added optional, non-blocking InfluxDB v3 telemetry export (`/api/v3/write_lp`) with bounded queue + background worker isolation from polling/MQTT/HA paths.
+- Added standalone and add-on configuration options for Prometheus/Influx telemetry, including safe defaults and docs/examples.
+- Preserved existing MQTT/Home Assistant behavior as primary output; telemetry exporters remain optional and disabled by default.
 
 ## Development checks
 

@@ -92,6 +92,29 @@ def _post(base_url: str, path: str, data: dict[str, str]) -> tuple[int, str]:
         return int(err.code), err.read().decode("utf-8")
 
 
+def _post_with_headers(
+    base_url: str,
+    path: str,
+    data: dict[str, str],
+) -> tuple[int, str, dict[str, str]]:
+    encoded = urlencode(data).encode("utf-8")
+    request = Request(
+        f"{base_url}{path}",
+        data=encoded,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(request) as response:  # nosec B310
+            return (
+                int(response.status),
+                response.read().decode("utf-8"),
+                dict(response.headers.items()),
+            )
+    except HTTPError as err:
+        return int(err.code), err.read().decode("utf-8"), dict(err.headers.items())
+
+
 def _start_test_server(
     tmp_path: Path,
     discover_nut_variables=None,
@@ -713,7 +736,7 @@ def test_saved_nut_profile_appears_in_profiles_and_device_flow(tmp_path: Path) -
                 sensor_preferences={
                     "battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}
                 },
-                comments="",
+                comments="Line one\nLine two",
                 is_protected=False,
             )
         )
@@ -724,10 +747,8 @@ def test_saved_nut_profile_appears_in_profiles_and_device_flow(tmp_path: Path) -
         assert status == HTTPStatus.OK
         assert "NUT Global" in profiles_body
         assert "nut_network_upsd" in profiles_body
-        assert (
-            "Reusable NUT profile. Devices using it keep their own host and UPS name."
-            in profiles_body
-        )
+        assert "Generated NUT profile: Line one" in profiles_body
+        assert "Line two" not in profiles_body
 
         status, modal_body = _fetch(
             base_url,
@@ -763,6 +784,227 @@ def test_saved_nut_profile_appears_in_profiles_and_device_flow(tmp_path: Path) -
         assert saved_device.profile_uid == "nut-profile-1"
         assert saved_device.source == "nut_network_upsd"
         assert saved_device.ups_name == "devups"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profiles_panel_actions_target_shared_modal_content(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-profile-modal-1",
+                name="Modal NUT",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="modal test",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/profiles")
+        assert status == HTTPStatus.OK
+        assert 'hx-get="/htmx/profiles/partials/form"' in body
+        assert 'hx-target="#device-modal-content"' in body
+        assert '@click="modalOpen = true"' in body
+        assert 'hx-get="/htmx/profiles/actions/edit"' in body
+        assert 'hx-get="/htmx/profiles/actions/copy"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profiles_form_posts_back_into_modal_for_validation_cycle(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/profiles/partials/form")
+        assert status == HTTPStatus.OK
+        assert 'hx-post="/htmx/profiles/actions/upsert"' in body
+        assert 'hx-target="#device-modal-content"' in body
+        assert 'type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Cancel</button>' in body
+        assert 'hx-post="/htmx/profiles/actions/rediscover"' not in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_upsert_success_retargets_admin_panel_and_closes_modal(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body, headers = _post_with_headers(
+            base_url,
+            "/htmx/profiles/actions/upsert",
+            {
+                "profile_uid": "",
+                "profile_name": "Modal Save Profile",
+                "driver_key": "nut_network_upsd",
+                "comments": "saved in modal",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "slow",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert headers.get("HX-Retarget") == "#admin-panel"
+        assert headers.get("HX-Reswap") == "innerHTML"
+        trigger_payload = headers.get("HX-Trigger", "")
+        assert "close-device-modal" in trigger_payload
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profiles_panel_comment_subtitles_and_generated_prefixes(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-subtitle-1",
+                name="NUT With Comment",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="\nNUT first line\nNUT second line",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="apcupsd-subtitle-1",
+                name="APCUPSD With Comment",
+                driver_key="apcupsd_network_nis",
+                config_payload={"driver_key": "apcupsd_network_nis"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="APC line one\nAPC line two",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="other-subtitle-1",
+                name="Other With Comment",
+                driver_key="cyberpower_modbus_single_phase",
+                config_payload={"driver_key": "cyberpower_modbus_single_phase"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="Other line one\nOther line two",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-empty-comment-1",
+                name="NUT Empty Comment",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/profiles")
+        assert status == HTTPStatus.OK
+        assert "Generated NUT profile: NUT first line" in body
+        assert "Generated APCUPSD profile: APC line one" in body
+        assert "Other line one" in body
+        assert "NUT second line" not in body
+        assert "APC line two" not in body
+        assert "Other line two" not in body
+        assert (
+            "Reusable NUT profile. Devices using it keep their own host and UPS name."
+            in body
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_device_modal_field_visibility_by_driver_type(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="modal-nut-1",
+                name="Modal NUT",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="modal-apcupsd-1",
+                name="Modal APCUPSD",
+                driver_key="apcupsd_network_nis",
+                config_payload={"driver_key": "apcupsd_network_nis"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="modal-snmp-1",
+                name="Modal SNMP",
+                driver_key="ups_snmp_apc_mib",
+                config_payload={"driver_key": "ups_snmp_apc_mib"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+
+        status, nut_body = _fetch(
+            base_url,
+            "/htmx/devices/partials/modal?mode=add&profile_uid=modal-nut-1&source=nut_network_upsd&host=192.0.2.50&ups_name=devups",
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="ups_name"' in nut_body
+        assert 'name="snmp_community"' not in nut_body
+        assert 'name="snmp_port"' not in nut_body
+        assert 'name="unit_id"' not in nut_body
+
+        status, apcupsd_body = _fetch(
+            base_url,
+            "/htmx/devices/partials/modal?mode=add&profile_uid=modal-apcupsd-1&source=apcupsd_network_nis&host=192.0.2.51&port=3551",
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="ups_name"' not in apcupsd_body
+        assert 'name="snmp_community"' not in apcupsd_body
+        assert 'name="snmp_port"' not in apcupsd_body
+        assert 'name="unit_id"' not in apcupsd_body
+        assert 'name="port"' in apcupsd_body
+
+        status, snmp_body = _fetch(
+            base_url,
+            "/htmx/devices/partials/modal?mode=add&profile_uid=modal-snmp-1&source=ups_snmp_apc_mib&host=192.0.2.52",
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="snmp_community"' in snmp_body
+        assert 'name="snmp_port"' in snmp_body
+        assert 'name="ups_name"' not in snmp_body
     finally:
         server.shutdown()
         server.server_close()
@@ -849,6 +1091,224 @@ def test_global_nut_profile_edit_preserves_unknown_keys(tmp_path: Path) -> None:
         server.shutdown()
         server.server_close()
 
+
+def test_profile_edit_shows_rediscover_for_editable_nut_and_apcupsd(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-rediscover-1",
+                name="NUT Rediscover",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="apcupsd-rediscover-1",
+                name="APCUPSD Rediscover",
+                driver_key="apcupsd_network_nis",
+                config_payload={"driver_key": "apcupsd_network_nis"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+
+        status, nut_body = _fetch(
+            base_url,
+            "/htmx/profiles/actions/edit?profile_uid=nut-rediscover-1",
+        )
+        assert status == HTTPStatus.OK
+        assert 'hx-post="/htmx/profiles/actions/rediscover"' in nut_body
+        assert 'name="rediscover_ups_name"' in nut_body
+
+        status, apcupsd_body = _fetch(
+            base_url,
+            "/htmx/profiles/actions/edit?profile_uid=apcupsd-rediscover-1",
+        )
+        assert status == HTTPStatus.OK
+        assert 'hx-post="/htmx/profiles/actions/rediscover"' in apcupsd_body
+        assert 'name="rediscover_ups_name"' not in apcupsd_body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_edit_rediscover_disabled_for_protected_profile(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-protected-rediscover-1",
+                name="Protected NUT",
+                driver_key="nut_network_upsd",
+                config_payload={"driver_key": "nut_network_upsd"},
+                selected_sensors=["battery_charge"],
+                sensor_preferences={"battery_charge": {"mqtt_enabled": True}},
+                comments="",
+                is_protected=True,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(
+            base_url,
+            "/htmx/profiles/actions/edit?profile_uid=nut-protected-rediscover-1",
+        )
+        assert status == HTTPStatus.OK
+        assert 'hx-post="/htmx/profiles/actions/rediscover"' in body
+        assert "disabled" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_rediscover_nut_merges_fields_and_preserves_preferences(
+    tmp_path: Path,
+) -> None:
+    def _discover_nut(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
+        assert host == "192.0.2.50"
+        assert port == 3493
+        assert ups_name == "apc_pdu1"
+        assert use_starttls is False
+        return {
+            "input.current": "1.80",
+            "outlet.count": "0",
+            "vendor.mode": "auto",
+        }
+
+    server = _start_test_server(tmp_path, discover_nut_variables=_discover_nut)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="nut-rediscover-merge-1",
+                name="NUT Merge",
+                driver_key="nut_network_upsd",
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 15, "slow": 60},
+                    "key_precedence": {},
+                },
+                selected_sensors=["vendor.mode"],
+                sensor_preferences={
+                    "vendor.mode": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profiles/actions/rediscover",
+            {
+                "profile_uid": "nut-rediscover-merge-1",
+                "profile_name": "NUT Merge",
+                "driver_key": "nut_network_upsd",
+                "comments": "",
+                "rediscover_host": "192.0.2.50",
+                "rediscover_port": "3493",
+                "rediscover_ups_name": "apc_pdu1",
+                "sensor_key__vendor.mode": "1",
+                "sensor_mqtt__vendor.mode": "1",
+                "sensor_poll_group__vendor.mode": "fast",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="sensor_key__input.current"' in body
+        assert 'name="sensor_key__outlet.count"' in body
+        assert 'name="sensor_mqtt__vendor.mode"' in body
+        assert 'name="sensor_mqtt__input.current"' in body
+        assert 'name="sensor_mqtt__outlet.count"' in body
+        assert "checked" in body
+
+        saved = next(
+            item for item in db.load_profiles() if item.profile_uid == "nut-rediscover-merge-1"
+        )
+        assert "rediscover_host" not in saved.config_payload
+        assert "rediscover_port" not in saved.config_payload
+        assert "rediscover_ups_name" not in saved.config_payload
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_rediscover_apcupsd_merges_fields_and_preserves_preferences(
+    tmp_path: Path,
+) -> None:
+    def _discover_apcupsd(host: str, port: int) -> dict[str, str]:
+        assert host == "192.0.2.60"
+        assert port == 3551
+        return {
+            "BCHARGE": "100.0 Percent",
+            "TIMELEFT": "24.0 Minutes",
+            "VENDORX": "custom",
+        }
+
+    server = _start_test_server(tmp_path, discover_apcupsd_variables=_discover_apcupsd)
+    try:
+        db = Database(str(tmp_path / "test.db"))
+        db.save_profile(
+            ProfileConfig(
+                profile_uid="apcupsd-rediscover-merge-1",
+                name="APCUPSD Merge",
+                driver_key="apcupsd_network_nis",
+                config_payload={
+                    "driver_key": "apcupsd_network_nis",
+                    "poll_groups": {"fast": 15, "slow": 60},
+                    "key_precedence": {},
+                },
+                selected_sensors=["battery_charge"],
+                sensor_preferences={
+                    "battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
+                comments="",
+                is_protected=False,
+            )
+        )
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _post(
+            base_url,
+            "/htmx/profiles/actions/rediscover",
+            {
+                "profile_uid": "apcupsd-rediscover-merge-1",
+                "profile_name": "APCUPSD Merge",
+                "driver_key": "apcupsd_network_nis",
+                "comments": "",
+                "rediscover_host": "192.0.2.60",
+                "rediscover_port": "3551",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "fast",
+            },
+        )
+        assert status == HTTPStatus.OK
+        assert 'name="sensor_key__runtime_remaining"' in body
+        assert 'name="sensor_key__VENDORX"' in body
+
+        saved = next(
+            item
+            for item in db.load_profiles()
+            if item.profile_uid == "apcupsd-rediscover-merge-1"
+        )
+        assert "rediscover_host" not in saved.config_payload
+        assert "rediscover_port" not in saved.config_payload
+    finally:
+        server.shutdown()
+        server.server_close()
 
 def test_local_nut_profile_edit_is_device_only_and_preserves_unknown_keys(
     tmp_path: Path,

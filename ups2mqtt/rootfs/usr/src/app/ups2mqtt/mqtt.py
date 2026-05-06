@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from time import monotonic
 from typing import Any
@@ -189,6 +190,38 @@ class MqttPublisher:
                 for key in entities
             ],
         }
+
+    def get_prometheus_numeric_samples(
+        self, devices: list[DeviceConfig]
+    ) -> list[dict[str, str | float]]:
+        """Return latest selected numeric state values for Prometheus scraping.
+
+        This is read-only and in-memory only. It performs no I/O and excludes
+        non-numeric values and internal metadata keys.
+        """
+        samples: list[dict[str, str | float]] = []
+        for device in devices:
+            identity = device.device_uid or device.id
+            cached_state = self._device_state_cache.get(identity, {})
+            if not isinstance(cached_state, dict):
+                continue
+            for key, value in cached_state.items():
+                if key == "_meta":
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                numeric = float(value)
+                if not math.isfinite(numeric):
+                    continue
+                samples.append(
+                    {
+                        "device_id": str(device.id),
+                        "source": str(device.source),
+                        "key": str(key),
+                        "value": numeric,
+                    }
+                )
+        return samples
 
     def _sensor_metadata_for_source(self, source: str) -> dict[str, dict[str, str]]:
         cached = self._sensor_meta_cache.get(source)
@@ -506,10 +539,14 @@ class MqttPublisher:
             self._device_metadata[identity] = merged
 
         state_topic = f"{self._config.mqtt_topic_prefix}/{device.id}/state"
-        previous_state = self._device_state_cache.get(identity, {})
-        payload = dict(previous_state)
-        payload.update(values)
-        self._device_state_cache[identity] = dict(payload)
+        try:
+            previous_state = self._device_state_cache.get(identity, {})
+            payload = dict(previous_state)
+            payload.update(values)
+            self._device_state_cache[identity] = dict(payload)
+        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            LOG.debug("State cache update failed for %s: %s", device.id, err)
+            payload = dict(values)
         payload["_meta"] = {
             "host": device.host,
             "port": device.port,

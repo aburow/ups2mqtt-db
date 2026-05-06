@@ -123,6 +123,17 @@ class AppConfig:
     ha_url: str | None = None
     ha_token: str | None = None
     ha_bridge_enabled: bool = False
+    telemetry_influx_enabled: bool = False
+    telemetry_influx_url: str = ""
+    telemetry_influx_api: str = "v3"
+    telemetry_influx_database: str = ""
+    telemetry_influx_token: str | None = None
+    telemetry_influx_measurement: str = "ups2mqtt"
+    telemetry_influx_timeout_seconds: float = 2.0
+    telemetry_influx_queue_size: int = 1000
+    telemetry_influx_flush_interval_seconds: float = 5.0
+    telemetry_influx_batch_max_points: int = 500
+    telemetry_influx_accept_partial: bool = True
 
 
 @dataclass(slots=True)

@@ -8,6 +8,7 @@ import html
 import importlib.util
 import json
 import logging
+import math
 import threading
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -1179,9 +1180,61 @@ def start_web_server(
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
+    get_prometheus_samples: (
+        Callable[[list[DeviceConfig]], list[dict[str, str | float]]] | None
+    ) = None,
+    metrics_only: bool = False,
     web_base_path: str = "/",
     minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> HTTPServer:
+    def _prometheus_escape_label(value: str) -> str:
+        return (
+            str(value)
+            .replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace('"', '\\"')
+        )
+
+    def _render_prometheus_metrics() -> str:
+        lines = [
+            "# HELP ups2mqtt_device_value Latest selected numeric value published by ups2mqtt.",
+            "# TYPE ups2mqtt_device_value gauge",
+        ]
+        raw_samples: list[dict[str, str | float]] = []
+        if get_prometheus_samples is not None:
+            try:
+                raw_samples = get_prometheus_samples(store.list_devices())
+            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                LOG.debug("Prometheus sample fetch failed: %s", err)
+                raw_samples = []
+        rows: list[tuple[str, str, str, float]] = []
+        for sample in raw_samples:
+            try:
+                device_id = str(sample.get("device_id", ""))
+                source = str(sample.get("source", ""))
+                key = str(sample.get("key", ""))
+                value = sample.get("value")
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                numeric = float(value)
+                if not math.isfinite(numeric):
+                    continue
+                rows.append((device_id, source, key, numeric))
+            except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                continue
+        rows.sort(key=lambda item: (item[0], item[1], item[2]))
+        for device_id, source, key, numeric in rows:
+            lines.append(
+                'ups2mqtt_device_value{device_id="%s",source="%s",key="%s"} %s'
+                % (
+                    _prometheus_escape_label(device_id),
+                    _prometheus_escape_label(source),
+                    _prometheus_escape_label(key),
+                    f"{numeric:.15g}",
+                )
+            )
+        return "\n".join(lines) + "\n"
+
     def _normalize_base_path(value: str | None) -> str:
         text = str(value or "").strip()
         if not text:
@@ -1454,6 +1507,9 @@ def start_web_server(
         is_protected_profile: bool = False,
         save_action_path: str = "/htmx/profiles/actions/upsert",
         copy_source_name: str = "",
+        rediscover_host: str = "",
+        rediscover_port: str = "",
+        rediscover_ups_name: str = "",
     ) -> dict[str, object]:
         eligible = _eligible_profile_drivers()
         driver_options = list(eligible.keys())
@@ -1461,6 +1517,22 @@ def start_web_server(
             driver_key.strip()
             if driver_key.strip()
             else (driver_options[0] if driver_options else "")
+        )
+        rediscover_supported = selected_driver in {
+            GENERIC_NUT_DRIVER_KEY,
+            GENERIC_APCUPSD_DRIVER_KEY,
+        }
+        rediscover_connection_type = (
+            "apcupsd"
+            if selected_driver == GENERIC_APCUPSD_DRIVER_KEY
+            else "nut"
+        )
+        rediscover_default_port = _profile_builder_default_port(
+            rediscover_connection_type
+        )
+        rediscover_enabled = bool(profile_uid and rediscover_supported)
+        rediscover_disabled = bool(
+            is_protected_profile and not ProfileDatabase._is_profile_protection_disabled()
         )
         contract_profile = eligible.get(selected_driver)
         driver_contract_missing = bool(
@@ -1493,6 +1565,12 @@ def start_web_server(
                 ),
                 "sensor_count": 0,
                 "sensor_poll_group_choices": [],
+                "rediscover_enabled": rediscover_enabled,
+                "rediscover_disabled": rediscover_disabled,
+                "rediscover_connection_type": rediscover_connection_type,
+                "rediscover_host": rediscover_host,
+                "rediscover_port": rediscover_port or rediscover_default_port,
+                "rediscover_ups_name": rediscover_ups_name,
             }
 
         defaults = _profile_default_payload(selected_driver, contract_profile)
@@ -1571,6 +1649,12 @@ def start_web_server(
                 "error_message": str(err),
                 "sensor_count": 0,
                 "sensor_poll_group_choices": poll_group_choices,
+                "rediscover_enabled": rediscover_enabled,
+                "rediscover_disabled": rediscover_disabled,
+                "rediscover_connection_type": rediscover_connection_type,
+                "rediscover_host": rediscover_host,
+                "rediscover_port": rediscover_port or rediscover_default_port,
+                "rediscover_ups_name": rediscover_ups_name,
             }
         default_enabled = _profile_default_enabled_map(
             selected_driver,
@@ -1732,6 +1816,12 @@ def start_web_server(
             "can_save_profile": not is_protected_profile,
             "profile_is_protected": is_protected_profile,
             "sensor_poll_group_choices": poll_group_choices,
+            "rediscover_enabled": rediscover_enabled,
+            "rediscover_disabled": rediscover_disabled,
+            "rediscover_connection_type": rediscover_connection_type,
+            "rediscover_host": rediscover_host,
+            "rediscover_port": rediscover_port or rediscover_default_port,
+            "rediscover_ups_name": rediscover_ups_name,
         }
 
     def _render_htmx_profiles_form(
@@ -1747,6 +1837,9 @@ def start_web_server(
         is_protected_profile: bool = False,
         save_action_path: str = "/htmx/profiles/actions/upsert",
         copy_source_name: str = "",
+        rediscover_host: str = "",
+        rediscover_port: str = "",
+        rediscover_ups_name: str = "",
     ) -> str:
         context = _profile_editor_context(
             profile_uid=profile_uid,
@@ -1760,6 +1853,9 @@ def start_web_server(
             is_protected_profile=is_protected_profile,
             save_action_path=save_action_path,
             copy_source_name=copy_source_name,
+            rediscover_host=rediscover_host,
+            rediscover_port=rediscover_port,
+            rediscover_ups_name=rediscover_ups_name,
         )
         return templates.get_template("htmx/profiles_form.html").render(**context)
 
@@ -1793,6 +1889,13 @@ def start_web_server(
         *,
         form_html: str | None = None,
     ) -> str:
+        def _first_non_empty_comment_line(text: str | None) -> str:
+            for line in str(text or "").splitlines():
+                candidate = line.strip()
+                if candidate:
+                    return candidate
+            return ""
+
         profiles = sorted(_load_profiles(), key=lambda item: item.name.lower())
         devices_by_profile_uid: dict[str, list[DeviceConfig]] = {}
         for device in store.list_devices():
@@ -1805,6 +1908,26 @@ def start_web_server(
                 "profile_uid": item.profile_uid,
                 "name": item.name,
                 "driver_key": item.driver_key,
+                "subtitle": (
+                    (
+                        "Generated NUT profile: "
+                        + _first_non_empty_comment_line(item.comments)
+                    )
+                    if item.driver_key == GENERIC_NUT_DRIVER_KEY
+                    and _first_non_empty_comment_line(item.comments)
+                    else (
+                        "Generated APCUPSD profile: "
+                        + _first_non_empty_comment_line(item.comments)
+                    )
+                    if item.driver_key == GENERIC_APCUPSD_DRIVER_KEY
+                    and _first_non_empty_comment_line(item.comments)
+                    else _first_non_empty_comment_line(item.comments)
+                    or (
+                        "Reusable NUT profile. Devices using it keep their own host and UPS name."
+                        if item.driver_key == GENERIC_NUT_DRIVER_KEY
+                        else ""
+                    )
+                ),
                 "helper_text": (
                     "Reusable NUT profile. Devices using it keep their own host and UPS name."
                     if item.driver_key == GENERIC_NUT_DRIVER_KEY
@@ -3165,6 +3288,13 @@ def start_web_server(
         driver_key = (
             selected_profile.driver_key if selected_profile else source_fallback
         )
+        driver_key_text = str(driver_key or "").strip().lower()
+        is_nut_driver = driver_key_text == GENERIC_NUT_DRIVER_KEY
+        is_apcupsd_driver = driver_key_text == GENERIC_APCUPSD_DRIVER_KEY
+        is_snmp_driver = "snmp" in driver_key_text and not is_apcupsd_driver
+        is_modbus_like_driver = ("modbus" in driver_key_text) or (
+            not is_nut_driver and not is_apcupsd_driver and not is_snmp_driver
+        )
         contract_profile = _eligible_profile_drivers().get(driver_key)
         selected_profile_missing = bool(
             selected_profile_uid and selected_profile is None
@@ -3443,6 +3573,10 @@ def start_web_server(
             "selected_profile_name": selected_profile.name if selected_profile else "",
             "selected_driver_key": driver_key,
             "show_ups_name": driver_key == GENERIC_NUT_DRIVER_KEY,
+            "show_port_field": not is_snmp_driver,
+            "show_snmp_port_field": is_snmp_driver or is_modbus_like_driver,
+            "show_snmp_community_field": is_snmp_driver or is_modbus_like_driver,
+            "show_unit_id_field": is_modbus_like_driver,
             "profile_mode": profile_mode,
             "is_local_mode": local_mode,
             "poll_group_rows": poll_group_rows,
@@ -4486,6 +4620,289 @@ def start_web_server(
                 )
                 return True
 
+            if parsed_path.path == "/htmx/profiles/actions/rediscover":
+                profile_uid = (data.get("profile_uid", [""])[0]).strip()
+                profile = _get_profile(profile_uid)
+                if profile is None:
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            error_message=f"Profile {profile_uid} not found"
+                        ),
+                        status=HTTPStatus.NOT_FOUND,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message=f"Profile {profile_uid} not found",
+                            )
+                        },
+                    )
+                    return True
+                if profile.is_protected and not ProfileDatabase._is_profile_protection_disabled():
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            profile_uid=profile.profile_uid,
+                            profile_name=profile.name,
+                            driver_key=profile.driver_key,
+                            config_payload=profile.config_payload,
+                            selected_sensors=profile.selected_sensors,
+                            sensor_preferences=profile.sensor_preferences,
+                            comments=profile.comments,
+                            is_protected_profile=True,
+                            error_message="This is a default protected profile and cannot be rediscovered.",
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message="Protected profiles cannot be rediscovered",
+                            )
+                        },
+                    )
+                    return True
+
+                posted_values = {
+                    key: values[0]
+                    for key, values in data.items()
+                    if values and isinstance(key, str)
+                }
+                posted_payload, posted_selected, posted_preferences = (
+                    _profile_editor_overrides_from_values(posted_values)
+                )
+                has_posted_sensor_fields = any(
+                    str(key).startswith("sensor_key__") for key in posted_values
+                )
+                existing_selected = (
+                    posted_selected
+                    if has_posted_sensor_fields
+                    else [str(item) for item in profile.selected_sensors]
+                )
+                existing_preferences = (
+                    posted_preferences
+                    if has_posted_sensor_fields
+                    else (
+                        {
+                            str(key): dict(values)
+                            for key, values in (profile.sensor_preferences or {}).items()
+                            if str(key) and isinstance(values, dict)
+                        }
+                    )
+                )
+                profile_name = (data.get("profile_name", [profile.name])[0]).strip() or profile.name
+                comments = (data.get("comments", [profile.comments])[0]).strip()
+                driver_key = (data.get("driver_key", [profile.driver_key])[0]).strip() or profile.driver_key
+                rediscover_host = str(data.get("rediscover_host", [""])[0]).strip()
+                rediscover_port = str(data.get("rediscover_port", [""])[0]).strip()
+                rediscover_ups_name = str(data.get("rediscover_ups_name", [""])[0]).strip()
+
+                if driver_key not in {GENERIC_NUT_DRIVER_KEY, GENERIC_APCUPSD_DRIVER_KEY}:
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            profile_uid=profile.profile_uid,
+                            profile_name=profile_name,
+                            driver_key=driver_key,
+                            config_payload=profile.config_payload,
+                            selected_sensors=existing_selected,
+                            sensor_preferences=existing_preferences,
+                            comments=comments,
+                            error_message="Rediscover is available only for NUT and APCUPSD profiles.",
+                            rediscover_host=rediscover_host,
+                            rediscover_port=rediscover_port,
+                            rediscover_ups_name=rediscover_ups_name,
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return True
+
+                rediscover_connection_type = (
+                    "apcupsd"
+                    if driver_key == GENERIC_APCUPSD_DRIVER_KEY
+                    else "nut"
+                )
+                default_port = _profile_builder_default_port(rediscover_connection_type)
+
+                try:
+                    _validate_host(rediscover_host)
+                    port = _validate_port(
+                        _int_or_default(rediscover_port or default_port, int(default_port))
+                    )
+                    if rediscover_connection_type == "apcupsd":
+                        contract_profile = _generic_apcupsd_contract(
+                            capability_profiles_getter()
+                        )
+                        if not contract_profile:
+                            raise ValueError(
+                                "Generic APCUPSD runtime contract is not available"
+                            )
+                        variables = apcupsd_variable_discovery(rediscover_host, port)
+                        discovered_rows = _normalize_apcupsd_discovery_rows(
+                            variables,
+                            contract_profile,
+                        )
+                        discovered_keys = [
+                            str(item.get("key", "")).strip()
+                            for item in discovered_rows
+                            if str(item.get("key", "")).strip()
+                        ]
+                        discovered_keys = _normalize_apcupsd_submitted_keys(
+                            discovered_keys,
+                            contract_profile,
+                        )
+                    else:
+                        if not rediscover_ups_name:
+                            raise ValueError("UPS name is required")
+                        contract_profile = _generic_nut_contract(
+                            capability_profiles_getter()
+                        )
+                        if not contract_profile:
+                            raise ValueError("Generic NUT runtime contract is not available")
+                        variables = nut_variable_discovery(
+                            rediscover_host,
+                            port,
+                            rediscover_ups_name,
+                            False,
+                        )
+                        discovered_rows = _normalize_nut_discovery_rows(
+                            variables,
+                            contract_profile,
+                        )
+                        discovered_keys = [
+                            str(item.get("key", "")).strip()
+                            for item in discovered_rows
+                            if str(item.get("key", "")).strip()
+                        ]
+                    if not discovered_keys:
+                        raise ValueError("Discovery returned no reusable capabilities")
+
+                    merged_payload = (
+                        dict(profile.config_payload)
+                        if isinstance(profile.config_payload, dict)
+                        else {}
+                    )
+                    if isinstance(posted_payload.get("poll_groups"), dict) or isinstance(
+                        posted_payload.get("key_precedence"), dict
+                    ):
+                        merged_payload = {
+                            **merged_payload,
+                            "poll_groups": {
+                                **dict(merged_payload.get("poll_groups", {})),
+                                **dict(posted_payload.get("poll_groups", {})),
+                            },
+                            "key_precedence": {
+                                **dict(merged_payload.get("key_precedence", {})),
+                                **dict(posted_payload.get("key_precedence", {})),
+                            },
+                        }
+
+                    merged_available = sorted(
+                        {
+                            *[str(item).strip() for item in discovered_keys],
+                            *[str(item).strip() for item in existing_selected],
+                            *[
+                                str(key).strip()
+                                for key in existing_preferences
+                                if str(key).strip()
+                            ],
+                        }
+                    )
+                    selected_set = {
+                        str(item).strip()
+                        for item in existing_selected
+                        if str(item).strip()
+                    }
+                    merged_selected = [
+                        key for key in merged_available if key in selected_set
+                    ]
+                    poll_group_defaults = _sensor_poll_group_defaults_from_profile(
+                        contract_profile
+                    )
+                    merged_preferences: dict[str, dict[str, Any]] = {}
+                    for key in merged_available:
+                        current = existing_preferences.get(key, {})
+                        if not isinstance(current, dict):
+                            current = {}
+                        merged_preferences[key] = {
+                            "mqtt_enabled": bool(
+                                current.get("mqtt_enabled", key in selected_set)
+                            ),
+                            "poll_group": str(
+                                current.get(
+                                    "poll_group",
+                                    poll_group_defaults.get(key, "slow"),
+                                )
+                            ),
+                        }
+
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            profile_uid=profile.profile_uid,
+                            profile_name=profile_name,
+                            driver_key=driver_key,
+                            config_payload=merged_payload,
+                            selected_sensors=merged_selected,
+                            sensor_preferences=merged_preferences,
+                            comments=comments,
+                            rediscover_host=rediscover_host,
+                            rediscover_port=str(port),
+                            rediscover_ups_name=rediscover_ups_name,
+                        ),
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="success",
+                                toast_message=f"Rediscovered {len(discovered_keys)} field(s)",
+                            )
+                        },
+                    )
+                except ValueError as err:
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            profile_uid=profile.profile_uid,
+                            profile_name=profile_name,
+                            driver_key=driver_key,
+                            config_payload=profile.config_payload,
+                            selected_sensors=existing_selected,
+                            sensor_preferences=existing_preferences,
+                            comments=comments,
+                            error_message=str(err),
+                            rediscover_host=rediscover_host,
+                            rediscover_port=rediscover_port or default_port,
+                            rediscover_ups_name=rediscover_ups_name,
+                        ),
+                        status=HTTPStatus.BAD_REQUEST,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message=str(err),
+                            )
+                        },
+                    )
+                except (OSError, ImportError) as err:
+                    LOG.exception("Profile rediscover reader unavailable: %s", err)
+                    self._send_html(
+                        _render_htmx_profiles_form(
+                            profile_uid=profile.profile_uid,
+                            profile_name=profile_name,
+                            driver_key=driver_key,
+                            config_payload=profile.config_payload,
+                            selected_sensors=existing_selected,
+                            sensor_preferences=existing_preferences,
+                            comments=comments,
+                            error_message=(
+                                "Discovery reader is unavailable in this runtime."
+                            ),
+                            rediscover_host=rediscover_host,
+                            rediscover_port=rediscover_port or default_port,
+                            rediscover_ups_name=rediscover_ups_name,
+                        ),
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        headers={
+                            "HX-Trigger": _hx_trigger_payload(
+                                toast_level="danger",
+                                toast_message="Discovery reader unavailable",
+                            )
+                        },
+                    )
+                return True
+
             if parsed_path.path == "/htmx/profiles/actions/upsert":
                 db = _profile_db()
                 if db is None or not hasattr(db, "save_profile"):
@@ -4509,7 +4926,10 @@ def start_web_server(
                     self._send_html(
                         _render_htmx_profiles_panel(),
                         headers={
+                            "HX-Retarget": "#admin-panel",
+                            "HX-Reswap": "innerHTML",
                             "HX-Trigger": _hx_trigger_payload(
+                                close_modal=True,
                                 toast_level="success",
                                 toast_message=f"Saved profile {profile.name}",
                             )
@@ -5005,7 +5425,10 @@ def start_web_server(
                     self._send_html(
                         _render_htmx_profiles_panel(),
                         headers={
+                            "HX-Retarget": "#admin-panel",
+                            "HX-Reswap": "innerHTML",
                             "HX-Trigger": _hx_trigger_payload(
+                                close_modal=True,
                                 toast_level="success",
                                 toast_message=f"Saved profile {profile.name}",
                             )
@@ -5301,6 +5724,19 @@ def start_web_server(
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             parsed = parsed._replace(path=self._resolve_app_path(parsed.path))
+            if metrics_only:
+                if parsed.path in {"/metrics/prometheus", "/metrics"}:
+                    payload_text = _render_prometheus_metrics().encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header(
+                        "Content-Type", "text/plain; version=0.0.4; charset=utf-8"
+                    )
+                    self.send_header("Content-Length", str(len(payload_text)))
+                    self.end_headers()
+                    self.wfile.write(payload_text)
+                    return
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
             if self._handle_htmx_get(parsed):
                 return
             if parsed.path == "/":
@@ -5337,6 +5773,16 @@ def start_web_server(
                 self.end_headers()
                 self.wfile.write(payload_json)
                 return
+            if parsed.path in {"/metrics/prometheus", "/metrics"}:
+                payload_text = _render_prometheus_metrics().encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header(
+                    "Content-Type", "text/plain; version=0.0.4; charset=utf-8"
+                )
+                self.send_header("Content-Length", str(len(payload_text)))
+                self.end_headers()
+                self.wfile.write(payload_text)
+                return
             if parsed.path == "/check-config.json":
                 if not get_config:
                     result = {"status": "error", "message": "Config not available"}
@@ -5355,6 +5801,9 @@ def start_web_server(
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
+            if metrics_only:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
             content_length = int(self.headers.get("Content-Length", "0"))
             content_type = self.headers.get("Content-Type", "")
             raw_body = self.rfile.read(content_length)

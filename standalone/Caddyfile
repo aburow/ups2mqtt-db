@@ -5,7 +5,8 @@
 
 (_ups2mqtt_proxy_common) {
     basic_auth {
-        {$UPS2MQTT_PROXY_USERNAME} {$UPS2MQTT_PROXY_PASSWORD_HASH}
+        # Default credentials: admin / changeme
+        admin $2a$14$x784qDqIEqHfNoZu6tZvhOwGlnKjPv2QyWPTcuPgdF/O/Fumtk/ma
     }
 
     reverse_proxy ups2mqtt:8099

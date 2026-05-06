@@ -1,6 +1,6 @@
 ---
 name: "ups2mqtt"
-version: "1.1.2"
+version: "1.2.0"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
@@ -52,6 +52,17 @@ options:
   ha_bridge_enabled: false
   ha_url: ""
   ha_token: ""
+  telemetry_influx_enabled: false
+  telemetry_influx_url: ""
+  telemetry_influx_api: "v3"
+  telemetry_influx_database: ""
+  telemetry_influx_token: ""
+  telemetry_influx_measurement: "ups2mqtt"
+  telemetry_influx_timeout_seconds: 2.0
+  telemetry_influx_queue_size: 1000
+  telemetry_influx_flush_interval_seconds: 5.0
+  telemetry_influx_batch_max_points: 500
+  telemetry_influx_accept_partial: true
   config: "devices: []\n"
 schema:
   mqtt_enabled: bool
@@ -78,4 +89,15 @@ schema:
   ha_bridge_enabled: bool
   ha_url: str?
   ha_token: str?
+  telemetry_influx_enabled: bool
+  telemetry_influx_url: str?
+  telemetry_influx_api: list(v3)
+  telemetry_influx_database: str?
+  telemetry_influx_token: password?
+  telemetry_influx_measurement: str
+  telemetry_influx_timeout_seconds: float(0.1,60)
+  telemetry_influx_queue_size: int(1,50000)
+  telemetry_influx_flush_interval_seconds: float(0.1,60)
+  telemetry_influx_batch_max_points: int(1,10000)
+  telemetry_influx_accept_partial: bool
   config: str
