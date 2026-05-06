@@ -16,7 +16,10 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from .capability_repository import configure_capability_repository, get_capability_repository
+from .capability_repository import (
+    configure_capability_repository,
+    get_capability_repository,
+)
 from .capabilities import (
     bundled_source_keys,
     load_capabilities,
@@ -38,6 +41,7 @@ from .metrics import MetricsStore
 from .model import DeviceConfig, ProfileConfig
 from .mqtt import MqttPublisher, discovery_unique_id
 from .pollers import (
+    _nut_guess_ups_name,
     clear_catalog_poll_cache,
     get_idle_reconnect_seconds,
     get_metadata_refresh_interval_seconds,
@@ -54,6 +58,32 @@ LOG = logging.getLogger("ups2mqtt")
 DEVICE_LOG = logging.getLogger("ups2mqtt.device")
 AUDIT_LOG = logging.getLogger("ups2mqtt.audit")
 DISCOVERY_MIGRATION_MARKER = "/data/.discovery_v2_migrated"
+
+
+def _sanitize_endpoint_part(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "unknown"
+    return text.replace("/", "_")
+
+
+def _endpoint_lock_key(
+    *,
+    runtime_source: str,
+    device: DeviceConfig,
+    profile: dict[str, Any],
+) -> str:
+    source_key = _sanitize_endpoint_part(runtime_source or device.source)
+    host_key = _sanitize_endpoint_part(device.host)
+    if "snmp" in source_key:
+        snmp_port = int(getattr(device, "snmp_port", 161) or 161)
+        port_key = _sanitize_endpoint_part(snmp_port)
+    else:
+        port_key = _sanitize_endpoint_part(device.port)
+    if source_key == "nut_network_upsd":
+        ups_name = _sanitize_endpoint_part(_nut_guess_ups_name(device, profile))
+        return f"{source_key}://{host_key}:{port_key}/{ups_name}"
+    return f"{source_key}://{host_key}:{port_key}"
 
 
 class AdaptiveTypeLimiter:
@@ -636,7 +666,9 @@ async def _device_loop(
         _format_key_list(list(allowed_keys), max_display=20),
     )
     now_started = monotonic()
-    slot_offset_seconds = max(0.0, min(float(slot_offset_seconds), float(base_interval)))
+    slot_offset_seconds = max(
+        0.0, min(float(slot_offset_seconds), float(base_interval))
+    )
     startup_not_before = now_started + slot_offset_seconds
     next_due: dict[str, float] = {
         group: now_started + slot_offset_seconds + float(interval)
@@ -654,7 +686,11 @@ async def _device_loop(
             " -> ".join(",".join(groups) for groups in startup_poll_sequence),
             slot_offset_seconds,
         )
-    endpoint_key = f"{device.host}:{device.port}"
+    endpoint_key = _endpoint_lock_key(
+        runtime_source=runtime_source,
+        device=runtime_device,
+        profile=profile,
+    )
     endpoint_semaphore = endpoint_semaphores.setdefault(
         endpoint_key, asyncio.Semaphore(1)
     )
@@ -719,6 +755,11 @@ async def _device_loop(
                 continue
             endpoint_wait_started = monotonic()
             if endpoint_semaphore.locked():
+                LOG.debug(
+                    "Endpoint lock busy for %s: %s",
+                    device.id,
+                    endpoint_key,
+                )
                 metrics.record_missed_capacity(identity, runtime_source)
                 _advance_due_groups(due_groups, monotonic())
                 continue
@@ -1676,7 +1717,9 @@ def _apply_sensor_poll_group_overrides(
     expanded_overrides = dict(overrides)
     if runtime_source:
         try:
-            specs = get_capability_repository().load_catalog_sensor_specs(runtime_source)
+            specs = get_capability_repository().load_catalog_sensor_specs(
+                runtime_source
+            )
         except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             specs = []
         for spec in specs:
@@ -2326,6 +2369,7 @@ async def async_main() -> None:
 def main() -> None:
     asyncio.run(async_main())
 
+
 def _run_discovery_migration_cleanup(
     mqtt: MqttPublisher,
     devices: list[DeviceConfig],
@@ -2345,13 +2389,11 @@ def _run_discovery_migration_cleanup(
             "Profile resolution call site: _run_discovery_migration_cleanup (apps_dir=%s)",
             apps_dir,
         )
-        runtime_source, runtime_profile, keys, _ = (
-            _resolve_runtime_profile(
-                device=device,
-                capability_profiles=profiles,
-                profile_bindings=profile_bindings,
-                apps_dir=apps_dir,
-            )
+        runtime_source, runtime_profile, keys, _ = _resolve_runtime_profile(
+            device=device,
+            capability_profiles=profiles,
+            profile_bindings=profile_bindings,
+            apps_dir=apps_dir,
         )
         if not isinstance(runtime_profile, dict):
             continue
@@ -2384,13 +2426,11 @@ async def _prune_stale_ha_entities(
             "Profile resolution call site: _prune_stale_ha_entities (apps_dir=%s)",
             config.apps_dir,
         )
-        runtime_source, runtime_profile, keys, _ = (
-            _resolve_runtime_profile(
-                device=device,
-                capability_profiles=profiles,
-                profile_bindings=profile_bindings,
-                apps_dir=config.apps_dir,
-            )
+        runtime_source, runtime_profile, keys, _ = _resolve_runtime_profile(
+            device=device,
+            capability_profiles=profiles,
+            profile_bindings=profile_bindings,
+            apps_dir=config.apps_dir,
         )
         if not isinstance(runtime_profile, dict):
             continue

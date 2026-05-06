@@ -184,9 +184,7 @@ def _load_base_nutpoller_module():
             break
     if module_path is None:
         candidate_paths = ", ".join(str(path) for path in _nutpoller_candidate_paths())
-        raise FileNotFoundError(
-            f"NUT reader not found. Checked: {candidate_paths}"
-        )
+        raise FileNotFoundError(f"NUT reader not found. Checked: {candidate_paths}")
     spec = importlib.util.spec_from_file_location(
         "ups2mqtt_profile_builder_nutpoller",
         module_path,
@@ -210,9 +208,7 @@ def _load_apcupsd_module():
             break
     if module_path is None:
         candidate_paths = ", ".join(str(path) for path in _apcupsd_candidate_paths())
-        raise FileNotFoundError(
-            f"APCUPSD reader not found. Checked: {candidate_paths}"
-        )
+        raise FileNotFoundError(f"APCUPSD reader not found. Checked: {candidate_paths}")
     spec = importlib.util.spec_from_file_location(
         "ups2mqtt_profile_builder_apcupsd",
         module_path,
@@ -232,7 +228,9 @@ def _default_discover_nut_variables(
     use_starttls: bool,
 ) -> dict[str, str]:
     if use_starttls:
-        raise ValueError("STARTTLS discovery is not available with the selected NUT reader")
+        raise ValueError(
+            "STARTTLS discovery is not available with the selected NUT reader"
+        )
     module = _load_base_nutpoller_module()
     result = module.poll_ups(host=host, port=port, ups_name=ups_name, timeout=5.0)
     if not bool(getattr(result, "success", False)):
@@ -244,7 +242,10 @@ def _default_discover_nut_variables(
             raise ValueError("Access denied by the NUT server")
         if "TIMED OUT" in normalized or "TIMEOUT" in normalized:
             raise ValueError(f"Connection timeout to {host}:{port}")
-        if "NAME OR SERVICE NOT KNOWN" in normalized or "NODENAME NOR SERVNAME" in normalized:
+        if (
+            "NAME OR SERVICE NOT KNOWN" in normalized
+            or "NODENAME NOR SERVNAME" in normalized
+        ):
             raise ValueError(f"DNS resolution failed for {host}")
         if "REFUSED" in normalized:
             raise ValueError(f"Connection refused by {host}:{port}")
@@ -253,9 +254,7 @@ def _default_discover_nut_variables(
     if not isinstance(variables, dict) or not variables:
         raise ValueError("Discovery returned no variables for the selected UPS")
     return {
-        str(key): str(value)
-        for key, value in variables.items()
-        if str(key).strip()
+        str(key): str(value) for key, value in variables.items() if str(key).strip()
     }
 
 
@@ -287,7 +286,9 @@ def _normalize_nut_discovery_rows(
     consumed_raw_names: set[str] = set()
     variable_specs = nut.get("variables", {})
     if isinstance(variable_specs, dict):
-        for raw_name, spec in sorted(variable_specs.items(), key=lambda item: str(item[0])):
+        for raw_name, spec in sorted(
+            variable_specs.items(), key=lambda item: str(item[0])
+        ):
             if not isinstance(spec, dict):
                 continue
             canonical_key = str(spec.get("key", "")).strip()
@@ -306,7 +307,9 @@ def _normalize_nut_discovery_rows(
     if "ups.status" in variables:
         status_specs = nut.get("status_map", {})
         if isinstance(status_specs, dict):
-            for token, spec in sorted(status_specs.items(), key=lambda item: str(item[0])):
+            for token, spec in sorted(
+                status_specs.items(), key=lambda item: str(item[0])
+            ):
                 if not isinstance(spec, dict):
                     continue
                 canonical_key = str(spec.get("key", "")).strip()
@@ -324,7 +327,9 @@ def _normalize_nut_discovery_rows(
     sensitive_fragments = tuple(
         fragment.lower() for fragment in _SENSITIVE_KEY_FRAGMENTS
     )
-    for raw_name, sample_value in sorted(variables.items(), key=lambda item: str(item[0])):
+    for raw_name, sample_value in sorted(
+        variables.items(), key=lambda item: str(item[0])
+    ):
         raw_key = str(raw_name).strip()
         if not raw_key:
             continue
@@ -363,7 +368,9 @@ def _default_discover_apcupsd_variables(
         if str(key).strip()
     }
     if not cleaned:
-        raise ValueError("Discovery returned no APCUPSD fields for the selected endpoint")
+        raise ValueError(
+            "Discovery returned no APCUPSD fields for the selected endpoint"
+        )
     return cleaned
 
 
@@ -387,7 +394,9 @@ def _normalize_apcupsd_discovery_rows(
     consumed_raw_names: set[str] = set()
     field_specs = apcupsd.get("fields", {})
     if isinstance(field_specs, dict):
-        for raw_name, spec in sorted(field_specs.items(), key=lambda item: str(item[0])):
+        for raw_name, spec in sorted(
+            field_specs.items(), key=lambda item: str(item[0])
+        ):
             if not isinstance(spec, dict):
                 continue
             canonical_key = str(spec.get("key", "")).strip()
@@ -406,7 +415,9 @@ def _normalize_apcupsd_discovery_rows(
     sensitive_fragments = tuple(
         fragment.lower() for fragment in _SENSITIVE_KEY_FRAGMENTS
     )
-    for raw_name, sample_value in sorted(variables.items(), key=lambda item: str(item[0])):
+    for raw_name, sample_value in sorted(
+        variables.items(), key=lambda item: str(item[0])
+    ):
         raw_key = str(raw_name).strip()
         if not raw_key:
             continue
@@ -1010,9 +1021,7 @@ def _prepare_metrics_presentation(
         "semaphore_available": int(
             metrics.get("backpressure", {}).get("semaphore_available", 0)
         ),
-        "wait_pressure": dict(
-            metrics.get("backpressure", {}).get("wait_pressure", {})
-        ),
+        "wait_pressure": dict(metrics.get("backpressure", {}).get("wait_pressure", {})),
         "adaptive_concurrency": dict(
             metrics.get("backpressure", {}).get("adaptive_concurrency", {})
         ),
@@ -1166,9 +1175,7 @@ def start_web_server(
     discover_nut_variables: (
         Callable[[str, int, str, bool], dict[str, str]] | None
     ) = None,
-    discover_apcupsd_variables: (
-        Callable[[str, int], dict[str, str]] | None
-    ) = None,
+    discover_apcupsd_variables: (Callable[[str, int], dict[str, str]] | None) = None,
     get_cached_ha_payload_preview: (
         Callable[[DeviceConfig], dict[str, Any] | None] | None
     ) = None,
@@ -1198,8 +1205,8 @@ def start_web_server(
     theme_getter = get_theme or (lambda: DEFAULT_THEME)
     theme_setter = set_theme or (lambda value: None)
     metadata_refresh_getter = get_metadata_refresh_interval_seconds or (lambda: 3600)
-    metadata_refresh_setter = (
-        set_metadata_refresh_interval_seconds or (lambda value: None)
+    metadata_refresh_setter = set_metadata_refresh_interval_seconds or (
+        lambda value: None
     )
     idle_reconnect_getter = get_idle_reconnect_seconds or (lambda: 300.0)
     idle_reconnect_setter = set_idle_reconnect_seconds or (lambda value: None)
@@ -1253,9 +1260,9 @@ def start_web_server(
             device.id.lower()
         ):
             return False
-        if filters["device_filter_name"] and filters["device_filter_name"].lower() not in (
-            (device.name or "").lower()
-        ):
+        if filters["device_filter_name"] and filters[
+            "device_filter_name"
+        ].lower() not in ((device.name or "").lower()):
             return False
         location_text = (device.location or "").strip() or "-"
         if filters["device_filter_location"] and filters[
@@ -1313,7 +1320,10 @@ def start_web_server(
     ) -> bool:
         if not driver_key:
             return False
-        if driver_key.lower().startswith("nut") and driver_key != GENERIC_NUT_DRIVER_KEY:
+        if (
+            driver_key.lower().startswith("nut")
+            and driver_key != GENERIC_NUT_DRIVER_KEY
+        ):
             return False
         protocol = str((profile or {}).get("protocol", "")).strip().lower()
         if protocol == "nut" and driver_key != GENERIC_NUT_DRIVER_KEY:
@@ -1827,8 +1837,8 @@ def start_web_server(
         if connection_type not in {"nut", "apcupsd"}:
             connection_type = "nut"
         previous_connection_type = (
-            data.get("current_connection_type", [connection_type])[0]
-        ).strip().lower()
+            (data.get("current_connection_type", [connection_type])[0]).strip().lower()
+        )
         if previous_connection_type not in {"nut", "apcupsd"}:
             previous_connection_type = connection_type
         default_port = _profile_builder_default_port(connection_type)
@@ -1861,20 +1871,53 @@ def start_web_server(
         resolved_info_message = info_message
         if resolved_info_message is None:
             if connection_type == "apcupsd":
-                resolved_info_message = (
-                    "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract. Discovery host/IP and port are not persisted."
-                )
+                resolved_info_message = "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract. Discovery host/IP and port are not persisted."
             else:
-                resolved_info_message = (
-                    "Generated NUT profiles save against the generic reusable NUT runtime contract. Discovery host/IP and UPS name are not persisted."
+                resolved_info_message = "Generated NUT profiles save against the generic reusable NUT runtime contract. Discovery host/IP and UPS name are not persisted."
+        capability_profiles = capability_profiles_getter()
+        if driver_key == GENERIC_APCUPSD_DRIVER_KEY:
+            contract_profile = _generic_apcupsd_contract(capability_profiles)
+        else:
+            contract_profile = _generic_nut_contract(capability_profiles)
+        defaults = _profile_default_payload(driver_key, contract_profile)
+        sensor_poll_group_choices = sorted(
+            str(name)
+            for name in dict(defaults.get("poll_groups", {}))
+            if str(name).strip()
+        )
+        if not sensor_poll_group_choices:
+            sensor_poll_group_choices = ["fast", "slow"]
+        poll_group_defaults = _sensor_poll_group_defaults_from_profile(contract_profile)
+        resolved_rows: list[dict[str, object]] = []
+        for row in discovered_rows or []:
+            sensor_key = str(row.get("key", "")).strip()
+            poll_group = (
+                str(row.get("poll_group", poll_group_defaults.get(sensor_key, "slow")))
+                .strip()
+                .lower()
+                or "slow"
+            )
+            if poll_group not in set(sensor_poll_group_choices):
+                poll_group = (
+                    str(poll_group_defaults.get(sensor_key, "slow")).strip().lower()
+                    or "slow"
                 )
+            if poll_group not in set(sensor_poll_group_choices):
+                poll_group = "slow"
+            resolved_rows.append(
+                {
+                    **row,
+                    "poll_group": poll_group,
+                }
+            )
         return templates.get_template("htmx/profile_builder_results.html").render(
             error_message=error_message,
             info_message=resolved_info_message,
-            discovered_rows=discovered_rows or [],
+            discovered_rows=resolved_rows,
             profile_name=profile_name,
             connection_type=connection_type,
             driver_key=driver_key,
+            sensor_poll_group_choices=sensor_poll_group_choices,
         )
 
     def _render_htmx_profile_builder_panel(
@@ -1948,9 +1991,7 @@ def start_web_server(
         cached_metadata = redacted.get("cached_metadata")
         entities = redacted.get("entities")
         has_cached_data = bool(cached_state) or bool(cached_metadata) or bool(entities)
-        metadata_map = (
-            cached_metadata if isinstance(cached_metadata, dict) else {}
-        )
+        metadata_map = cached_metadata if isinstance(cached_metadata, dict) else {}
         topics_map = (
             redacted.get("topics") if isinstance(redacted.get("topics"), dict) else {}
         )
@@ -2142,6 +2183,7 @@ def start_web_server(
                     LOG.warning("Skipping malformed CSV line: %s", row)
                     continue
                 try:
+
                     def _cell(index: int, default: str = "") -> str:
                         if 0 <= index < len(row):
                             return str(row[index]).strip()
@@ -2168,7 +2210,9 @@ def start_web_server(
                         ),
                         name=(_cell_by_header("Name", 7) or None),
                         location=(
-                            _cell_by_header("Location", 8 if has_location_column else -1)
+                            _cell_by_header(
+                                "Location", 8 if has_location_column else -1
+                            )
                             or None
                         ),
                         debug_logging=str(
@@ -2182,11 +2226,15 @@ def start_web_server(
                         ).lower()
                         in {"true", "1", "yes"},
                         discovery_enabled=str(
-                            _cell_by_header("Discovery", 11 if has_location_column else 10)
+                            _cell_by_header(
+                                "Discovery", 11 if has_location_column else 10
+                            )
                         ).lower()
                         in {"true", "1", "yes"},
                         polling_enabled=str(
-                            _cell_by_header("Polling", 12 if has_location_column else 11)
+                            _cell_by_header(
+                                "Polling", 12 if has_location_column else 11
+                            )
                         ).lower()
                         in {"true", "1", "yes"},
                     )
@@ -2442,13 +2490,17 @@ def start_web_server(
             raise ValueError("Invalid schema: 'profiles' must be an array")
 
         db = _profile_db()
-        if db is None or not hasattr(db, "load_profiles") or not hasattr(
-            db, "save_profile"
+        if (
+            db is None
+            or not hasattr(db, "load_profiles")
+            or not hasattr(db, "save_profile")
         ):
             raise ValueError("Profile storage is not available")
 
         existing_profiles = [item for item in db.load_profiles() if item.profile_uid]
-        existing_profiles_by_uid = {item.profile_uid: item for item in existing_profiles}
+        existing_profiles_by_uid = {
+            item.profile_uid: item for item in existing_profiles
+        }
         existing_profiles_by_name_driver = {
             (item.name.lower(), item.driver_key): item for item in existing_profiles
         }
@@ -2456,7 +2508,9 @@ def start_web_server(
         imported_profile_snapshots: dict[str, dict[str, Any]] = {}
         for index, item in enumerate(raw_profiles, start=1):
             if not isinstance(item, dict):
-                raise ValueError(f"Invalid profile entry at index {index}: expected object")
+                raise ValueError(
+                    f"Invalid profile entry at index {index}: expected object"
+                )
             profile_uid = str(item.get("profile_uid", "")).strip()
             profile_name = str(item.get("name", "")).strip()
             driver_key = str(item.get("driver_key", "")).strip()
@@ -2530,13 +2584,15 @@ def start_web_server(
                     comments=str(snapshot["comments"]),
                     is_protected=bool(snapshot["is_protected"]),
                 )
-                if _profile_comparable_dict(existing_by_uid) != _profile_comparable_dict(
-                    imported_profile
-                ):
+                if _profile_comparable_dict(
+                    existing_by_uid
+                ) != _profile_comparable_dict(imported_profile):
                     raise ValueError(
                         f"Profile UID conflict for {import_uid}: existing profile content differs"
                     )
-                resolved_profile_uid_by_import_uid[import_uid] = existing_by_uid.profile_uid
+                resolved_profile_uid_by_import_uid[import_uid] = (
+                    existing_by_uid.profile_uid
+                )
                 continue
             name_driver_key = (
                 str(snapshot["name"]).lower(),
@@ -2554,14 +2610,16 @@ def start_web_server(
                     comments=str(snapshot["comments"]),
                     is_protected=bool(snapshot["is_protected"]),
                 )
-                if _profile_comparable_dict(existing_by_name) != _profile_comparable_dict(
-                    imported_profile
-                ):
+                if _profile_comparable_dict(
+                    existing_by_name
+                ) != _profile_comparable_dict(imported_profile):
                     raise ValueError(
                         "Profile conflict for "
                         f"{snapshot['name']} ({snapshot['driver_key']}): existing content differs"
                     )
-                resolved_profile_uid_by_import_uid[import_uid] = existing_by_name.profile_uid
+                resolved_profile_uid_by_import_uid[import_uid] = (
+                    existing_by_name.profile_uid
+                )
                 continue
             created = ProfileConfig(
                 profile_uid=import_uid,
@@ -2575,9 +2633,9 @@ def start_web_server(
             )
             profiles_to_create.append(created)
             resolved_profile_uid_by_import_uid[import_uid] = import_uid
-            staged_existing_by_name_driver[(created.name.lower(), created.driver_key)] = (
-                created
-            )
+            staged_existing_by_name_driver[
+                (created.name.lower(), created.driver_key)
+            ] = created
 
         existing_devices = store.list_devices()
         existing_devices_by_uid = {
@@ -2590,7 +2648,9 @@ def start_web_server(
         eligible_drivers = _eligible_profile_drivers()
         for index, item in enumerate(raw_devices, start=1):
             if not isinstance(item, dict):
-                raise ValueError(f"Invalid device entry at index {index}: expected object")
+                raise ValueError(
+                    f"Invalid device entry at index {index}: expected object"
+                )
             device_uid = str(item.get("device_uid", "")).strip()
             if not device_uid:
                 raise ValueError(
@@ -2669,7 +2729,10 @@ def start_web_server(
                     resolved_profile_uid = resolved_profile_uid_by_import_uid.get(
                         profile_uid_text, ""
                     )
-                    if not resolved_profile_uid and profile_uid_text in existing_profiles_by_uid:
+                    if (
+                        not resolved_profile_uid
+                        and profile_uid_text in existing_profiles_by_uid
+                    ):
                         resolved_profile_uid = profile_uid_text
                 elif profile_name_text:
                     matched = staged_existing_by_name_driver.get(
@@ -2689,7 +2752,9 @@ def start_web_server(
                             matched_profile = item_profile
                             break
                     if matched_profile is None:
-                        matched_profile = existing_profiles_by_uid.get(resolved_profile_uid)
+                        matched_profile = existing_profiles_by_uid.get(
+                            resolved_profile_uid
+                        )
                     if (
                         matched_profile is not None
                         and str(matched_profile.driver_key) != driver_key
@@ -2747,11 +2812,15 @@ def start_web_server(
                 port=port,
                 snmp_port=snmp_port,
                 unit_id=unit_id,
-                snmp_community=str(config_payload.get("snmp_community", "public") or "public"),
+                snmp_community=str(
+                    config_payload.get("snmp_community", "public") or "public"
+                ),
                 poll_interval=poll_interval,
                 name=str(item.get("name", "") or "").strip() or None,
                 location=str(item.get("location", "") or "").strip() or None,
-                debug_logging=_to_bool(config_payload.get("debug_logging"), default=False),
+                debug_logging=_to_bool(
+                    config_payload.get("debug_logging"), default=False
+                ),
                 keep_connection_open=_to_bool(
                     config_payload.get("keep_connection_open"), default=False
                 ),
@@ -2766,12 +2835,14 @@ def start_web_server(
                 profile_mode=profile_mode,
                 local_profile_payload=(
                     dict(local_profile_payload)
-                    if profile_mode == "local" and isinstance(local_profile_payload, dict)
+                    if profile_mode == "local"
+                    and isinstance(local_profile_payload, dict)
                     else None
                 ),
                 local_selected_sensors=(
                     [str(value) for value in local_selected_sensors]
-                    if profile_mode == "local" and isinstance(local_selected_sensors, list)
+                    if profile_mode == "local"
+                    and isinstance(local_selected_sensors, list)
                     else None
                 ),
                 local_sensor_preferences=(
@@ -3519,7 +3590,9 @@ def start_web_server(
                         (
                             existing_device.local_sensor_preferences
                             if existing_device is not None
-                            and isinstance(existing_device.local_sensor_preferences, dict)
+                            and isinstance(
+                                existing_device.local_sensor_preferences, dict
+                            )
                             else None
                         ),
                     )
@@ -4150,7 +4223,10 @@ def start_web_server(
         def _handle_htmx_post(self, parsed_path, data: dict[str, list[str]]) -> bool:
             filters = _device_filter_values_from_data(data)
             # Backward-compatible alias: legacy CSV import posted to "/" with action=import_csv.
-            if parsed_path.path == "/" and (data.get("action", [""])[0]).strip() == "import_csv":
+            if (
+                parsed_path.path == "/"
+                and (data.get("action", [""])[0]).strip() == "import_csv"
+            ):
                 parsed_path = parsed_path._replace(path="/htmx/maintenance/import/csv")
             if parsed_path.path == "/htmx/devices/actions/upsert":
                 try:
@@ -4484,29 +4560,15 @@ def start_web_server(
 
             if parsed_path.path == "/htmx/profile-builder/actions/discover":
                 posted_connection_type = (
-                    data.get("connection_type", ["nut"])[0]
-                    if data
-                    else "nut"
+                    data.get("connection_type", ["nut"])[0] if data else "nut"
                 )
                 connection_type = str(posted_connection_type).strip().lower()
                 if connection_type not in {"nut", "apcupsd"}:
                     connection_type = "nut"
-                host = (
-                    str(data.get("host", [""])[0]).strip()
-                    if data
-                    else ""
-                )
-                ups_name = (
-                    str(data.get("ups_name", [""])[0]).strip()
-                    if data
-                    else ""
-                )
+                host = str(data.get("host", [""])[0]).strip() if data else ""
+                ups_name = str(data.get("ups_name", [""])[0]).strip() if data else ""
                 default_port = _profile_builder_default_port(connection_type)
-                posted_port = (
-                    str(data.get("port", [""])[0]).strip()
-                    if data
-                    else ""
-                )
+                posted_port = str(data.get("port", [""])[0]).strip() if data else ""
                 port_text = posted_port or default_port
                 use_starttls = _bool_from_form(data or {}, "use_starttls")
                 try:
@@ -4623,9 +4685,20 @@ def start_web_server(
                         if str(item).strip()
                     }
                 )
+                poll_group_input = {
+                    str(key).removeprefix("sensor_poll_group__").strip(): (
+                        str(values[0]).strip().lower() if values else ""
+                    )
+                    for key, values in data.items()
+                    if isinstance(key, str)
+                    and key.startswith("sensor_poll_group__")
+                    and str(key).removeprefix("sensor_poll_group__").strip()
+                }
                 try:
                     driver_key = (data.get("driver_key", [""])[0]).strip()
-                    connection_type = (data.get("connection_type", ["nut"])[0]).strip().lower()
+                    connection_type = (
+                        (data.get("connection_type", ["nut"])[0]).strip().lower()
+                    )
                     if driver_key == GENERIC_APCUPSD_DRIVER_KEY:
                         contract_profile = _generic_apcupsd_contract(
                             capability_profiles_getter()
@@ -4649,7 +4722,9 @@ def start_web_server(
                     existing = _load_profiles()
                     for item in existing:
                         if item.name.lower() == profile_name.lower():
-                            raise ValueError(f"Profile name {profile_name} already exists")
+                            raise ValueError(
+                                f"Profile name {profile_name} already exists"
+                            )
 
                     selected_input_keys = sorted(
                         {
@@ -4680,6 +4755,11 @@ def start_web_server(
                         driver_key,
                         contract_profile,
                     )
+                    allowed_poll_groups = {
+                        str(name).strip()
+                        for name in dict(defaults.get("poll_groups", {}))
+                        if str(name).strip()
+                    }
                     payload = {
                         "driver_key": driver_key,
                         "poll_groups": dict(defaults.get("poll_groups", {})),
@@ -4688,12 +4768,38 @@ def start_web_server(
                     poll_group_defaults = _sensor_poll_group_defaults_from_profile(
                         contract_profile
                     )
+                    poll_group_overrides = dict(poll_group_input)
+                    if driver_key == GENERIC_APCUPSD_DRIVER_KEY:
+                        normalized_overrides: dict[str, str] = {}
+                        for key, group_name in poll_group_overrides.items():
+                            normalized_keys = _normalize_apcupsd_submitted_keys(
+                                [key],
+                                contract_profile,
+                            )
+                            if not normalized_keys:
+                                continue
+                            normalized_overrides[normalized_keys[0]] = group_name
+                        poll_group_overrides = normalized_overrides
                     selected_set = set(selected_sensors)
                     sensor_preferences = {
                         key: {
                             "mqtt_enabled": key in selected_set,
-                            "poll_group": str(
-                                poll_group_defaults.get(key, "slow")
+                            "poll_group": (
+                                poll_group_overrides.get(
+                                    key,
+                                    str(poll_group_defaults.get(key, "slow")).strip()
+                                    or "slow",
+                                )
+                                if poll_group_overrides.get(
+                                    key,
+                                    str(poll_group_defaults.get(key, "slow")).strip()
+                                    or "slow",
+                                )
+                                in allowed_poll_groups
+                                else (
+                                    str(poll_group_defaults.get(key, "slow")).strip()
+                                    or "slow"
+                                )
                             ),
                         }
                         for key in discovered_keys
@@ -4746,6 +4852,11 @@ def start_web_server(
                             "raw_name": "submitted",
                             "sample_value": "",
                             "selected": f"sensor_mqtt__{key}" in data,
+                            "poll_group": (
+                                poll_group_input.get(key, "slow")
+                                if poll_group_input.get(key, "slow") in {"fast", "slow"}
+                                else "slow"
+                            ),
                         }
                         for key in discovered_keys
                     ]
@@ -4754,8 +4865,14 @@ def start_web_server(
                             error_message=str(err),
                             discovered_rows=rows,
                             profile_name=(data.get("profile_name", [""])[0]).strip(),
-                            connection_type=(data.get("connection_type", ["nut"])[0]).strip().lower() or "nut",
-                            driver_key=(data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]).strip() or GENERIC_NUT_DRIVER_KEY,
+                            connection_type=(data.get("connection_type", ["nut"])[0])
+                            .strip()
+                            .lower()
+                            or "nut",
+                            driver_key=(
+                                data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]
+                            ).strip()
+                            or GENERIC_NUT_DRIVER_KEY,
                         ),
                         status=HTTPStatus.OK,
                     )
@@ -4770,12 +4887,24 @@ def start_web_server(
                                     "raw_name": "submitted",
                                     "sample_value": "",
                                     "selected": f"sensor_mqtt__{key}" in data,
+                                    "poll_group": (
+                                        poll_group_input.get(key, "slow")
+                                        if poll_group_input.get(key, "slow")
+                                        in {"fast", "slow"}
+                                        else "slow"
+                                    ),
                                 }
                                 for key in discovered_keys
                             ],
                             profile_name=(data.get("profile_name", [""])[0]).strip(),
-                            connection_type=(data.get("connection_type", ["nut"])[0]).strip().lower() or "nut",
-                            driver_key=(data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]).strip() or GENERIC_NUT_DRIVER_KEY,
+                            connection_type=(data.get("connection_type", ["nut"])[0])
+                            .strip()
+                            .lower()
+                            or "nut",
+                            driver_key=(
+                                data.get("driver_key", [GENERIC_NUT_DRIVER_KEY])[0]
+                            ).strip()
+                            or GENERIC_NUT_DRIVER_KEY,
                         ),
                         status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
@@ -5109,9 +5238,9 @@ def start_web_server(
                     theme_setter(selected_theme)
                     toast_message = f"Application theme set to {selected_theme}"
                 elif action == "set_poll_timers":
-                    metadata_raw = (
-                        data.get("metadata_refresh_interval_seconds", [""])[0].strip()
-                    )
+                    metadata_raw = data.get("metadata_refresh_interval_seconds", [""])[
+                        0
+                    ].strip()
                     idle_raw = (data.get("idle_reconnect_seconds", [""])[0]).strip()
                     try:
                         metadata_seconds = max(1, int(metadata_raw))

@@ -28,6 +28,9 @@
           <div class="form-text">The saved profile keeps only selected reusable capabilities and preferences.</div>
         </div>
       </div>
+      <div class="small text-muted">
+        Choose Poll Group per selected field. Slow-only selections can show 0 values during fast cycles.
+      </div>
       <input type="hidden" name="connection_type" value="{{ connection_type }}"/>
       <input type="hidden" name="driver_key" value="{{ driver_key }}"/>
 
@@ -39,6 +42,7 @@
               <th>Capability</th>
               <th>Raw Source</th>
               <th>Sample Value</th>
+              <th>Poll Group</th>
             </tr>
           </thead>
           <tbody>
@@ -57,6 +61,22 @@
               <td><code>{{ row.key }}</code></td>
               <td><code>{{ row.raw_name }}</code></td>
               <td>{{ row.sample_value }}</td>
+              <td>
+                <div class="d-flex flex-wrap gap-2">
+                  {% for group_name in sensor_poll_group_choices %}
+                  <label class="form-check form-check-inline small mb-0">
+                    <input
+                      class="form-check-input"
+                      type="radio"
+                      name="sensor_poll_group__{{ row.key }}"
+                      value="{{ group_name }}"
+                      {% if row.poll_group == group_name %}checked{% endif %}
+                    />
+                    <span class="form-check-label">{{ group_name|title }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </td>
             </tr>
             {% endfor %}
           </tbody>

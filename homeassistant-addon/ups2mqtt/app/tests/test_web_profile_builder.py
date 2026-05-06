@@ -58,7 +58,11 @@ _APCUPSD_PROFILE = {
             "BCHARGE": {"key": "battery_charge", "poll_group": "fast", "type": "float"},
             "LINEV": {"key": "input_voltage", "poll_group": "fast", "type": "float"},
             "LOADPCT": {"key": "output_load", "poll_group": "fast", "type": "float"},
-            "TIMELEFT": {"key": "runtime_remaining", "poll_group": "fast", "type": "float"},
+            "TIMELEFT": {
+                "key": "runtime_remaining",
+                "poll_group": "fast",
+                "type": "float",
+            },
         }
     },
 }
@@ -99,7 +103,11 @@ def _start_test_server(
         host="127.0.0.1",
         port=0,
         store=store,
-        get_source_names=lambda: ["cyberpower_modbus_single_phase", "nut_network_upsd", "apcupsd_network_nis"],
+        get_source_names=lambda: [
+            "cyberpower_modbus_single_phase",
+            "nut_network_upsd",
+            "apcupsd_network_nis",
+        ],
         log_buffer=LogBuffer(),
         get_capability_status=lambda: {},
         trigger_capability_reload=lambda: None,
@@ -164,7 +172,9 @@ def test_profile_builder_panel_apcupsd_defaults_port_to_3551(tmp_path: Path) -> 
         server.server_close()
 
 
-def test_profile_builder_panel_preserves_explicit_port_from_context(tmp_path: Path) -> None:
+def test_profile_builder_panel_preserves_explicit_port_from_context(
+    tmp_path: Path,
+) -> None:
     server = _start_test_server(tmp_path)
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
@@ -205,16 +215,22 @@ def test_profile_builder_hides_starttls_when_selected_reader_does_not_support_it
         status, body = _fetch(base_url, "/htmx/devices/partials/panel/profile-builder")
         assert status == HTTPStatus.OK
         assert "Use STARTTLS" not in body
-        assert "STARTTLS is not available with the selected NUT discovery reader." in body
+        assert (
+            "STARTTLS is not available with the selected NUT discovery reader." in body
+        )
     finally:
         server.shutdown()
         server.server_close()
 
 
-def test_profile_builder_validation_errors_do_not_attempt_discovery(tmp_path: Path) -> None:
+def test_profile_builder_validation_errors_do_not_attempt_discovery(
+    tmp_path: Path,
+) -> None:
     discovery_calls: list[tuple[str, int, str, bool]] = []
 
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         discovery_calls.append((host, port, ups_name, use_starttls))
         return {"ups.status": "OL"}
 
@@ -234,8 +250,12 @@ def test_profile_builder_validation_errors_do_not_attempt_discovery(tmp_path: Pa
         server.server_close()
 
 
-def test_profile_builder_missing_reader_returns_html_error_fragment(tmp_path: Path) -> None:
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+def test_profile_builder_missing_reader_returns_html_error_fragment(
+    tmp_path: Path,
+) -> None:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         raise FileNotFoundError("NUT reader not found")
 
     server = _start_test_server(tmp_path, discover_nut_variables=_discover)
@@ -266,7 +286,9 @@ def test_profile_builder_mocked_nut_discovery_renders_selectable_variables_and_p
 ) -> None:
     discovery_calls: list[tuple[str, int, str, bool]] = []
 
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         discovery_calls.append((host, port, ups_name, use_starttls))
         return {
             "battery.charge": "100",
@@ -287,6 +309,10 @@ def test_profile_builder_mocked_nut_discovery_renders_selectable_variables_and_p
         assert "<code>battery_charge</code>" in body
         assert "<code>load_on_source</code>" in body
         assert 'type="checkbox"' in body
+        assert 'name="sensor_poll_group__battery_charge"' in body
+        assert 'name="sensor_poll_group__load_on_source"' in body
+        assert ">Fast<" in body
+        assert ">Slow<" in body
         assert "Save Profile" in body
         assert "selected reusable capabilities and preferences" in body
     finally:
@@ -299,7 +325,9 @@ def test_profile_builder_discovery_honors_explicit_port_after_connection_type_to
 ) -> None:
     discovery_calls: list[tuple[str, int, str, bool]] = []
 
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         discovery_calls.append((host, port, ups_name, use_starttls))
         return {
             "battery.charge": "100",
@@ -360,10 +388,16 @@ def test_profile_builder_mocked_apcupsd_discovery_renders_selectable_fields(
         assert status == HTTPStatus.OK
         assert discovery_calls == [("192.0.2.40", 3551)]
         assert "Discovered APCUPSD Capabilities" in body
-        assert "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract." in body
+        assert (
+            "Generated APCUPSD profiles save against the generic reusable APCUPSD runtime contract."
+            in body
+        )
         assert "<code>battery_charge</code>" in body
         assert "<code>VENDORX</code>" in body
         assert "Raw Source" in body
+        assert 'name="sensor_poll_group__battery_charge"' in body
+        assert ">Fast<" in body
+        assert ">Slow<" in body
         assert 'name="driver_key" value="apcupsd_network_nis"' in body
         assert 'name="connection_type" value="apcupsd"' in body
     finally:
@@ -385,17 +419,23 @@ def test_profile_builder_save_persists_reusable_nut_profile_without_connection_d
                 "discovered_sensor_key": "battery_charge",
                 "sensor_key__battery_charge": "1",
                 "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "fast",
             },
         )
         assert status == HTTPStatus.OK
         assert "Saved reusable NUT profile NUT Builder Profile" in body
-        assert "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved." in body
+        assert (
+            "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved."
+            in body
+        )
 
         db = Database(str(tmp_path / "test.db"))
         profiles = db.load_profiles()
         saved = next(item for item in profiles if item.name == "NUT Builder Profile")
         assert saved.driver_key == "nut_network_upsd"
         assert saved.selected_sensors == ["battery_charge"]
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["battery_charge"]["poll_group"] == "fast"
         assert "host" not in saved.config_payload
         assert "ups_name" not in saved.config_payload
     finally:
@@ -419,17 +459,25 @@ def test_profile_builder_save_persists_reusable_apcupsd_profile_without_endpoint
                 "discovered_sensor_key": "battery_charge",
                 "sensor_key__battery_charge": "1",
                 "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "slow",
             },
         )
         assert status == HTTPStatus.OK
         assert "Saved reusable APCUPSD profile APCUPSD Builder Profile" in body
-        assert "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved." in body
+        assert (
+            "host/IP, port, UPS name, credentials, and STARTTLS settings were not saved."
+            in body
+        )
 
         db = Database(str(tmp_path / "test.db"))
         profiles = db.load_profiles()
-        saved = next(item for item in profiles if item.name == "APCUPSD Builder Profile")
+        saved = next(
+            item for item in profiles if item.name == "APCUPSD Builder Profile"
+        )
         assert saved.driver_key == "apcupsd_network_nis"
         assert saved.selected_sensors == ["battery_charge"]
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["battery_charge"]["poll_group"] == "slow"
         assert "host" not in saved.config_payload
         assert "port" not in saved.config_payload
     finally:
@@ -453,6 +501,7 @@ def test_profile_builder_save_normalizes_raw_apcupsd_keys_to_canonical(
                 "discovered_sensor_key": "BCHARGE",
                 "sensor_key__BCHARGE": "1",
                 "sensor_mqtt__BCHARGE": "1",
+                "sensor_poll_group__BCHARGE": "fast",
             },
         )
         assert status == HTTPStatus.OK
@@ -460,9 +509,13 @@ def test_profile_builder_save_normalizes_raw_apcupsd_keys_to_canonical(
 
         db = Database(str(tmp_path / "test.db"))
         profiles = db.load_profiles()
-        saved = next(item for item in profiles if item.name == "APCUPSD Raw Key Profile")
+        saved = next(
+            item for item in profiles if item.name == "APCUPSD Raw Key Profile"
+        )
         assert saved.selected_sensors == ["battery_charge"]
         assert "BCHARGE" not in saved.selected_sensors
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["battery_charge"]["poll_group"] == "fast"
     finally:
         server.shutdown()
         server.server_close()
@@ -492,8 +545,12 @@ def test_profile_builder_save_apcupsd_rejects_empty_selection(
         server.server_close()
 
 
-def test_profile_builder_discovery_includes_unknown_vendor_variables(tmp_path: Path) -> None:
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+def test_profile_builder_discovery_includes_unknown_vendor_variables(
+    tmp_path: Path,
+) -> None:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         return {
             "battery.charge": "98",
             "vendor.mode": "eco",
@@ -518,7 +575,9 @@ def test_profile_builder_discovery_includes_unknown_vendor_variables(tmp_path: P
         server.server_close()
 
 
-def test_profile_builder_save_allows_unknown_discovered_variables(tmp_path: Path) -> None:
+def test_profile_builder_save_allows_unknown_discovered_variables(
+    tmp_path: Path,
+) -> None:
     server = _start_test_server(tmp_path)
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
@@ -530,6 +589,7 @@ def test_profile_builder_save_allows_unknown_discovered_variables(tmp_path: Path
                 "discovered_sensor_key": "vendor.mode",
                 "sensor_key__vendor.mode": "1",
                 "sensor_mqtt__vendor.mode": "1",
+                "sensor_poll_group__vendor.mode": "slow",
             },
         )
         assert status == HTTPStatus.OK
@@ -540,8 +600,67 @@ def test_profile_builder_save_allows_unknown_discovered_variables(tmp_path: Path
         saved = next(item for item in profiles if item.name == "NUT Vendor Profile")
         assert saved.driver_key == "nut_network_upsd"
         assert saved.selected_sensors == ["vendor.mode"]
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["vendor.mode"]["poll_group"] == "slow"
         assert "host" not in saved.config_payload
         assert "ups_name" not in saved.config_payload
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_save_omitted_poll_group_uses_default(tmp_path: Path) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/save",
+            {
+                "profile_name": "NUT Default Poll Group Profile",
+                "discovered_sensor_key": "battery_charge",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+            },
+        )
+        assert status == HTTPStatus.OK
+        db = Database(str(tmp_path / "test.db"))
+        profiles = db.load_profiles()
+        saved = next(
+            item for item in profiles if item.name == "NUT Default Poll Group Profile"
+        )
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["battery_charge"]["poll_group"] == "slow"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_profile_builder_save_invalid_poll_group_falls_back_to_default(
+    tmp_path: Path,
+) -> None:
+    server = _start_test_server(tmp_path)
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, _body = _post(
+            base_url,
+            "/htmx/profile-builder/actions/save",
+            {
+                "profile_name": "NUT Invalid Poll Group Profile",
+                "discovered_sensor_key": "battery_charge",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "ultra-fast",
+            },
+        )
+        assert status == HTTPStatus.OK
+        db = Database(str(tmp_path / "test.db"))
+        profiles = db.load_profiles()
+        saved = next(
+            item for item in profiles if item.name == "NUT Invalid Poll Group Profile"
+        )
+        assert saved.sensor_preferences is not None
+        assert saved.sensor_preferences["battery_charge"]["poll_group"] == "slow"
     finally:
         server.shutdown()
         server.server_close()
@@ -550,7 +669,9 @@ def test_profile_builder_save_allows_unknown_discovered_variables(tmp_path: Path
 def test_profile_builder_discovery_ignores_malformed_empty_variable_names(
     tmp_path: Path,
 ) -> None:
-    def _discover(host: str, port: int, ups_name: str, use_starttls: bool) -> dict[str, str]:
+    def _discover(
+        host: str, port: int, ups_name: str, use_starttls: bool
+    ) -> dict[str, str]:
         return {
             "": "bad",
             "   ": "bad2",
@@ -583,19 +704,30 @@ def test_saved_nut_profile_appears_in_profiles_and_device_flow(tmp_path: Path) -
                 profile_uid="nut-profile-1",
                 name="NUT Global",
                 driver_key="nut_network_upsd",
-                config_payload={"driver_key": "nut_network_upsd", "poll_groups": {"fast": 15, "slow": 60}, "key_precedence": {}},
+                config_payload={
+                    "driver_key": "nut_network_upsd",
+                    "poll_groups": {"fast": 15, "slow": 60},
+                    "key_precedence": {},
+                },
                 selected_sensors=["battery_charge"],
-                sensor_preferences={"battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}},
+                sensor_preferences={
+                    "battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
                 comments="",
                 is_protected=False,
             )
         )
         base_url = f"http://127.0.0.1:{server.server_port}"
-        status, profiles_body = _fetch(base_url, "/htmx/devices/partials/panel/profiles")
+        status, profiles_body = _fetch(
+            base_url, "/htmx/devices/partials/panel/profiles"
+        )
         assert status == HTTPStatus.OK
         assert "NUT Global" in profiles_body
         assert "nut_network_upsd" in profiles_body
-        assert "Reusable NUT profile. Devices using it keep their own host and UPS name." in profiles_body
+        assert (
+            "Reusable NUT profile. Devices using it keep their own host and UPS name."
+            in profiles_body
+        )
 
         status, modal_body = _fetch(
             base_url,
@@ -625,7 +757,9 @@ def test_saved_nut_profile_appears_in_profiles_and_device_flow(tmp_path: Path) -
             },
         )
         assert status == HTTPStatus.OK
-        saved_device = next(item for item in db.load_devices() if item.id == "nut-device-1")
+        saved_device = next(
+            item for item in db.load_devices() if item.id == "nut-device-1"
+        )
         assert saved_device.profile_uid == "nut-profile-1"
         assert saved_device.source == "nut_network_upsd"
         assert saved_device.ups_name == "devups"
@@ -683,7 +817,8 @@ def test_global_nut_profile_edit_preserves_unknown_keys(tmp_path: Path) -> None:
             "/htmx/profiles/actions/edit?profile_uid=nut-profile-edit-1",
         )
         assert status == HTTPStatus.OK
-        assert 'name="sensor__vendor.mode"' in form_body
+        assert 'name="sensor_mqtt__vendor.mode"' in form_body
+        assert 'name="sensor_poll_group__vendor.mode"' in form_body
 
         status, _body = _post(
             base_url,
@@ -693,12 +828,20 @@ def test_global_nut_profile_edit_preserves_unknown_keys(tmp_path: Path) -> None:
                 "profile_name": "ION NUT Driver",
                 "driver_key": "nut_network_upsd",
                 "comments": "edited",
-                "sensor__battery_charge": "on",
-                "sensor__vendor.mode": "on",
+                "sensor_key__battery_charge": "1",
+                "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "fast",
+                "sensor_key__vendor.mode": "1",
+                "sensor_mqtt__vendor.mode": "1",
+                "sensor_poll_group__vendor.mode": "slow",
             },
         )
         assert status == HTTPStatus.OK
-        saved = next(item for item in db.load_profiles() if item.profile_uid == "nut-profile-edit-1")
+        saved = next(
+            item
+            for item in db.load_profiles()
+            if item.profile_uid == "nut-profile-edit-1"
+        )
         assert "vendor.mode" in saved.selected_sensors
         assert "host" not in saved.config_payload
         assert "ups_name" not in saved.config_payload
@@ -724,7 +867,9 @@ def test_local_nut_profile_edit_is_device_only_and_preserves_unknown_keys(
                     "key_precedence": {},
                 },
                 selected_sensors=["battery_charge"],
-                sensor_preferences={"battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}},
+                sensor_preferences={
+                    "battery_charge": {"mqtt_enabled": True, "poll_group": "fast"}
+                },
                 comments="global",
                 is_protected=False,
             )
@@ -748,22 +893,39 @@ def test_local_nut_profile_edit_is_device_only_and_preserves_unknown_keys(
                 "polling_enabled": "on",
                 "sensor_key__battery_charge": "1",
                 "sensor_mqtt__battery_charge": "1",
+                "sensor_poll_group__battery_charge": "fast",
                 "sensor_key__vendor.mode": "1",
                 "sensor_mqtt__vendor.mode": "1",
+                "sensor_poll_group__vendor.mode": "slow",
             },
         )
         assert status == HTTPStatus.OK
 
-        saved_device = next(item for item in db.load_devices() if item.id == "nut-device-local-1")
+        saved_device = next(
+            item for item in db.load_devices() if item.id == "nut-device-local-1"
+        )
         assert saved_device.profile_mode == "local"
         assert saved_device.local_selected_sensors is not None
         assert "vendor.mode" in saved_device.local_selected_sensors
         assert saved_device.local_sensor_preferences is not None
         assert "vendor.mode" in saved_device.local_sensor_preferences
+        assert (
+            saved_device.local_sensor_preferences["battery_charge"]["poll_group"]
+            == "fast"
+        )
+        assert (
+            saved_device.local_sensor_preferences["vendor.mode"]["poll_group"] == "slow"
+        )
 
-        global_profile = next(item for item in db.load_profiles() if item.profile_uid == "nut-global-1")
+        global_profile = next(
+            item for item in db.load_profiles() if item.profile_uid == "nut-global-1"
+        )
         assert global_profile.selected_sensors == ["battery_charge"]
         assert "vendor.mode" not in global_profile.selected_sensors
+        assert global_profile.sensor_preferences is not None
+        assert (
+            global_profile.sensor_preferences["battery_charge"]["poll_group"] == "fast"
+        )
     finally:
         server.shutdown()
         server.server_close()
@@ -800,7 +962,8 @@ def test_device_global_modal_reflects_edited_nut_profile_unknown_keys(
             "/htmx/devices/partials/modal?mode=add&profile_uid=nut-global-modal-1&source=nut_network_upsd&profile_mode=global&host=192.0.2.50&ups_name=devups",
         )
         assert status == HTTPStatus.OK
-        assert 'name="sensor__vendor.mode"' in modal_body
+        assert 'name="sensor_mqtt__vendor.mode"' in modal_body
+        assert 'name="sensor_poll_group__vendor.mode"' in modal_body
     finally:
         server.shutdown()
         server.server_close()
@@ -837,7 +1000,8 @@ def test_device_local_mode_initializes_from_current_global_profile_when_no_local
             "/htmx/devices/partials/modal?mode=add&profile_uid=nut-global-init-1&source=nut_network_upsd&profile_mode=local&host=192.0.2.50&ups_name=devups",
         )
         assert status == HTTPStatus.OK
-        assert 'name="sensor__vendor.mode"' in modal_body
+        assert 'name="sensor_mqtt__vendor.mode"' in modal_body
+        assert 'name="sensor_poll_group__vendor.mode"' in modal_body
         assert "Local mode: MQTT publish can be customized per device." in modal_body
     finally:
         server.shutdown()
