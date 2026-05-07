@@ -100,7 +100,9 @@ def test_resolve_runtime_profile_does_not_add_unselected_nut_raw_key() -> None:
     assert "battery.voltage" not in variables
 
 
-def test_resolve_runtime_profile_applies_fast_poll_group_to_selected_nut_raw_keys() -> None:
+def test_resolve_runtime_profile_applies_fast_poll_group_to_selected_nut_raw_keys() -> (
+    None
+):
     device = DeviceConfig(
         id="ups-1",
         source="nut_network_upsd",

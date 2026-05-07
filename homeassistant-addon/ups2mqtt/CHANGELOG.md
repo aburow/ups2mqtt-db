@@ -2,6 +2,17 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.5
+
+- Modbus optimizations release.
+- Enforced selected-sensor-only Modbus poll-plan generation before dispatch across:
+  - CyberPower
+  - APC SMT
+  - APC Smart
+  - APC PDU
+- Prevented non-selected descriptor/block reads from being scheduled in minimal profiles.
+- Added focused poll-plan regression tests for minimal vs explicitly enabled optional sensor paths.
+
 ## v1.2.4
 
 - Fixed Home Assistant add-on direct Prometheus access gap.

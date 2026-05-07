@@ -359,9 +359,7 @@ def _run_pdu_poll(
         pollers,
         "_catalog_keys_for_transport",
         lambda _device, transport: (
-            (set(all_keys), set(all_keys))
-            if transport == "modbus"
-            else (set(), set())
+            (set(all_keys), set(all_keys)) if transport == "modbus" else (set(), set())
         ),
     )
     monkeypatch.setattr(
@@ -512,7 +510,9 @@ def test_apc_pdu_plan_only_contains_selected_descriptor_intersections(monkeypatc
     selected = {"device_real_power", "phase_L1_current"}
     calls = _run_pdu_poll(monkeypatch, selected_keys=selected)
     assert calls
-    assert all(_call_intersects_selected_pdu_descriptor(call, selected) for call in calls)
+    assert all(
+        _call_intersects_selected_pdu_descriptor(call, selected) for call in calls
+    )
     assert (0x009E, 0x0005, 1) not in calls
 
 

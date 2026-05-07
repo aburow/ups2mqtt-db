@@ -199,8 +199,8 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.4)
+## Latest release (v1.2.5)
 
-- Resolved Home Assistant add-on direct Prometheus access gap by adding optional metrics direct-port support (`8100/tcp` by default).
-- Added add-on `metrics_port` option (default `8100`) and wired it to runtime (`UPS2MQTT_METRICS_PORT`) so Prometheus can scrape the metrics-only listener directly.
-- Updated add-on docs for direct metrics exposure and scrape paths (`/metrics` and `/metrics/prometheus`).
+- Added selected-sensor-only Modbus poll-plan optimization across CyberPower, APC SMT, APC Smart, and APC PDU paths.
+- Prevented dispatch of non-selected Modbus descriptor/block reads by constraining plan generation before block/single dispatch.
+- Added focused regression coverage for minimal and opt-in sensor scenarios across supported Modbus driver families.

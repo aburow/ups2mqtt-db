@@ -1210,12 +1210,7 @@ def start_web_server(
     minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> HTTPServer:
     def _prometheus_escape_label(value: str) -> str:
-        return (
-            str(value)
-            .replace("\\", "\\\\")
-            .replace("\n", "\\n")
-            .replace('"', '\\"')
-        )
+        return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
     def _render_prometheus_metrics() -> str:
         lines = [
@@ -1457,10 +1452,13 @@ def start_web_server(
             if isinstance(poll_groups, dict):
                 fast_value = _parse_positive_int(str(poll_groups.get("fast", "")))
                 if fast_value is not None:
-                    return _validate_poll_interval(
-                        fast_value,
-                        normalized_minimum_poll_interval,
-                    ) or normalized_minimum_poll_interval
+                    return (
+                        _validate_poll_interval(
+                            fast_value,
+                            normalized_minimum_poll_interval,
+                        )
+                        or normalized_minimum_poll_interval
+                    )
         source_key = (driver_key or (profile.driver_key if profile else "")).strip()
         contract_profile = _eligible_profile_drivers().get(source_key)
         if isinstance(contract_profile, dict):
@@ -1469,10 +1467,13 @@ def start_web_server(
             if isinstance(poll_groups, dict):
                 fast_value = _parse_positive_int(str(poll_groups.get("fast", "")))
                 if fast_value is not None:
-                    return _validate_poll_interval(
-                        fast_value,
-                        normalized_minimum_poll_interval,
-                    ) or normalized_minimum_poll_interval
+                    return (
+                        _validate_poll_interval(
+                            fast_value,
+                            normalized_minimum_poll_interval,
+                        )
+                        or normalized_minimum_poll_interval
+                    )
         return normalized_minimum_poll_interval
 
     def _profile_default_enabled_map(
@@ -1573,16 +1574,15 @@ def start_web_server(
             GENERIC_APCUPSD_DRIVER_KEY,
         }
         rediscover_connection_type = (
-            "apcupsd"
-            if selected_driver == GENERIC_APCUPSD_DRIVER_KEY
-            else "nut"
+            "apcupsd" if selected_driver == GENERIC_APCUPSD_DRIVER_KEY else "nut"
         )
         rediscover_default_port = _profile_builder_default_port(
             rediscover_connection_type
         )
         rediscover_enabled = bool(profile_uid and rediscover_supported)
         rediscover_disabled = bool(
-            is_protected_profile and not ProfileDatabase._is_profile_protection_disabled()
+            is_protected_profile
+            and not ProfileDatabase._is_profile_protection_disabled()
         )
         contract_profile = eligible.get(selected_driver)
         driver_contract_missing = bool(
@@ -3271,7 +3271,10 @@ def start_web_server(
                 )
 
                 existing_uid_profile = existing_by_uid.get(profile_uid)
-                if existing_uid_profile is not None and existing_uid_profile.is_protected:
+                if (
+                    existing_uid_profile is not None
+                    and existing_uid_profile.is_protected
+                ):
                     skipped += 1
                     LOG.info(
                         "profile restore skipped profile_uid=%s reason=protected_uid_conflict",
@@ -3443,9 +3446,7 @@ def start_web_server(
         default_profile_uid = (
             str(profile_rows[0]["profile_uid"]) if profile_rows else ""
         )
-        default_source = (
-            str(profile_rows[0]["driver_key"]) if profile_rows else ""
-        )
+        default_source = str(profile_rows[0]["driver_key"]) if profile_rows else ""
         return {
             "id": "",
             "source": default_source,
@@ -5046,7 +5047,10 @@ def start_web_server(
                         },
                     )
                     return True
-                if profile.is_protected and not ProfileDatabase._is_profile_protection_disabled():
+                if (
+                    profile.is_protected
+                    and not ProfileDatabase._is_profile_protection_disabled()
+                ):
                     self._send_html(
                         _render_htmx_profiles_form(
                             profile_uid=profile.profile_uid,
@@ -5091,19 +5095,32 @@ def start_web_server(
                     else (
                         {
                             str(key): dict(values)
-                            for key, values in (profile.sensor_preferences or {}).items()
+                            for key, values in (
+                                profile.sensor_preferences or {}
+                            ).items()
                             if str(key) and isinstance(values, dict)
                         }
                     )
                 )
-                profile_name = (data.get("profile_name", [profile.name])[0]).strip() or profile.name
+                profile_name = (
+                    (data.get("profile_name", [profile.name])[0]).strip()
+                    or profile.name
+                )
                 comments = (data.get("comments", [profile.comments])[0]).strip()
-                driver_key = (data.get("driver_key", [profile.driver_key])[0]).strip() or profile.driver_key
+                driver_key = (
+                    (data.get("driver_key", [profile.driver_key])[0]).strip()
+                    or profile.driver_key
+                )
                 rediscover_host = str(data.get("rediscover_host", [""])[0]).strip()
                 rediscover_port = str(data.get("rediscover_port", [""])[0]).strip()
-                rediscover_ups_name = str(data.get("rediscover_ups_name", [""])[0]).strip()
+                rediscover_ups_name = str(
+                    data.get("rediscover_ups_name", [""])[0]
+                ).strip()
 
-                if driver_key not in {GENERIC_NUT_DRIVER_KEY, GENERIC_APCUPSD_DRIVER_KEY}:
+                if driver_key not in {
+                    GENERIC_NUT_DRIVER_KEY,
+                    GENERIC_APCUPSD_DRIVER_KEY,
+                }:
                     self._send_html(
                         _render_htmx_profiles_form(
                             profile_uid=profile.profile_uid,
@@ -5123,16 +5140,16 @@ def start_web_server(
                     return True
 
                 rediscover_connection_type = (
-                    "apcupsd"
-                    if driver_key == GENERIC_APCUPSD_DRIVER_KEY
-                    else "nut"
+                    "apcupsd" if driver_key == GENERIC_APCUPSD_DRIVER_KEY else "nut"
                 )
                 default_port = _profile_builder_default_port(rediscover_connection_type)
 
                 try:
                     _validate_host(rediscover_host)
                     port = _validate_port(
-                        _int_or_default(rediscover_port or default_port, int(default_port))
+                        _int_or_default(
+                            rediscover_port or default_port, int(default_port)
+                        )
                     )
                     if rediscover_connection_type == "apcupsd":
                         contract_profile = _generic_apcupsd_contract(
@@ -5163,7 +5180,9 @@ def start_web_server(
                             capability_profiles_getter()
                         )
                         if not contract_profile:
-                            raise ValueError("Generic NUT runtime contract is not available")
+                            raise ValueError(
+                                "Generic NUT runtime contract is not available"
+                            )
                         variables = nut_variable_discovery(
                             rediscover_host,
                             port,
@@ -5187,9 +5206,9 @@ def start_web_server(
                         if isinstance(profile.config_payload, dict)
                         else {}
                     )
-                    if isinstance(posted_payload.get("poll_groups"), dict) or isinstance(
-                        posted_payload.get("key_precedence"), dict
-                    ):
+                    if isinstance(
+                        posted_payload.get("poll_groups"), dict
+                    ) or isinstance(posted_payload.get("key_precedence"), dict):
                         merged_payload = {
                             **merged_payload,
                             "poll_groups": {
@@ -5341,7 +5360,7 @@ def start_web_server(
                                 close_modal=True,
                                 toast_level="success",
                                 toast_message=f"Saved profile {profile.name}",
-                            )
+                            ),
                         },
                     )
                 except (ValueError, TypeError, OSError) as err:
@@ -5840,7 +5859,7 @@ def start_web_server(
                                 close_modal=True,
                                 toast_level="success",
                                 toast_message=f"Saved profile {profile.name}",
-                            )
+                            ),
                         },
                     )
                 except (ValueError, TypeError, OSError) as err:

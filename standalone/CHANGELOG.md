@@ -2,6 +2,7 @@
 
 ### ups2mqtt-db
 
+- 5f97fab fix modbus poll plans to selected sensors across drivers
 - cd2cf7c release: v1.2.4 prometheus direct access fix
 - a1465c2 release: v1.2.3 profile restore and poll-interval fixes
 

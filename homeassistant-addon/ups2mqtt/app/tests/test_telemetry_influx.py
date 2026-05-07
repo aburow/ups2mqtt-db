@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ups2mqtt.config import load_config
 from ups2mqtt.main import _enqueue_influx_telemetry, _sanitize_config_for_log
 from ups2mqtt.model import DeviceConfig
-from ups2mqtt.telemetry_influx import InfluxV3TelemetryExporter, format_line_protocol_point
+from ups2mqtt.telemetry_influx import (
+    InfluxV3TelemetryExporter,
+    format_line_protocol_point,
+)
 
 
 def test_format_line_protocol_point_escapes_and_formats() -> None:

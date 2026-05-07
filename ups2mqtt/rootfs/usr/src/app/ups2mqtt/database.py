@@ -842,7 +842,9 @@ class Database:
         """Delete all profiles and clear device profile bindings."""
         conn = self._get_conn()
         cursor = conn.cursor()
-        deleted_count = int(cursor.execute("SELECT COUNT(*) FROM profiles").fetchone()[0])
+        deleted_count = int(
+            cursor.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
+        )
         cursor.execute("DELETE FROM profiles")
         cursor.execute("UPDATE devices SET profile_uid = '', profile_mode = 'local'")
         self._maybe_commit(conn)

@@ -168,7 +168,9 @@ class InfluxV3TelemetryExporter:
     async def run(self) -> None:
         timeout = aiohttp.ClientTimeout(total=self._timeout_seconds)
         connector = aiohttp.TCPConnector(limit=4, enable_cleanup_closed=True)
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector
+        ) as session:
             batch: list[str] = []
             try:
                 while True:
@@ -196,7 +198,9 @@ class InfluxV3TelemetryExporter:
             except asyncio.CancelledError:
                 if batch:
                     try:
-                        await asyncio.wait_for(self._post_lines(session, batch), timeout=1.0)
+                        await asyncio.wait_for(
+                            self._post_lines(session, batch), timeout=1.0
+                        )
                     except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
                         pass
                 raise

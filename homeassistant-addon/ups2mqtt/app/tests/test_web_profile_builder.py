@@ -828,7 +828,10 @@ def test_profiles_form_posts_back_into_modal_for_validation_cycle(
         assert status == HTTPStatus.OK
         assert 'hx-post="/htmx/profiles/actions/upsert"' in body
         assert 'hx-target="#device-modal-content"' in body
-        assert 'type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Cancel</button>' in body
+        assert (
+            'type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Cancel</button>'
+            in body
+        )
         assert 'hx-post="/htmx/profiles/actions/rediscover"' not in body
     finally:
         server.shutdown()
@@ -864,7 +867,9 @@ def test_profile_upsert_success_retargets_admin_panel_and_closes_modal(
         server.server_close()
 
 
-def test_profiles_panel_comment_subtitles_and_generated_prefixes(tmp_path: Path) -> None:
+def test_profiles_panel_comment_subtitles_and_generated_prefixes(
+    tmp_path: Path,
+) -> None:
     server = _start_test_server(tmp_path)
     try:
         db = Database(str(tmp_path / "test.db"))
@@ -1236,7 +1241,9 @@ def test_profile_rediscover_nut_merges_fields_and_preserves_preferences(
         assert "checked" in body
 
         saved = next(
-            item for item in db.load_profiles() if item.profile_uid == "nut-rediscover-merge-1"
+            item
+            for item in db.load_profiles()
+            if item.profile_uid == "nut-rediscover-merge-1"
         )
         assert "rediscover_host" not in saved.config_payload
         assert "rediscover_port" not in saved.config_payload
@@ -1309,6 +1316,7 @@ def test_profile_rediscover_apcupsd_merges_fields_and_preserves_preferences(
     finally:
         server.shutdown()
         server.server_close()
+
 
 def test_local_nut_profile_edit_is_device_only_and_preserves_unknown_keys(
     tmp_path: Path,
