@@ -22,4 +22,5 @@ quickcap.pcap
 ups2mqtt-backup-*-format.json
 ups2mqtt-backup-*.json
 scripts/pull_stats.sh
+full-listing.md
 =9,
