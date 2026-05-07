@@ -100,6 +100,12 @@ Once connected, you can:
 
 ---
 
+## Project rules
+
+- Changelog history is append-only: when updating changelog files, preserve all existing historical entries and do not wipe prior data.
+
+---
+
 ## Compatibility
 
 `ups2mqtt` is designed for mixed UPS environments and supports multiple deployment models.
