@@ -796,7 +796,12 @@ async def _device_loop(
                 endpoint_wait_ms=(poll_started - endpoint_wait_started) * 1000.0,
             )
             values = await asyncio.wait_for(
-                poll_device(runtime_device, profile, set(due_groups)),
+                poll_device(
+                    runtime_device,
+                    profile,
+                    set(due_groups),
+                    selected_keys=allowed_keys,
+                ),
                 timeout=max(2, poll_timeout),
             )
             warning_text = ""

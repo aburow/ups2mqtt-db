@@ -619,6 +619,7 @@ def _poll_modbus_sync(
     poll_groups: set[str] | None = None,
     *,
     suppress_runtime_metadata_merge: bool = False,
+    selected_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     output: dict[str, Any] = {}
 
@@ -628,6 +629,9 @@ def _poll_modbus_sync(
     descriptors = [
         item for item in base_registers if isinstance(item, dict) and item.get("key")
     ]
+    descriptors = _filter_modbus_descriptors_by_selected_keys(
+        device, descriptors, selected_keys
+    )
     register_blocks = [
         item for item in profile.get("register_blocks", []) if isinstance(item, dict)
     ]
@@ -644,6 +648,33 @@ def _poll_modbus_sync(
         for item in register_blocks
         if _block_intersects_descriptors(item, descriptors)
     ]
+    if LOG.isEnabledFor(logging.DEBUG):
+        block_attribution: dict[str, list[str]] = {}
+        for block in register_blocks:
+            start = int(block.get("start_address", -1))
+            count = int(block.get("count", 0))
+            end = start + count
+            covered: list[str] = []
+            for descriptor in descriptors:
+                key = str(descriptor.get("key", "")).strip()
+                try:
+                    address = int(descriptor.get("address", -1))
+                    reg_count = int(descriptor.get("count", 1))
+                except (TypeError, ValueError):
+                    continue
+                if reg_count <= 0:
+                    continue
+                desc_end = address + reg_count
+                if address < end and desc_end > start:
+                    covered.append(key)
+            block_attribution[str(block.get("name", f"{start}:{count}"))] = covered
+        LOG.debug(
+            "[%s] Modbus plan attribution selected=%s descriptors=%s blocks=%s",
+            device.id,
+            sorted(selected_keys or []),
+            [str(item.get("key", "")).strip() for item in descriptors],
+            block_attribution,
+        )
     if not descriptors:
         return output
 
@@ -1265,6 +1296,30 @@ def _filter_modbus_registers_by_catalog(
             or key not in all_catalog_keys
             or key.lower().endswith("_bf")
         ):
+            out.append(item)
+    return out
+
+
+def _filter_modbus_descriptors_by_selected_keys(
+    device: DeviceConfig,
+    descriptors: list[dict[str, Any]],
+    selected_keys: set[str] | None,
+) -> list[dict[str, Any]]:
+    """Constrain modbus descriptors to effective selected keys for this cycle."""
+    if not selected_keys:
+        return descriptors
+    selected = {str(key).strip() for key in selected_keys if str(key).strip()}
+    if not selected:
+        return []
+
+    alias_to_canonical = _catalog_alias_to_canonical_map(device, transport="modbus")
+    out: list[dict[str, Any]] = []
+    for item in descriptors:
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        canonical = alias_to_canonical.get(key, key)
+        if key in selected or canonical in selected:
             out.append(item)
     return out
 
@@ -2024,6 +2079,7 @@ async def _poll_multi_source(
     device: DeviceConfig,
     profile: dict[str, Any],
     groups: set[str],
+    selected_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Poll multi-source driver with explicit tier/overlap validation.
 
@@ -2145,6 +2201,7 @@ async def _poll_multi_source(
             modbus_config,
             groups,
             suppress_runtime_metadata_merge=True,
+            selected_keys=selected_keys,
         )
         LOG.debug(
             "Modbus poll completed for %s: %d values", device.source, len(modbus_values)
@@ -2176,25 +2233,41 @@ async def poll_device(
     device: DeviceConfig,
     profile: dict[str, Any],
     poll_groups: set[str] | None = None,
+    selected_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     groups = poll_groups or {"slow"}
     protocol = profile.get("protocol")
     if protocol == "modbus":
-        return await asyncio.to_thread(_poll_modbus_sync, device, profile, groups)
+        return await asyncio.to_thread(
+            _poll_modbus_sync,
+            device,
+            profile,
+            groups,
+            selected_keys=selected_keys,
+        )
     if protocol == "snmp":
         return await asyncio.to_thread(_poll_snmp_sync, device, profile, groups)
     if protocol == "hybrid":
         modbus_profile = profile.get("modbus", {})
         snmp_profile = profile.get("snmp", {})
         modbus_values = await asyncio.to_thread(
-            _poll_modbus_sync, device, modbus_profile, groups
+            _poll_modbus_sync,
+            device,
+            modbus_profile,
+            groups,
+            selected_keys=selected_keys,
         )
         snmp_values = await asyncio.to_thread(
             _poll_snmp_sync, device, snmp_profile, groups
         )
         return _merge_hybrid_values(device, profile, modbus_values, snmp_values)
     if protocol == "multi_source":
-        return await _poll_multi_source(device, profile, groups)
+        return await _poll_multi_source(
+            device,
+            profile,
+            groups,
+            selected_keys=selected_keys,
+        )
     if protocol == "nut":
         return await asyncio.to_thread(_poll_nut_sync, device, profile, groups)
     if protocol == "apcupsd":
