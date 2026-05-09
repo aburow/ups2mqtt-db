@@ -42,6 +42,12 @@ from .model import DeviceConfig, ProfileConfig
 from .mqtt import MqttPublisher, discovery_unique_id
 from .pollers import (
     _nut_guess_ups_name,
+    close_all_apcupsd_keepalive_sessions,
+    close_all_modbus_keepalive_sessions,
+    close_all_nut_keepalive_sessions,
+    close_apcupsd_keepalive_for_device,
+    close_modbus_keepalive_for_device,
+    close_nut_keepalive_for_device,
     clear_catalog_poll_cache,
     get_idle_reconnect_seconds,
     get_metadata_refresh_interval_seconds,
@@ -655,6 +661,7 @@ async def _device_loop(
         location=device.location,
         debug_logging=device.debug_logging,
         keep_connection_open=device.keep_connection_open,
+        optimizer_v2_enabled=device.optimizer_v2_enabled,
         device_uid=device.device_uid,
         discovery_enabled=device.discovery_enabled,
         polling_enabled=device.polling_enabled,
@@ -727,271 +734,271 @@ async def _device_loop(
                 due += interval
             next_due[group_name] = due
 
-    while True:
-        now = monotonic()
-        startup_cycle = False
-        if startup_poll_sequence:
-            if now < startup_not_before:
-                await asyncio.sleep(min(max(0.1, startup_not_before - now), 0.5))
+    try:
+        while True:
+            now = monotonic()
+            startup_cycle = False
+            if startup_poll_sequence:
+                if now < startup_not_before:
+                    await asyncio.sleep(min(max(0.1, startup_not_before - now), 0.5))
+                    continue
+                due_groups = startup_poll_sequence.pop(0)
+                startup_cycle = True
+            else:
+                due_groups = sorted(
+                    group for group, due_at in next_due.items() if due_at <= now
+                )
+            if not due_groups:
+                sleep_for = min(max(0.1, min(next_due.values()) - now), 0.5)
+                await asyncio.sleep(sleep_for)
                 continue
-            due_groups = startup_poll_sequence.pop(0)
-            startup_cycle = True
-        else:
-            due_groups = sorted(
-                group for group, due_at in next_due.items() if due_at <= now
-            )
-        if not due_groups:
-            sleep_for = min(max(0.1, min(next_due.values()) - now), 0.5)
-            await asyncio.sleep(sleep_for)
-            continue
 
-        identity = device.device_uid or device.id
-        started = monotonic()
-        wait_started = started
-        poll_started = 0.0
-        wait_elapsed = 0.0
-        poll_elapsed = 0.0
-        prepare_elapsed = 0.0
-        publish_elapsed = 0.0
-        type_slot_acquired = False
-        global_slot_acquired = False
-        endpoint_slot_acquired = False
-        try:
-            LOG.debug(
-                "Polling cycle started for %s (groups=%s, allowed_keys=%d)",
-                device.id,
-                ",".join(due_groups),
-                len(allowed_keys),
-            )
-            if type_limiter is not None:
-                type_slot_acquired = type_limiter.try_acquire(runtime_source)
-                if not type_slot_acquired:
+            identity = device.device_uid or device.id
+            started = monotonic()
+            wait_started = started
+            poll_started = 0.0
+            wait_elapsed = 0.0
+            poll_elapsed = 0.0
+            prepare_elapsed = 0.0
+            publish_elapsed = 0.0
+            type_slot_acquired = False
+            global_slot_acquired = False
+            endpoint_slot_acquired = False
+            try:
+                LOG.debug(
+                    "Polling cycle started for %s (groups=%s, allowed_keys=%d)",
+                    device.id,
+                    ",".join(due_groups),
+                    len(allowed_keys),
+                )
+                if type_limiter is not None:
+                    type_slot_acquired = type_limiter.try_acquire(runtime_source)
+                    if not type_slot_acquired:
+                        metrics.record_missed_capacity(identity, runtime_source)
+                        _advance_due_groups(due_groups, monotonic())
+                        continue
+                global_slot_acquired = global_poll_semaphore.try_acquire(runtime_source)
+                if not global_slot_acquired:
                     metrics.record_missed_capacity(identity, runtime_source)
                     _advance_due_groups(due_groups, monotonic())
                     continue
-            global_slot_acquired = global_poll_semaphore.try_acquire(runtime_source)
-            if not global_slot_acquired:
-                metrics.record_missed_capacity(identity, runtime_source)
-                _advance_due_groups(due_groups, monotonic())
-                continue
-            endpoint_wait_started = monotonic()
-            if endpoint_semaphore.locked():
-                LOG.debug(
-                    "Endpoint lock busy for %s: %s",
-                    device.id,
-                    endpoint_key,
-                )
-                metrics.record_missed_capacity(identity, runtime_source)
-                _advance_due_groups(due_groups, monotonic())
-                continue
-            await endpoint_semaphore.acquire()
-            endpoint_slot_acquired = True
-
-            metrics.record_start(identity, runtime_source)
-            poll_started = monotonic()
-            metrics.record_dequeue(
-                identity,
-                runtime_source,
-                wait_ms=(poll_started - wait_started) * 1000.0,
-                endpoint_wait_ms=(poll_started - endpoint_wait_started) * 1000.0,
-            )
-            values = await asyncio.wait_for(
-                poll_device(
-                    runtime_device,
-                    profile,
-                    set(due_groups),
-                    selected_keys=allowed_keys,
-                ),
-                timeout=max(2, poll_timeout),
-            )
-            warning_text = ""
-            if isinstance(values, dict):
-                warning_raw = values.pop("__poll_warning__", "")
-                if warning_raw:
-                    warning_text = str(warning_raw)
-            wait_elapsed = max(0.0, poll_started - wait_started)
-            poll_elapsed = max(0.0, monotonic() - poll_started)
-            prepare_started = monotonic()
-            publish_elapsed = 0.0
-            if values:
-                # Derive bit-flag sensor values from raw polled registers using catalog
-                # metadata. Uses cached raw values from slow polls when not freshly polled.
-                # This must happen before the allowed_keys filter so that derived
-                # keys (e.g. online_state from ups_status_bf:bit1) are included.
-                _apply_catalog_derived_values(
-                    values, runtime_source, apps_dir, allowed_keys, raw_bitfield_cache
-                )
-                values = apply_catalog_transforms(
-                    values,
-                    device_uid=identity,
-                    runtime_source=runtime_source,
-                    apps_dir=apps_dir,
-                    value_cache=raw_bitfield_cache,
-                )
-                LOG.debug(
-                    "Polling for %s returned %d values (after derivation): %s",
-                    device.id,
-                    len(values),
-                    _format_key_list(list(values.keys()), max_display=15),
-                )
-                mqtt_values = {
-                    key: value for key, value in values.items() if key in allowed_keys
-                }
-                filtered_count = len(values) - len(mqtt_values)
-                if filtered_count > 0:
-                    filtered_keys = set(values.keys()) - set(mqtt_values.keys())
+                endpoint_wait_started = monotonic()
+                if endpoint_semaphore.locked():
                     LOG.debug(
-                        "Polling for %s: filtered out %d keys not in allowed_keys: %s",
+                        "Endpoint lock busy for %s: %s",
                         device.id,
-                        filtered_count,
-                        _format_key_list(list(filtered_keys), max_display=10),
+                        endpoint_key,
                     )
+                    metrics.record_missed_capacity(identity, runtime_source)
+                    _advance_due_groups(due_groups, monotonic())
+                    continue
+                await endpoint_semaphore.acquire()
+                endpoint_slot_acquired = True
 
-                # Keys not returned in this cycle were not polled for this group mix
-                # (e.g. slow-only keys during a fast cycle). Do not overwrite them
-                # with null; let MQTT state cache preserve last-known values.
-                not_polled = allowed_keys - set(values.keys())
-                if not_polled:
+                metrics.record_start(identity, runtime_source)
+                poll_started = monotonic()
+                metrics.record_dequeue(
+                    identity,
+                    runtime_source,
+                    wait_ms=(poll_started - wait_started) * 1000.0,
+                    endpoint_wait_ms=(poll_started - endpoint_wait_started) * 1000.0,
+                )
+                values = await asyncio.wait_for(
+                    poll_device(
+                        runtime_device,
+                        profile,
+                        set(due_groups),
+                        selected_keys=allowed_keys,
+                    ),
+                    timeout=max(2, poll_timeout),
+                )
+                warning_text = ""
+                if isinstance(values, dict):
+                    warning_raw = values.pop("__poll_warning__", "")
+                    if warning_raw:
+                        warning_text = str(warning_raw)
+                wait_elapsed = max(0.0, poll_started - wait_started)
+                poll_elapsed = max(0.0, monotonic() - poll_started)
+                prepare_started = monotonic()
+                publish_elapsed = 0.0
+                if values:
+                    _apply_catalog_derived_values(
+                        values,
+                        runtime_source,
+                        apps_dir,
+                        allowed_keys,
+                        raw_bitfield_cache,
+                    )
+                    values = apply_catalog_transforms(
+                        values,
+                        device_uid=identity,
+                        runtime_source=runtime_source,
+                        apps_dir=apps_dir,
+                        value_cache=raw_bitfield_cache,
+                        required_keys=set(allowed_keys),
+                    )
                     LOG.debug(
-                        "Device %s: %d allowed keys not polled this cycle; preserving previous state for: %s",
-                        device.id,
-                        len(not_polled),
-                        _format_key_list(list(not_polled), max_display=10),
-                    )
-
-                prepare_elapsed = max(0.0, monotonic() - prepare_started)
-                publish_started = monotonic()
-                published = mqtt.publish_state(
-                    runtime_device,
-                    mqtt_values,
-                    discovery_keys=discovery_keys,
-                )
-                _enqueue_influx_telemetry(
-                    influx_exporter,
-                    device=runtime_device,
-                    runtime_source=runtime_source,
-                    values=mqtt_values,
-                )
-                publish_elapsed = max(0.0, monotonic() - publish_started)
-                if published:
-                    LOG.info(
-                        "Published %d values for %s (polled=%d, filtered=%d)",
-                        len(mqtt_values),
+                        "Polling for %s returned %d values (after derivation): %s",
                         device.id,
                         len(values),
-                        filtered_count,
+                        _format_key_list(list(values.keys()), max_display=15),
+                    )
+                    mqtt_values = {
+                        key: value for key, value in values.items() if key in allowed_keys
+                    }
+                    filtered_count = len(values) - len(mqtt_values)
+                    if filtered_count > 0:
+                        filtered_keys = set(values.keys()) - set(mqtt_values.keys())
+                        LOG.debug(
+                            "Polling for %s: filtered out %d keys not in allowed_keys: %s",
+                            device.id,
+                            filtered_count,
+                            _format_key_list(list(filtered_keys), max_display=10),
+                        )
+                    not_polled = allowed_keys - set(values.keys())
+                    if not_polled:
+                        LOG.debug(
+                            "Device %s: %d allowed keys not polled this cycle; preserving previous state for: %s",
+                            device.id,
+                            len(not_polled),
+                            _format_key_list(list(not_polled), max_display=10),
+                        )
+                    prepare_elapsed = max(0.0, monotonic() - prepare_started)
+                    publish_started = monotonic()
+                    published = mqtt.publish_state(
+                        runtime_device,
+                        mqtt_values,
+                        discovery_keys=discovery_keys,
+                    )
+                    _enqueue_influx_telemetry(
+                        influx_exporter,
+                        device=runtime_device,
+                        runtime_source=runtime_source,
+                        values=mqtt_values,
+                    )
+                    publish_elapsed = max(0.0, monotonic() - publish_started)
+                    if published:
+                        LOG.info(
+                            "Published %d values for %s (polled=%d, filtered=%d)",
+                            len(mqtt_values),
+                            device.id,
+                            len(values),
+                            filtered_count,
+                        )
+                    else:
+                        LOG.info(
+                            "Polled %d values for %s (MQTT disabled/offline, filtered=%d)",
+                            len(mqtt_values),
+                            device.id,
+                            filtered_count,
+                        )
+                    _maybe_emit_device_debug(device.debug_logging, device.id, mqtt_values)
+                    metrics.record_success(
+                        identity,
+                        (monotonic() - started) * 1000,
+                        len(values),
+                        warning=warning_text,
+                        wait_ms=wait_elapsed * 1000,
+                        poll_ms=poll_elapsed * 1000,
+                        prepare_ms=prepare_elapsed * 1000,
+                        publish_ms=publish_elapsed * 1000,
                     )
                 else:
-                    LOG.info(
-                        "Polled %d values for %s (MQTT disabled/offline, filtered=%d)",
-                        len(mqtt_values),
-                        device.id,
-                        filtered_count,
+                    prepare_elapsed = max(0.0, monotonic() - prepare_started)
+                    LOG.warning("No values read for %s", device.id)
+                    metrics.record_success(
+                        identity,
+                        (monotonic() - started) * 1000,
+                        0,
+                        warning=warning_text,
+                        wait_ms=wait_elapsed * 1000,
+                        poll_ms=poll_elapsed * 1000,
+                        prepare_ms=prepare_elapsed * 1000,
+                        publish_ms=publish_elapsed * 1000,
                     )
-                _maybe_emit_device_debug(
-                    device.debug_logging,
-                    device.id,
-                    mqtt_values,
-                )
-                metrics.record_success(
-                    identity,
-                    (monotonic() - started) * 1000,
-                    len(values),
-                    warning=warning_text,
-                    wait_ms=wait_elapsed * 1000,
-                    poll_ms=poll_elapsed * 1000,
-                    prepare_ms=prepare_elapsed * 1000,
-                    publish_ms=publish_elapsed * 1000,
-                )
-            else:
-                prepare_elapsed = max(0.0, monotonic() - prepare_started)
-                LOG.warning("No values read for %s", device.id)
-                metrics.record_success(
-                    identity,
-                    (monotonic() - started) * 1000,
-                    0,
-                    warning=warning_text,
-                    wait_ms=wait_elapsed * 1000,
-                    poll_ms=poll_elapsed * 1000,
-                    prepare_ms=prepare_elapsed * 1000,
-                    publish_ms=publish_elapsed * 1000,
-                )
-            cycle_elapsed = max(0.0, monotonic() - started)
-            perf_cycles += 1
-            perf_total_s += cycle_elapsed
-            perf_wait_s += wait_elapsed
-            perf_poll_s += poll_elapsed
-            perf_prepare_s += prepare_elapsed
-            perf_publish_s += publish_elapsed
-            if perf_cycles >= perf_sample_every:
+                cycle_elapsed = max(0.0, monotonic() - started)
+                perf_cycles += 1
+                perf_total_s += cycle_elapsed
+                perf_wait_s += wait_elapsed
+                perf_poll_s += poll_elapsed
+                perf_prepare_s += prepare_elapsed
+                perf_publish_s += publish_elapsed
+                if perf_cycles >= perf_sample_every:
+                    LOG.info(
+                        "Perf sample [%s] cycles=%d avg_total=%.3fs avg_wait=%.3fs avg_poll=%.3fs avg_prepare=%.3fs avg_publish=%.3fs",
+                        device.id,
+                        perf_cycles,
+                        perf_total_s / perf_cycles,
+                        perf_wait_s / perf_cycles,
+                        perf_poll_s / perf_cycles,
+                        perf_prepare_s / perf_cycles,
+                        perf_publish_s / perf_cycles,
+                    )
+                    perf_cycles = 0
+                    perf_total_s = 0.0
+                    perf_wait_s = 0.0
+                    perf_poll_s = 0.0
+                    perf_prepare_s = 0.0
+                    perf_publish_s = 0.0
                 LOG.info(
-                    "Perf sample [%s] cycles=%d avg_total=%.3fs avg_wait=%.3fs avg_poll=%.3fs avg_prepare=%.3fs avg_publish=%.3fs",
+                    "Polling cycle completed for %s in %.2fs",
                     device.id,
-                    perf_cycles,
-                    perf_total_s / perf_cycles,
-                    perf_wait_s / perf_cycles,
-                    perf_poll_s / perf_cycles,
-                    perf_prepare_s / perf_cycles,
-                    perf_publish_s / perf_cycles,
+                    monotonic() - started,
                 )
-                perf_cycles = 0
-                perf_total_s = 0.0
-                perf_wait_s = 0.0
-                perf_poll_s = 0.0
-                perf_prepare_s = 0.0
-                perf_publish_s = 0.0
-            LOG.info(
-                "Polling cycle completed for %s in %.2fs",
-                device.id,
-                monotonic() - started,
-            )
-        except TimeoutError:
-            if poll_started:
-                wait_elapsed = max(0.0, poll_started - wait_started)
-                poll_elapsed = max(0.0, monotonic() - poll_started)
-            LOG.error("Polling timeout for %s after %ss", device.id, poll_timeout)
-            metrics.record_timeout(
-                identity,
-                (monotonic() - started) * 1000,
-                poll_timeout,
-                wait_ms=wait_elapsed * 1000,
-                poll_ms=poll_elapsed * 1000,
-                prepare_ms=prepare_elapsed * 1000,
-                publish_ms=publish_elapsed * 1000,
-            )
-        except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
-            if poll_started:
-                wait_elapsed = max(0.0, poll_started - wait_started)
-                poll_elapsed = max(0.0, monotonic() - poll_started)
-            LOG.exception("Polling failed for %s: %s", device.id, err)
-            metrics.record_failure(
-                identity,
-                (monotonic() - started) * 1000,
-                str(err),
-                wait_ms=wait_elapsed * 1000,
-                poll_ms=poll_elapsed * 1000,
-                prepare_ms=prepare_elapsed * 1000,
-                publish_ms=publish_elapsed * 1000,
-            )
-        finally:
-            if endpoint_slot_acquired:
-                endpoint_semaphore.release()
-            if global_slot_acquired:
-                await global_poll_semaphore.release(runtime_source)
-            if type_slot_acquired and type_limiter is not None:
-                await type_limiter.release(runtime_source)
-        next_base = monotonic()
-        if startup_cycle:
-            continue
-        for group in due_groups:
-            interval = float(group_intervals.get(group, base_interval))
-            due = float(next_due.get(group, next_base + interval))
-            next_slot = due + interval
-            while next_slot <= next_base:
-                metrics.record_missed_overlap(identity, runtime_source)
-                next_slot += interval
-            # Preserve fixed-rate cadence rather than drifting to now+interval.
-            next_due[group] = next_slot
+            except TimeoutError:
+                if poll_started:
+                    wait_elapsed = max(0.0, poll_started - wait_started)
+                    poll_elapsed = max(0.0, monotonic() - poll_started)
+                LOG.error("Polling timeout for %s after %ss", device.id, poll_timeout)
+                metrics.record_timeout(
+                    identity,
+                    (monotonic() - started) * 1000,
+                    poll_timeout,
+                    wait_ms=wait_elapsed * 1000,
+                    poll_ms=poll_elapsed * 1000,
+                    prepare_ms=prepare_elapsed * 1000,
+                    publish_ms=publish_elapsed * 1000,
+                )
+            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                if poll_started:
+                    wait_elapsed = max(0.0, poll_started - wait_started)
+                    poll_elapsed = max(0.0, monotonic() - poll_started)
+                LOG.exception("Polling failed for %s: %s", device.id, err)
+                metrics.record_failure(
+                    identity,
+                    (monotonic() - started) * 1000,
+                    str(err),
+                    wait_ms=wait_elapsed * 1000,
+                    poll_ms=poll_elapsed * 1000,
+                    prepare_ms=prepare_elapsed * 1000,
+                    publish_ms=publish_elapsed * 1000,
+                )
+            finally:
+                if endpoint_slot_acquired:
+                    endpoint_semaphore.release()
+                if global_slot_acquired:
+                    await global_poll_semaphore.release(runtime_source)
+                if type_slot_acquired and type_limiter is not None:
+                    await type_limiter.release(runtime_source)
+            next_base = monotonic()
+            if startup_cycle:
+                continue
+            for group in due_groups:
+                interval = float(group_intervals.get(group, base_interval))
+                due = float(next_due.get(group, next_base + interval))
+                next_slot = due + interval
+                while next_slot <= next_base:
+                    metrics.record_missed_overlap(identity, runtime_source)
+                    next_slot += interval
+                # Preserve fixed-rate cadence rather than drifting to now+interval.
+                next_due[group] = next_slot
+    finally:
+        if profile.get("protocol") == "modbus" and device.keep_connection_open:
+            close_modbus_keepalive_for_device(runtime_device)
+        if runtime_source == "nut_network_upsd" and device.keep_connection_open:
+            close_nut_keepalive_for_device(runtime_device, profile)
+        if runtime_source == "apcupsd_network_nis" and device.keep_connection_open:
+            close_apcupsd_keepalive_for_device(runtime_device)
 
 
 def _round_robin_devices_by_source(devices: list[DeviceConfig]) -> list[DeviceConfig]:
@@ -1278,6 +1285,7 @@ def _runtime_device_with_source(device: DeviceConfig, source: str) -> DeviceConf
         location=device.location,
         debug_logging=device.debug_logging,
         keep_connection_open=device.keep_connection_open,
+        optimizer_v2_enabled=device.optimizer_v2_enabled,
         device_uid=device.device_uid,
         discovery_enabled=device.discovery_enabled,
         polling_enabled=device.polling_enabled,
@@ -2076,6 +2084,7 @@ async def async_main() -> None:
             location=device.location,
             debug_logging=device.debug_logging,
             keep_connection_open=device.keep_connection_open,
+            optimizer_v2_enabled=device.optimizer_v2_enabled,
             device_uid=device.device_uid,
             discovery_enabled=device.discovery_enabled,
             polling_enabled=device.polling_enabled,
@@ -2220,6 +2229,7 @@ async def async_main() -> None:
             set_ha_bridge_enabled=_set_ha_bridge_enabled,
             get_cached_ha_payload_preview=mqtt.get_cached_ha_payload_preview,
             get_prometheus_samples=mqtt.get_prometheus_numeric_samples,
+            get_runtime_warnings=mqtt.get_runtime_warnings,
         )
         metrics_port = int(os.environ.get("UPS2MQTT_METRICS_PORT", "8100"))
         metrics_host = str(os.environ.get("UPS2MQTT_METRICS_HOST", config.web_host))
@@ -2474,6 +2484,9 @@ async def async_main() -> None:
         if metrics_server is not None:
             metrics_server.shutdown()
             metrics_server.server_close()
+        close_all_modbus_keepalive_sessions()
+        close_all_nut_keepalive_sessions()
+        close_all_apcupsd_keepalive_sessions()
         if influx_task is not None:
             with suppress(asyncio.CancelledError):
                 await influx_task

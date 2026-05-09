@@ -172,6 +172,7 @@ def test_export_global_profile_device_includes_uid_and_profile_snapshot(
         assert payload["devices"][0]["profile_uid"] == "profile-1"
         assert payload["devices"][0]["profile_mode"] == "global"
         assert payload["devices"][0]["config"]["ups_name"] == "ignored-for-modbus"
+        assert payload["devices"][0]["config"]["optimizer_v2_enabled"] is True
         assert payload["devices"][0]["location"] == ""
         assert any(item["profile_uid"] == "profile-1" for item in payload["profiles"])
     finally:
@@ -623,7 +624,7 @@ def test_csv_import_template_route_returns_headers_only(tmp_path: Path) -> None:
         assert status == HTTPStatus.OK
         assert headers.get("Content-Type", "").startswith("text/csv")
         assert body == (
-            "ID,Source,Host,Port,SNMPPort,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
+            "ID,Source,Host,Port,SNMPPort,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,OptimizedV2,Discovery,Polling\n"
         )
     finally:
         server.shutdown()
@@ -1444,8 +1445,8 @@ def test_csv_import_supports_location_column(tmp_path: Path) -> None:
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
         csv_payload = (
-            "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,Discovery,Polling\n"
-            "legacy-2,apc_modbus_smt,127.0.0.2,502,1,public,,Legacy Two,DC Room,false,false,true,true"
+            "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Location,Debug,KeepConnectionOpen,OptimizedV2,Discovery,Polling\n"
+            "legacy-2,apc_modbus_smt,127.0.0.2,502,1,public,,Legacy Two,DC Room,false,false,false,true,true"
         )
         status, _body, _headers = _post(
             base_url,
@@ -1455,6 +1456,7 @@ def test_csv_import_supports_location_column(tmp_path: Path) -> None:
         assert status == HTTPStatus.OK
         imported = next(item for item in db.load_devices() if item.id == "legacy-2")
         assert imported.location == "DC Room"
+        assert imported.optimizer_v2_enabled is False
     finally:
         server.shutdown()
         server.server_close()

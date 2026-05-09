@@ -14,7 +14,9 @@ from .capability_repository import get_capability_repository
 LOG = logging.getLogger("ups2mqtt")
 
 _MISSING_SOURCE_LOG_INTERVAL_S = 60.0
+_MISSING_SOURCE_STARTUP_GRACE_S = 30.0
 _MISSING_SOURCE_WARNINGS: dict[tuple[str, str, str], float] = {}
+_MISSING_SOURCE_FIRST_SEEN: dict[tuple[str, str, str], float] = {}
 _UNMAPPED_VALUE_WARNINGS: dict[tuple[str, str, str], float] = {}
 _SUPPORTED_TRANSFORMS = {
     "bitfield_bit_to_bool",
@@ -113,9 +115,24 @@ def _rate_limited_missing_source_warning(
     *,
     device_uid: str,
     output_key: str,
+    source_key: str,
+    source_seen_before: bool,
 ) -> None:
     rate_key = (device_uid, output_key, "missing_source")
     now = monotonic()
+    if not source_seen_before:
+        first_seen = _MISSING_SOURCE_FIRST_SEEN.get(rate_key)
+        if first_seen is None:
+            _MISSING_SOURCE_FIRST_SEEN[rate_key] = now
+            LOG.debug(
+                "Transform pending source during warmup: %s source=%s",
+                output_key,
+                source_key,
+            )
+            return
+        if now - first_seen < _MISSING_SOURCE_STARTUP_GRACE_S:
+            return
+
     last_logged = _MISSING_SOURCE_WARNINGS.get(rate_key, 0.0)
     if now - last_logged < _MISSING_SOURCE_LOG_INTERVAL_S:
         return
@@ -275,6 +292,7 @@ def apply_catalog_transforms(
     runtime_source: str,
     apps_dir: str | None,
     value_cache: dict[str, Any] | None = None,
+    required_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Apply catalog-declared transforms to polled values (v1.1 contract)."""
     output = dict(values)
@@ -326,6 +344,16 @@ def apply_catalog_transforms(
         if source_key in declared_output_keys:
             continue
 
+        if required_keys is not None:
+            needed = output_key in required_keys or source_key in required_keys
+            if not needed:
+                LOG.debug(
+                    "Transform skipped (not required by selected keys): %s source=%s",
+                    output_key,
+                    source_key,
+                )
+                continue
+
         existing_value = output.get(output_key)
         if existing_value is not None:
             continue
@@ -348,6 +376,8 @@ def apply_catalog_transforms(
             _rate_limited_missing_source_warning(
                 device_uid=device_uid,
                 output_key=output_key,
+                source_key=source_key,
+                source_seen_before=(source_key in value_cache),
             )
             continue
         source_value, source_origin = resolved

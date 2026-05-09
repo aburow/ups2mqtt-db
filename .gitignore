@@ -24,3 +24,19 @@ ups2mqtt-backup-*.json
 scripts/pull_stats.sh
 full-listing.md
 =9,
+
+# Local captures and benchmark artifacts
+barry_test.pcap
+barry_test2.pcap
+tttt*.pcap
+ups2mqtt_modbus_snmp_mqtt.pcap
+ups2mqtt_polling_only.pcapng
+benchmark-results/
+keepconn-off.txt
+keepconn-on.txt
+keepconn-v2-forced-3min.txt
+
+# Local docs/scripts used for bench triage
+scripts/report_modbus_performance_snapshot.sh
+docs/MODBUS_V2_STABILIZATION.md
+docs/V2_READINESS.md

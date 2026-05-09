@@ -25,6 +25,7 @@ class DeviceConfig:
     location: str | None = None
     debug_logging: bool = False
     keep_connection_open: bool = False
+    optimizer_v2_enabled: bool = True
     device_uid: str = ""
     discovery_enabled: bool = True
     polling_enabled: bool = True
@@ -48,6 +49,7 @@ class DeviceConfig:
         int | None,
         str | None,
         str | None,
+        bool,
         bool,
         bool,
         str,
@@ -84,6 +86,7 @@ class DeviceConfig:
             self.location,
             self.debug_logging,
             self.keep_connection_open,
+            self.optimizer_v2_enabled,
             self.device_uid,
             self.discovery_enabled,
             self.polling_enabled,

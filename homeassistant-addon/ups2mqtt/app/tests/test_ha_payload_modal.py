@@ -31,6 +31,7 @@ def _start_test_server(
     tmp_path: Path,
     devices: list[DeviceConfig],
     preview_callback,
+    runtime_warnings_callback=lambda: [],
 ):
     db = Database(str(tmp_path / "test.db"))
     store = DeviceStore(devices, db)
@@ -57,6 +58,7 @@ def _start_test_server(
         get_metrics_snapshot=lambda: {},
         trigger_reload=_reload,
         get_cached_ha_payload_preview=preview_callback,
+        get_runtime_warnings=runtime_warnings_callback,
     )
     return server, callback_calls
 
@@ -271,6 +273,34 @@ def test_metrics_panel_renders_ha_payload_data_button_with_device_id(
         )
         assert 'hx-target="#device-modal-content"' in body
         assert '@click="modalOpen = true"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_devices_page_renders_persistent_runtime_warning_banner_for_mqtt_auth_failure(
+    tmp_path: Path,
+) -> None:
+    warning = {
+        "code": "mqtt_auth_failed",
+        "level": "danger",
+        "message": "MQTT authentication failed for 192.168.100.41:1883.",
+        "details": "Not authorized",
+    }
+    server, _ = _start_test_server(
+        tmp_path=tmp_path,
+        devices=[],
+        preview_callback=lambda _device: {},
+        runtime_warnings_callback=lambda: [warning],
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices")
+        assert status == HTTPStatus.OK
+        assert "Runtime Warning:" in body
+        assert "MQTT authentication failed for 192.168.100.41:1883." in body
+        assert "data-runtime-warning-code=\"mqtt_auth_failed\"" in body
+        assert "Not authorized" in body
     finally:
         server.shutdown()
         server.server_close()

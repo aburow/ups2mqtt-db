@@ -9,6 +9,7 @@ import importlib.util
 import json
 import logging
 import math
+import os
 import threading
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -63,6 +64,7 @@ CSV_IMPORT_HEADERS = [
     "Location",
     "Debug",
     "KeepConnectionOpen",
+    "OptimizedV2",
     "Discovery",
     "Polling",
 ]
@@ -770,6 +772,7 @@ def _build_form_values(data: dict[str, list[str]]) -> DeviceConfig:
         location=(data.get("location", [""])[0]).strip() or None,
         debug_logging=_bool_from_form(data, "debug_logging"),
         keep_connection_open=_bool_from_form(data, "keep_connection_open"),
+        optimizer_v2_enabled=True,
         device_uid=(data.get("device_uid", [""])[0]).strip(),
         discovery_enabled=_bool_from_form(data, "discovery_enabled"),
         polling_enabled=_bool_from_form(data, "polling_enabled"),
@@ -781,6 +784,7 @@ def _clone_device(
     *,
     debug_logging: bool | None = None,
     keep_connection_open: bool | None = None,
+    optimizer_v2_enabled: bool | None = None,
     discovery_enabled: bool | None = None,
     polling_enabled: bool | None = None,
 ) -> DeviceConfig:
@@ -801,6 +805,11 @@ def _clone_device(
             device.keep_connection_open
             if keep_connection_open is None
             else keep_connection_open
+        ),
+        optimizer_v2_enabled=(
+            device.optimizer_v2_enabled
+            if optimizer_v2_enabled is None
+            else optimizer_v2_enabled
         ),
         device_uid=device.device_uid,
         discovery_enabled=(
@@ -845,7 +854,7 @@ def _generate_devices_csv(devices: list[DeviceConfig]) -> str:
     lines = [",".join(CSV_IMPORT_HEADERS)]
     for d in devices:
         lines.append(
-            f"{d.id},{d.source},{d.host},{d.port},{d.snmp_port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{(d.location or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.discovery_enabled},{d.polling_enabled}"
+            f"{d.id},{d.source},{d.host},{d.port},{d.snmp_port},{d.unit_id},{d.snmp_community},{d.poll_interval or ''},{(d.name or '').replace(',', ' ')},{(d.location or '').replace(',', ' ')},{d.debug_logging},{d.keep_connection_open},{d.optimizer_v2_enabled},{d.discovery_enabled},{d.polling_enabled}"
         )
     return "\n".join(lines)
 
@@ -1205,6 +1214,7 @@ def start_web_server(
     get_prometheus_samples: (
         Callable[[list[DeviceConfig]], list[dict[str, str | float]]] | None
     ) = None,
+    get_runtime_warnings: Callable[[], list[dict[str, str]]] | None = None,
     metrics_only: bool = False,
     web_base_path: str = "/",
     minimum_poll_interval: int = DEFAULT_POLL_INTERVAL_SECONDS,
@@ -2421,12 +2431,17 @@ def start_web_server(
         header = [str(item).strip() for item in lines[0]]
         header_map = {item.lower(): index for index, item in enumerate(header)}
         has_location_column = "location" in header_map
+        has_optimized_v2_column = "optimizedv2" in header_map
         count = 0
         db = _profile_db()
         tx = db.transaction() if db is not None else nullcontext()
         with tx:
             for row in lines[1:]:
-                required_cells = 13 if has_location_column else 12
+                required_cells = (
+                    14
+                    if has_location_column
+                    else (13 if has_optimized_v2_column else 12)
+                )
                 if len(row) < required_cells:
                     LOG.warning("Skipping malformed CSV line: %s", row)
                     continue
@@ -2476,15 +2491,25 @@ def start_web_server(
                             )
                         ).lower()
                         in {"true", "1", "yes"},
+                        optimizer_v2_enabled=str(
+                            _cell_by_header(
+                                "OptimizedV2",
+                                11
+                                if has_location_column
+                                else (10 if has_optimized_v2_column else -1),
+                            )
+                            or "true"
+                        ).lower()
+                        in {"true", "1", "yes"},
                         discovery_enabled=str(
                             _cell_by_header(
-                                "Discovery", 11 if has_location_column else 10
+                                "Discovery", 12 if has_location_column else 11
                             )
                         ).lower()
                         in {"true", "1", "yes"},
                         polling_enabled=str(
                             _cell_by_header(
-                                "Polling", 12 if has_location_column else 11
+                                "Polling", 13 if has_location_column else 12
                             )
                         ).lower()
                         in {"true", "1", "yes"},
@@ -2604,6 +2629,7 @@ def start_web_server(
                         ),
                         "debug_logging": bool(device.debug_logging),
                         "keep_connection_open": bool(device.keep_connection_open),
+                        "optimizer_v2_enabled": bool(device.optimizer_v2_enabled),
                         "discovery_enabled": bool(device.discovery_enabled),
                         "polling_enabled": bool(device.polling_enabled),
                     },
@@ -2679,6 +2705,7 @@ def start_web_server(
             "location": str(device.location or ""),
             "debug_logging": bool(device.debug_logging),
             "keep_connection_open": bool(device.keep_connection_open),
+            "optimizer_v2_enabled": bool(device.optimizer_v2_enabled),
             "discovery_enabled": bool(device.discovery_enabled),
             "polling_enabled": bool(device.polling_enabled),
             "profile_uid": str(device.profile_uid or ""),
@@ -3075,6 +3102,9 @@ def start_web_server(
                 keep_connection_open=_to_bool(
                     config_payload.get("keep_connection_open"), default=False
                 ),
+                optimizer_v2_enabled=_to_bool(
+                    config_payload.get("optimizer_v2_enabled"), default=True
+                ),
                 device_uid=device_uid,
                 discovery_enabled=_to_bool(
                     config_payload.get("discovery_enabled"), default=True
@@ -3464,6 +3494,7 @@ def start_web_server(
             "location": "",
             "debug_logging": False,
             "keep_connection_open": False,
+            "optimizer_v2_enabled": True,
             "discovery_enabled": True,
             "polling_enabled": True,
             "original_id": "",
@@ -3500,6 +3531,7 @@ def start_web_server(
             "location": device.location or "",
             "debug_logging": bool(device.debug_logging),
             "keep_connection_open": bool(device.keep_connection_open),
+            "optimizer_v2_enabled": bool(device.optimizer_v2_enabled),
             "discovery_enabled": bool(device.discovery_enabled),
             "polling_enabled": bool(device.polling_enabled),
             "original_id": device.id,
@@ -3635,6 +3667,9 @@ def start_web_server(
         is_snmp_driver = "snmp" in driver_key_text and not is_apcupsd_driver
         is_modbus_like_driver = ("modbus" in driver_key_text) or (
             not is_nut_driver and not is_apcupsd_driver and not is_snmp_driver
+        )
+        keep_connection_controls_allowed = (
+            is_modbus_like_driver or is_nut_driver or is_apcupsd_driver
         )
         contract_profile = _eligible_profile_drivers().get(driver_key)
         selected_profile_missing = bool(
@@ -3918,6 +3953,8 @@ def start_web_server(
             "show_snmp_port_field": is_snmp_driver or is_modbus_like_driver,
             "show_snmp_community_field": is_snmp_driver or is_modbus_like_driver,
             "show_unit_id_field": is_modbus_like_driver,
+            "modbus_controls_allowed": is_modbus_like_driver,
+            "keep_connection_controls_allowed": keep_connection_controls_allowed,
             "profile_mode": profile_mode,
             "is_local_mode": local_mode,
             "poll_group_rows": poll_group_rows,
@@ -3960,6 +3997,7 @@ def start_web_server(
             poll_interval_value,
             normalized_minimum_poll_interval,
         )
+        modbus_controls_allowed = "modbus" in str(source or "").lower()
 
         profile_uid = (data.get("profile_uid", [""])[0]).strip()
         profile_mode = (data.get("profile_mode", [""])[0]).strip().lower() or "local"
@@ -4156,6 +4194,14 @@ def start_web_server(
                 else:
                     raise ValueError("Profile is required")
 
+        modbus_controls_allowed = "modbus" in str(source or "").lower()
+        source_text = str(source or "").lower()
+        keep_connection_controls_allowed = (
+            modbus_controls_allowed
+            or source_text.startswith("nut")
+            or source_text.startswith("apcupsd")
+        )
+
         return DeviceConfig(
             id=device_id,
             source=source,
@@ -4170,7 +4216,24 @@ def start_web_server(
             name=(data.get("name", [""])[0]).strip() or None,
             location=(data.get("location", [""])[0]).strip() or None,
             debug_logging=_bool_from_form(data, "debug_logging"),
-            keep_connection_open=_bool_from_form(data, "keep_connection_open"),
+            keep_connection_open=(
+                _bool_from_form(data, "keep_connection_open")
+                if keep_connection_controls_allowed
+                else (
+                    existing_device.keep_connection_open
+                    if existing_device is not None
+                    else False
+                )
+            ),
+            optimizer_v2_enabled=(
+                _bool_from_form(data, "optimizer_v2_enabled")
+                if modbus_controls_allowed
+                else (
+                    existing_device.optimizer_v2_enabled
+                    if existing_device is not None
+                    else True
+                )
+            ),
             device_uid=(data.get("device_uid", [""])[0]).strip(),
             discovery_enabled=_bool_from_form(data, "discovery_enabled"),
             polling_enabled=_bool_from_form(data, "polling_enabled"),
@@ -4467,11 +4530,18 @@ def start_web_server(
 
             if parsed_path.path == "/htmx/devices":
                 filters = _device_filter_values_from_params(params)
+                runtime_warnings: list[dict[str, str]] = []
+                if get_runtime_warnings is not None:
+                    try:
+                        runtime_warnings = list(get_runtime_warnings())
+                    except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                        LOG.debug("Runtime warning fetch failed: %s", err)
                 payload = templates.get_template("htmx/devices_page.html").render(
                     initial_panel_html=_render_htmx_devices_panel(filters),
                     initial_theme_choice=_normalize_theme(theme_getter()),
                     sidebar_versions=_sidebar_version_items(),
                     web_base_path=self._request_base_path(),
+                    runtime_warnings=runtime_warnings,
                 )
                 self._send_html(payload)
                 return True
@@ -4915,6 +4985,25 @@ def start_web_server(
                     field_label = "Logging"
                     enabled = updated.debug_logging
                 elif field == "keep_connection_open":
+                    source_text = str(current.source or "").lower()
+                    if (
+                        "modbus" not in source_text
+                        and not source_text.startswith("nut")
+                        and not source_text.startswith("apcupsd")
+                    ):
+                        self._send_html(
+                            _render_htmx_devices_table(filters),
+                            status=HTTPStatus.BAD_REQUEST,
+                            headers={
+                                "HX-Trigger": _hx_trigger_payload(
+                                    toast_level="warning",
+                                    toast_message=(
+                                        "Keep Conn is available for Modbus/NUT/APCUPSD profiles only"
+                                    ),
+                                )
+                            },
+                        )
+                        return True
                     updated = _clone_device(
                         current,
                         keep_connection_open=not current.keep_connection_open,
@@ -4935,6 +5024,27 @@ def start_web_server(
                     )
                     field_label = "Polling"
                     enabled = updated.polling_enabled
+                elif field == "optimizer_v2":
+                    if "modbus" not in str(current.source or "").lower():
+                        self._send_html(
+                            _render_htmx_devices_table(filters),
+                            status=HTTPStatus.BAD_REQUEST,
+                            headers={
+                                "HX-Trigger": _hx_trigger_payload(
+                                    toast_level="warning",
+                                    toast_message=(
+                                        "Optimised is available for Modbus profiles only"
+                                    ),
+                                )
+                            },
+                        )
+                        return True
+                    updated = _clone_device(
+                        current,
+                        optimizer_v2_enabled=not current.optimizer_v2_enabled,
+                    )
+                    enabled = updated.optimizer_v2_enabled
+                    field_label = "Optimised (V2)"
                 else:
                     self._send_html(
                         _render_htmx_devices_table(filters),

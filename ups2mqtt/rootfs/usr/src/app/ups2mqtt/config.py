@@ -152,6 +152,7 @@ def _parse_device(
         location=_clean_optional(item.get("location")),
         debug_logging=bool(item.get("debug_logging", False)),
         keep_connection_open=bool(item.get("keep_connection_open", False)),
+        optimizer_v2_enabled=bool(item.get("optimizer_v2_enabled", True)),
         device_uid=str(item.get("device_uid", "")).strip() or str(uuid4()),
         discovery_enabled=bool(item.get("discovery_enabled", True)),
         polling_enabled=bool(item.get("polling_enabled", True)),

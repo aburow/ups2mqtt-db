@@ -196,8 +196,26 @@
               <label class="form-check-label" for="debug_logging">Debug</label>
             </div>
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="keep_connection_open" id="keep_connection_open" {% if form.keep_connection_open %}checked{% endif %}/>
+              <input
+                class="form-check-input"
+                type="checkbox"
+                name="keep_connection_open"
+                id="keep_connection_open"
+                {% if keep_connection_controls_allowed and form.keep_connection_open %}checked{% endif %}
+                {% if not keep_connection_controls_allowed %}disabled title="Available for Modbus/NUT/APCUPSD profiles only"{% endif %}
+              />
               <label class="form-check-label" for="keep_connection_open">Keep Connection Open</label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                name="optimizer_v2_enabled"
+                id="optimizer_v2_enabled"
+                {% if modbus_controls_allowed and form.optimizer_v2_enabled %}checked{% endif %}
+                {% if not modbus_controls_allowed %}disabled title="Available for Modbus profiles only"{% endif %}
+              />
+              <label class="form-check-label" for="optimizer_v2_enabled">Optimised (V2)</label>
             </div>
             <div class="form-check">
               <input class="form-check-input" type="checkbox" name="discovery_enabled" id="discovery_enabled" {% if form.discovery_enabled %}checked{% endif %}/>

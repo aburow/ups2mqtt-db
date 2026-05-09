@@ -94,7 +94,7 @@ Once connected, you can:
 
 - Minimal dependencies  
 - Works alongside existing UPS tooling
-- Leverage existing tooling permanently or as a migration path
+- Use existing tooling permanently or as a migration path
 - MQTT-first (no tight coupling to Home Assistant)  
 - Simple to deploy (Docker / add-on)
 
@@ -199,8 +199,12 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.5)
+## Latest release (v1.2.6)
 
-- Added selected-sensor-only Modbus poll-plan optimization across CyberPower, APC SMT, APC Smart, and APC PDU paths.
-- Prevented dispatch of non-selected Modbus descriptor/block reads by constraining plan generation before block/single dispatch.
-- Added focused regression coverage for minimal and opt-in sensor scenarios across supported Modbus driver families.
+- Expanded protocol and polling regression coverage across NUT/APCUPSD/Modbus paths.
+- Hardened device/profile edit and payload flows in the HTMX web surface.
+- Updated release documentation and changelog coverage for the 1.2.6 cut.
+
+## V2 rollout gate
+
+- Use the V2 release checklist: [docs/V2_READINESS.md](docs/V2_READINESS.md)

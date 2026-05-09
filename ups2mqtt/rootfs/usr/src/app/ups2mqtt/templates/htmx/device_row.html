@@ -1,4 +1,6 @@
 <tr id="device-row-{{ device.id }}">
+  {% set modbus_controls_allowed = "modbus" in (device.source or "")|lower %}
+  {% set keep_connection_controls_allowed = modbus_controls_allowed or (device.source or "") in ["nut_network_upsd", "apcupsd_network_nis"] %}
   <td>
     <button class="btn btn-sm btn-primary" @click="openModal('/htmx/devices/partials/modal?mode=edit&id={{ device.id }}')">{{ device.id }}</button>
   </td>
@@ -42,17 +44,33 @@
   </td>
   <td>
     <button
-      class="btn btn-sm {{ 'btn-success' if device.keep_connection_open else 'btn-outline-secondary' }}"
+      class="btn btn-sm {{ 'btn-success' if (keep_connection_controls_allowed and device.keep_connection_open) else 'btn-outline-secondary' }}{{ ' disabled' if not keep_connection_controls_allowed else '' }}"
       hx-post="/htmx/devices/actions/toggle"
       hx-target="#devices-table-container"
       hx-swap="innerHTML"
       hx-indicator="#global-loading"
       hx-include="#devices-filter-form"
       hx-vals='{"id":"{{ device.id }}","field":"keep_connection_open"}'
+      {% if not keep_connection_controls_allowed %}disabled aria-disabled="true" title="Available for Modbus/NUT/APCUPSD profiles only"{% endif %}
       hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='On'?'Off':'On'); this.classList.add('disabled')"
       hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
       hx-on:htmx:afterRequest="this.classList.remove('disabled')"
-    >{{ "On" if device.keep_connection_open else "Off" }}</button>
+    >{{ "On" if keep_connection_controls_allowed and device.keep_connection_open else ("Off" if keep_connection_controls_allowed else "N/A") }}</button>
+  </td>
+  <td>
+    <button
+      class="btn btn-sm {{ 'btn-success' if (modbus_controls_allowed and device.optimizer_v2_enabled) else 'btn-outline-secondary' }}{{ ' disabled' if not modbus_controls_allowed else '' }}"
+      hx-post="/htmx/devices/actions/toggle"
+      hx-target="#devices-table-container"
+      hx-swap="innerHTML"
+      hx-indicator="#global-loading"
+      hx-include="#devices-filter-form"
+      hx-vals='{"id":"{{ device.id }}","field":"optimizer_v2"}'
+      {% if not modbus_controls_allowed %}disabled aria-disabled="true" title="Available for Modbus profiles only"{% endif %}
+      hx-on:htmx:beforeRequest="this.dataset.prevText=this.textContent.trim(); this.textContent=(this.dataset.prevText==='V2'?'V1':'V2'); this.classList.add('disabled')"
+      hx-on:htmx:responseError="if (this.dataset.prevText) { this.textContent=this.dataset.prevText; } this.classList.remove('disabled')"
+      hx-on:htmx:afterRequest="this.classList.remove('disabled')"
+    >{{ "V2" if modbus_controls_allowed and device.optimizer_v2_enabled else ("V1" if modbus_controls_allowed else "N/A") }}</button>
   </td>
   <td>
     <button

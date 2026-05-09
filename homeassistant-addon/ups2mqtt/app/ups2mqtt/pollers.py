@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import logging
+import os
 import shlex
 import re
 import socket
@@ -19,7 +20,7 @@ from pymodbus.client import ModbusTcpClient
 
 from .capability_repository import get_capability_repository
 from .model import DeviceConfig
-from .vendor.apcupsd_nis import get_apcupsd_status
+from .vendor.apcupsd_nis import get_apcupsd_status, get_apcupsd_status_from_socket
 
 LOG = logging.getLogger("ups2mqtt.pollers")
 _HYBRID_COLLISION_LOGGED: set[str] = set()
@@ -80,8 +81,24 @@ class _UpsMibSnmpCache:
     last_refresh_monotonic: float = 0.0
 
 
+@dataclass(slots=True)
+class _NutSession:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    sock: socket.socket | None = None
+
+
+@dataclass(slots=True)
+class _ApcupsdSession:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    sock: socket.socket | None = None
+
+
 _MODBUS_SESSIONS_LOCK = threading.Lock()
-_MODBUS_SESSIONS: dict[str, _EndpointSession] = {}
+_MODBUS_SESSIONS: dict[tuple[str, str, str, int, int], _EndpointSession] = {}
+_NUT_SESSIONS_LOCK = threading.Lock()
+_NUT_SESSIONS: dict[tuple[str, str, int, str], _NutSession] = {}
+_APCUPSD_SESSIONS_LOCK = threading.Lock()
+_APCUPSD_SESSIONS: dict[str, _ApcupsdSession] = {}
 _APC_SNMP_CACHE_LOCK = threading.Lock()
 _APC_SNMP_CACHE: dict[str, _ApcSnmpCache] = {}
 _CYBERPOWER_SNMP_CACHE_LOCK = threading.Lock()
@@ -92,6 +109,12 @@ _CATALOG_CACHE_LOCK = threading.Lock()
 _CATALOG_SPECS_CACHE: dict[str, list[dict[str, Any]]] = {}
 _CATALOG_KEYS_CACHE: dict[tuple[str, str, bool], tuple[set[str], set[str]]] = {}
 _CATALOG_ALIAS_CACHE: dict[tuple[str, str, bool], dict[str, str]] = {}
+_MODBUS_V2_DRY_RUN_FLAG = "UPS2MQTT_MODBUS_OPTIMIZER_V2_DRY_RUN"
+_MODBUS_V2_POLICY_FLAG = "UPS2MQTT_MODBUS_OPTIMIZER_V2_POLICY"
+_MODBUS_V2_DISPATCH_FLAG = "UPS2MQTT_MODBUS_OPTIMIZER_V2_DISPATCH"
+_MODBUS_MAX_REGS_PER_REQUEST = 125
+_MODBUS_V2_FALLBACK_DEVICES_LOCK = threading.Lock()
+_MODBUS_V2_FALLBACK_DEVICES: set[str] = set()
 
 
 def get_metadata_refresh_interval_seconds() -> int:
@@ -167,9 +190,41 @@ def _decode_registers(
     return raw
 
 
-def _get_modbus_session(endpoint_key: str) -> _EndpointSession:
+def _modbus_session_key(device: DeviceConfig) -> tuple[str, str, str, int, int]:
+    identity = str(device.device_uid or device.id).strip() or str(device.id)
+    return (
+        identity,
+        str(device.source or "").strip(),
+        str(device.host),
+        int(device.port or 502),
+        int(device.unit_id or 1),
+    )
+
+
+def _get_modbus_session(endpoint_key: tuple[str, str, str, int, int]) -> _EndpointSession:
     with _MODBUS_SESSIONS_LOCK:
         return _MODBUS_SESSIONS.setdefault(endpoint_key, _EndpointSession())
+
+
+def close_modbus_keepalive_for_device(device: DeviceConfig) -> None:
+    key = _modbus_session_key(device)
+    with _MODBUS_SESSIONS_LOCK:
+        session = _MODBUS_SESSIONS.pop(key, None)
+    if session is None:
+        return
+    with session.lock:
+        _close_session_client(session)
+        session.last_io_monotonic = 0.0
+
+
+def close_all_modbus_keepalive_sessions() -> None:
+    with _MODBUS_SESSIONS_LOCK:
+        sessions = list(_MODBUS_SESSIONS.values())
+        _MODBUS_SESSIONS.clear()
+    for session in sessions:
+        with session.lock:
+            _close_session_client(session)
+            session.last_io_monotonic = 0.0
 
 
 def _get_read_param_names(client: ModbusTcpClient) -> list[str]:
@@ -368,7 +423,8 @@ def _try_block_reads(
     register_blocks: list[dict[str, Any]],
     output: dict[str, Any],
     decoded: set[str],
-) -> None:
+) -> bool:
+    had_failures = False
     for block in register_blocks:
         start = block.get("start_address")
         count = block.get("count")
@@ -386,6 +442,7 @@ def _try_block_reads(
             result = _read_holding_registers(session, start, count, device.unit_id)
             _mark_io(session)
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+            had_failures = True
             LOG.info(
                 "[%s] Block read failed name=%s start=%d count=%d err=%s: %s",
                 device.id,
@@ -419,6 +476,7 @@ def _try_block_reads(
                 result = _read_holding_registers(session, start, count, device.unit_id)
                 _mark_io(session)
             except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                had_failures = True
                 LOG.info(
                     "[%s] Block read retry failed name=%s start=%d count=%d",
                     device.id,
@@ -429,6 +487,7 @@ def _try_block_reads(
                 continue
 
         if result is None or _is_error_response(result):
+            had_failures = True
             LOG.info(
                 "[%s] Block read error-response name=%s start=%d count=%d detail=%s",
                 device.id,
@@ -441,6 +500,7 @@ def _try_block_reads(
 
         regs = list(getattr(result, "registers", []) or [])
         if not regs:
+            had_failures = True
             LOG.info(
                 "[%s] Block read empty name=%s start=%d count=%d",
                 device.id,
@@ -471,6 +531,7 @@ def _try_block_reads(
             if value is not None:
                 output[key] = value
                 decoded.add(key)
+    return had_failures
 
 
 def _block_intersects_descriptors(
@@ -501,6 +562,566 @@ def _block_intersects_descriptors(
         if address < block_end and desc_end > block_start:
             return True
     return False
+
+
+def _modbus_optimizer_v2_dry_run_enabled() -> bool:
+    raw = str(os.environ.get(_MODBUS_V2_DRY_RUN_FLAG, "")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _modbus_optimizer_v2_policy() -> str:
+    raw = str(os.environ.get(_MODBUS_V2_POLICY_FLAG, "")).strip().lower()
+    if raw in {"balanced", "min_requests", "min_bytes"}:
+        return raw
+    return "balanced"
+
+
+def _modbus_optimizer_v2_dispatch_enabled() -> bool:
+    raw = os.environ.get(_MODBUS_V2_DISPATCH_FLAG)
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _modbus_optimizer_v2_is_fallback_device(device_id: str) -> bool:
+    with _MODBUS_V2_FALLBACK_DEVICES_LOCK:
+        return device_id in _MODBUS_V2_FALLBACK_DEVICES
+
+
+def _modbus_optimizer_v2_mark_fallback_device(device_id: str) -> None:
+    with _MODBUS_V2_FALLBACK_DEVICES_LOCK:
+        _MODBUS_V2_FALLBACK_DEVICES.add(device_id)
+
+
+def _descriptor_spans(descriptors: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for descriptor in descriptors:
+        try:
+            start = int(descriptor["address"])
+            count = int(descriptor.get("count", 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        spans.append((start, start + count))
+    return sorted(spans)
+
+
+def _normalize_unsafe_ranges(profile: dict[str, Any]) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for key in ("unsafe_ranges", "forbidden_ranges", "known_bad_ranges"):
+        raw = profile.get(key, [])
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start = int(item.get("start_address"))
+                count = int(item.get("count", 0))
+            except (TypeError, ValueError):
+                continue
+            if count <= 0:
+                continue
+            out.append((start, start + count))
+    return sorted(out)
+
+
+def _span_overlaps(spans: list[tuple[int, int]], start: int, end: int) -> bool:
+    for span_start, span_end in spans:
+        if span_start < end and span_end > start:
+            return True
+    return False
+
+
+def _count_span_overlaps(
+    ranges: list[tuple[int, int]], requests: list[tuple[int, int]]
+) -> int:
+    overlaps = 0
+    for start, count in requests:
+        end = start + count
+        if _span_overlaps(ranges, start, end):
+            overlaps += 1
+    return overlaps
+
+
+def _requests_from_blocks(blocks: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for block in blocks:
+        try:
+            start = int(block.get("start_address"))
+            count = int(block.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            out.append((start, count))
+    return out
+
+
+def _singles_for_uncovered_descriptors(
+    descriptors: list[dict[str, Any]], blocks: list[dict[str, Any]]
+) -> list[tuple[int, int]]:
+    singles: list[tuple[int, int]] = []
+    for descriptor in descriptors:
+        try:
+            start = int(descriptor["address"])
+            count = int(descriptor.get("count", 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        desc_end = start + count
+        covered = False
+        for block in blocks:
+            try:
+                block_start = int(block.get("start_address"))
+                block_count = int(block.get("count", 0))
+            except (TypeError, ValueError):
+                continue
+            if block_count <= 0:
+                continue
+            block_end = block_start + block_count
+            if start >= block_start and desc_end <= block_end:
+                covered = True
+                break
+        if not covered:
+            singles.append((start, count))
+    return singles
+
+
+def _build_optimizer_v2_blocks(
+    descriptors: list[dict[str, Any]],
+    unsafe_ranges: list[tuple[int, int]],
+) -> list[dict[str, int | str]]:
+    spans = _descriptor_spans(descriptors)
+    if not spans:
+        return []
+    requests: list[tuple[int, int]] = []
+    current_start: int | None = None
+    current_end: int | None = None
+
+    for span_start, span_end in spans:
+        if current_start is None:
+            current_start = span_start
+            current_end = span_end
+            continue
+        assert current_end is not None
+        merged_end = max(current_end, span_end)
+        merged_count = merged_end - current_start
+        crosses_unsafe = _span_overlaps(unsafe_ranges, current_start, merged_end)
+        if span_start <= current_end and merged_count <= _MODBUS_MAX_REGS_PER_REQUEST and not crosses_unsafe:
+            current_end = merged_end
+            continue
+        requests.append((current_start, current_end - current_start))
+        current_start = span_start
+        current_end = span_end
+
+    if current_start is not None and current_end is not None:
+        requests.append((current_start, current_end - current_start))
+
+    # Split any oversized blocks and avoid unsafe ranges by conservative fallback.
+    safe_requests: list[tuple[int, int]] = []
+    for start, count in requests:
+        end = start + count
+        cursor = start
+        while cursor < end:
+            chunk_end = min(end, cursor + _MODBUS_MAX_REGS_PER_REQUEST)
+            if _span_overlaps(unsafe_ranges, cursor, chunk_end):
+                safe_requests.append((cursor, 1))
+                cursor += 1
+                continue
+            safe_requests.append((cursor, chunk_end - cursor))
+            cursor = chunk_end
+
+    return [
+        {"name": f"optimizer_v2_{start}_{count}", "start_address": start, "count": count}
+        for start, count in safe_requests
+        if count > 0
+    ]
+
+
+def _build_optimizer_v2_request_preserving_blocks(
+    descriptors: list[dict[str, Any]],
+    v1_blocks: list[dict[str, Any]],
+) -> list[dict[str, int | str]]:
+    out: list[dict[str, int | str]] = []
+    for block in v1_blocks:
+        try:
+            block_start = int(block.get("start_address"))
+            block_count = int(block.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        if block_count <= 0:
+            continue
+        block_end = block_start + block_count
+        min_start: int | None = None
+        max_end: int | None = None
+        for descriptor in descriptors:
+            try:
+                desc_start = int(descriptor["address"])
+                desc_count = int(descriptor.get("count", 1))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if desc_count <= 0:
+                continue
+            desc_end = desc_start + desc_count
+            if desc_start < block_end and desc_end > block_start:
+                clip_start = max(desc_start, block_start)
+                clip_end = min(desc_end, block_end)
+                min_start = clip_start if min_start is None else min(min_start, clip_start)
+                max_end = clip_end if max_end is None else max(max_end, clip_end)
+        if min_start is None or max_end is None or max_end <= min_start:
+            min_start = block_start
+            max_end = block_end
+        out.append(
+            {
+                "name": f"optimizer_v2_preserve_{min_start}_{max_end - min_start}",
+                "start_address": min_start,
+                "count": max_end - min_start,
+            }
+        )
+    return out
+
+
+def _merge_safe_adjacent_blocks(
+    blocks: list[dict[str, int | str]],
+    unsafe_ranges: list[tuple[int, int]],
+) -> list[dict[str, int | str]]:
+    reqs = sorted(_requests_from_blocks(blocks), key=lambda item: (item[0], item[1]))
+    if not reqs:
+        return []
+    merged: list[tuple[int, int]] = []
+    current_start, current_count = reqs[0]
+    current_end = current_start + current_count
+    for start, count in reqs[1:]:
+        end = start + count
+        merged_end = max(current_end, end)
+        merged_count = merged_end - current_start
+        can_merge = (
+            start <= current_end
+            and merged_count <= _MODBUS_MAX_REGS_PER_REQUEST
+            and not _span_overlaps(unsafe_ranges, current_start, merged_end)
+        )
+        if can_merge:
+            current_end = merged_end
+            continue
+        merged.append((current_start, current_end - current_start))
+        current_start = start
+        current_end = end
+    merged.append((current_start, current_end - current_start))
+    return [
+        {"name": f"optimizer_v2_minreq_{start}_{count}", "start_address": start, "count": count}
+        for start, count in merged
+        if count > 0
+    ]
+
+
+def _optimizer_v2_dispatch_eligibility(
+    *,
+    policy: str,
+    requests_saved: int,
+    registers_saved: int,
+    active_spans_covered: bool,
+    unsafe_violation: bool,
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    if not active_spans_covered:
+        reasons.append("active spans not fully covered")
+    if unsafe_violation:
+        reasons.append("forbidden/unsafe range violation")
+
+    if policy == "min_requests":
+        if requests_saved < 0:
+            reasons.append("request increase under min_requests policy")
+        elif requests_saved == 0 and registers_saved < 0:
+            reasons.append("register increase under min_requests policy")
+    elif policy == "min_bytes":
+        if registers_saved <= 0:
+            reasons.append("no register savings under min_bytes policy")
+    else:  # balanced
+        if requests_saved < 0:
+            reasons.append("request increase under balanced policy")
+        if registers_saved < 0:
+            reasons.append("register increase under balanced policy")
+
+    return len(reasons) == 0, reasons
+
+
+def _optimizer_v2_candidate_summary(
+    *,
+    name: str,
+    descriptors: list[dict[str, Any]],
+    blocks: list[dict[str, int | str]],
+    unsafe_ranges: list[tuple[int, int]],
+    v1_requests: int,
+    v1_registers: int,
+) -> dict[str, Any]:
+    block_reqs = _requests_from_blocks(blocks)
+    singles = _singles_for_uncovered_descriptors(descriptors, blocks)
+    requests = len(block_reqs) + len(singles)
+    registers = sum(count for _start, count in block_reqs + singles)
+    active_spans_covered = len(singles) == 0
+    unsafe_violation = _count_span_overlaps(unsafe_ranges, block_reqs + singles) > 0
+    return {
+        "name": name,
+        "plan": {"blocks": block_reqs, "singles": singles},
+        "requests_saved": v1_requests - requests,
+        "registers_saved": v1_registers - registers,
+        "active_spans_covered": active_spans_covered,
+        "unsafe_violation": unsafe_violation,
+    }
+
+
+def _select_optimizer_v2_candidate(
+    *,
+    policy: str,
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_name = {str(item.get("name")): item for item in candidates}
+    if policy == "min_bytes":
+        return by_name.get("min_bytes") or candidates[0]
+    if policy == "min_requests":
+        return min(
+            candidates,
+            key=lambda item: (
+                -int(item.get("requests_saved", 0)),
+                -int(item.get("registers_saved", 0)),
+                str(item.get("name", "")),
+            ),
+        )
+    # balanced: prefer request_preserving explicitly.
+    return by_name.get("request_preserving") or candidates[0]
+
+
+def _build_optimizer_v2_comparison_payload(
+    device: DeviceConfig,
+    profile: dict[str, Any],
+    descriptors: list[dict[str, Any]],
+    v1_blocks: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    policy = _modbus_optimizer_v2_policy()
+    unsafe_ranges = _normalize_unsafe_ranges(profile)
+    v1_block_reqs = _requests_from_blocks(v1_blocks)
+    v1_singles = _singles_for_uncovered_descriptors(descriptors, v1_blocks)
+    v1_requests = len(v1_block_reqs) + len(v1_singles)
+    v1_registers = sum(count for _start, count in v1_block_reqs + v1_singles)
+    min_bytes_blocks = _build_optimizer_v2_blocks(descriptors, unsafe_ranges)
+    request_preserving_blocks = _build_optimizer_v2_request_preserving_blocks(
+        descriptors, v1_blocks
+    )
+    min_requests_blocks = _merge_safe_adjacent_blocks(
+        request_preserving_blocks, unsafe_ranges
+    )
+
+    all_profile_blocks = [
+        item for item in profile.get("register_blocks", []) if isinstance(item, dict)
+    ]
+    orphan_removed = 0
+    for block in all_profile_blocks:
+        if _block_intersects_descriptors(block, descriptors):
+            continue
+        orphan_removed += 1
+
+    candidates = [
+        _optimizer_v2_candidate_summary(
+            name="min_bytes",
+            descriptors=descriptors,
+            blocks=min_bytes_blocks,
+            unsafe_ranges=unsafe_ranges,
+            v1_requests=v1_requests,
+            v1_registers=v1_registers,
+        ),
+        _optimizer_v2_candidate_summary(
+            name="request_preserving",
+            descriptors=descriptors,
+            blocks=request_preserving_blocks,
+            unsafe_ranges=unsafe_ranges,
+            v1_requests=v1_requests,
+            v1_registers=v1_registers,
+        ),
+        _optimizer_v2_candidate_summary(
+            name="min_requests",
+            descriptors=descriptors,
+            blocks=min_requests_blocks,
+            unsafe_ranges=unsafe_ranges,
+            v1_requests=v1_requests,
+            v1_registers=v1_registers,
+        ),
+    ]
+    selected = _select_optimizer_v2_candidate(policy=policy, candidates=candidates)
+    selected_name = str(selected.get("name", "min_bytes"))
+    selected_plan = dict(selected.get("plan", {}))
+    requests_saved = int(selected.get("requests_saved", 0))
+    registers_saved = int(selected.get("registers_saved", 0))
+    active_spans_covered = bool(selected.get("active_spans_covered", False))
+    unsafe_violation = bool(selected.get("unsafe_violation", False))
+    dispatch_eligible, ineligibility_reasons = _optimizer_v2_dispatch_eligibility(
+        policy=policy,
+        requests_saved=requests_saved,
+        registers_saved=registers_saved,
+        active_spans_covered=active_spans_covered,
+        unsafe_violation=unsafe_violation,
+    )
+    if (
+        policy == "balanced"
+        and selected_name == "request_preserving"
+        and (
+            requests_saved < 0
+            or registers_saved <= 0
+            or not active_spans_covered
+            or unsafe_violation
+        )
+    ):
+        if requests_saved < 0:
+            ineligibility_reasons.append(
+                "no request-preserving candidate without request increase"
+            )
+        if registers_saved <= 0:
+            ineligibility_reasons.append(
+                "no request-preserving candidate with positive register savings"
+            )
+        dispatch_eligible = False
+
+    payload: dict[str, Any] = {
+        "mode": "dry_run_only",
+        "optimizer": "optimizer_v2",
+        "policy": policy,
+        "selected_candidate": selected_name,
+        "candidates": candidates,
+        "current_v1_plan": {"blocks": v1_block_reqs, "singles": v1_singles},
+        "proposed_v2_plan": selected_plan,
+        "requests_saved": requests_saved,
+        "registers_saved": registers_saved,
+        "active_spans_covered": active_spans_covered,
+        "orphan_blocks_removed": orphan_removed,
+        "forbidden_unsafe_ranges_avoided": {
+            "known_ranges": unsafe_ranges or "unknown",
+            "v1_overlaps": _count_span_overlaps(unsafe_ranges, v1_block_reqs + v1_singles),
+            "v2_overlaps": _count_span_overlaps(
+                unsafe_ranges,
+                list(selected_plan.get("blocks", [])) + list(selected_plan.get("singles", [])),
+            ),
+        },
+        "dispatch_eligible": dispatch_eligible,
+        "ineligibility_reasons": sorted(set(ineligibility_reasons)),
+    }
+    selected_block_reqs = list(selected_plan.get("blocks", []))
+    selected_singles = list(selected_plan.get("singles", []))
+    plans_differ = (
+        v1_block_reqs != selected_block_reqs
+        or v1_singles != selected_singles
+        or payload["requests_saved"] != 0
+        or payload["registers_saved"] != 0
+    )
+    return payload, plans_differ
+
+
+def _log_modbus_optimizer_v2_comparison(device: DeviceConfig, payload: dict[str, Any], *, plans_differ: bool) -> None:
+    log_fn = LOG.info if plans_differ else LOG.debug
+    log_fn("[%s] Modbus optimizer_v2 comparison: %s", device.id, payload)
+
+
+def _optimizer_v2_blocks_from_payload(payload: dict[str, Any]) -> list[dict[str, int | str]]:
+    proposed = payload.get("proposed_v2_plan", {})
+    return _optimizer_v2_blocks_from_plan(proposed)
+
+
+def _optimizer_v2_blocks_from_plan(plan: Any) -> list[dict[str, int | str]]:
+    proposed = plan
+    if not isinstance(proposed, dict):
+        return []
+    blocks = proposed.get("blocks", [])
+    out: list[dict[str, int | str]] = []
+    if not isinstance(blocks, list):
+        return out
+    for item in blocks:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+        try:
+            start = int(item[0])
+            count = int(item[1])
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        out.append(
+            {
+                "name": f"optimizer_v2_dispatch_{start}_{count}",
+                "start_address": start,
+                "count": count,
+            }
+        )
+    return out
+
+
+def _optimizer_v2_safe_dispatch_candidate(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    candidates = payload.get("candidates", [])
+    if not isinstance(candidates, list):
+        return None, ["candidate payload unavailable"]
+
+    by_name = {
+        str(item.get("name")): item
+        for item in candidates
+        if isinstance(item, dict)
+    }
+    for candidate_name in ("request_preserving", "min_requests"):
+        candidate = by_name.get(candidate_name)
+        if not isinstance(candidate, dict):
+            continue
+        reasons: list[str] = []
+        if int(candidate.get("requests_saved", 0)) < 0:
+            reasons.append("request count increase")
+        if int(candidate.get("registers_saved", 0)) < 0:
+            reasons.append("register count increase")
+        if not bool(candidate.get("active_spans_covered", False)):
+            reasons.append("active spans not fully covered")
+        if bool(candidate.get("unsafe_violation", False)):
+            reasons.append("forbidden/unsafe range violation")
+        if not _optimizer_v2_blocks_from_plan(candidate.get("plan", {})):
+            reasons.append("empty v2 block plan")
+        if not reasons:
+            return candidate, []
+
+    selected_candidate = str(payload.get("selected_candidate", ""))
+    if selected_candidate == "min_bytes":
+        return None, ["min_bytes candidate is classification-only and is not dispatch safe"]
+    return None, ["no request-preserving dispatch candidate available"]
+
+
+def _expand_v2_singleton_blocks(
+    blocks: list[dict[str, int | str]],
+    v1_blocks: list[dict[str, Any]],
+) -> tuple[list[dict[str, int | str]], set[int]]:
+    expanded: list[dict[str, int | str]] = []
+    singleton_starts: set[int] = set()
+    for block in blocks:
+        start = int(block.get("start_address", -1))
+        count = int(block.get("count", 0))
+        if count == 1:
+            singleton_starts.add(start)
+            promoted_start = start
+            for v1_block in v1_blocks:
+                try:
+                    v1_start = int(v1_block.get("start_address"))
+                    v1_count = int(v1_block.get("count", 0))
+                except (TypeError, ValueError):
+                    continue
+                v1_end = v1_start + v1_count
+                if start < v1_start or start >= v1_end:
+                    continue
+                if start + 1 >= v1_end and start - 1 >= v1_start:
+                    promoted_start = start - 1
+                break
+            expanded.append(
+                {
+                    "name": f"optimizer_v2_dispatch_{promoted_start}_2",
+                    "start_address": promoted_start,
+                    "count": 2,
+                }
+            )
+            continue
+        expanded.append(block)
+    return expanded, singleton_starts
 
 
 def _try_individual_reads(
@@ -648,6 +1269,15 @@ def _poll_modbus_sync(
         for item in register_blocks
         if _block_intersects_descriptors(item, descriptors)
     ]
+    v2_payload: dict[str, Any] | None = None
+    if _modbus_optimizer_v2_dry_run_enabled() or _modbus_optimizer_v2_dispatch_enabled():
+        v2_payload, plans_differ = _build_optimizer_v2_comparison_payload(
+            device, profile, descriptors, register_blocks
+        )
+        if _modbus_optimizer_v2_dry_run_enabled():
+            _log_modbus_optimizer_v2_comparison(
+                device, v2_payload, plans_differ=plans_differ
+            )
     if LOG.isEnabledFor(logging.DEBUG):
         block_attribution: dict[str, list[str]] = {}
         for block in register_blocks:
@@ -678,8 +1308,7 @@ def _poll_modbus_sync(
     if not descriptors:
         return output
 
-    endpoint_key = f"{device.host}:{device.port}"
-    session = _get_modbus_session(endpoint_key)
+    session = _get_modbus_session(_modbus_session_key(device))
 
     poll_started = time.monotonic()
     lock_wait = 0.0
@@ -707,15 +1336,92 @@ def _poll_modbus_sync(
             )
         ensure_connection_elapsed = time.monotonic() - ensure_connection_started
 
+        active_register_blocks = register_blocks
+        using_v2_dispatch = False
+        v2_singleton_starts: set[int] = set()
+        if _modbus_optimizer_v2_dispatch_enabled():
+            if not getattr(device, "optimizer_v2_enabled", True):
+                LOG.info(
+                    "[%s] optimizer_v2 dispatch disabled for device: device setting",
+                    device.id,
+                )
+            elif _modbus_optimizer_v2_is_fallback_device(device.id):
+                LOG.warning(
+                    "[%s] optimizer_v2 dispatch disabled for device: sticky v1 fallback is active",
+                    device.id,
+                )
+            elif v2_payload is None:
+                LOG.warning(
+                    "[%s] optimizer_v2 dispatch disabled for device: comparison payload unavailable",
+                    device.id,
+                )
+            else:
+                dispatch_candidate, dispatch_reasons = (
+                    _optimizer_v2_safe_dispatch_candidate(v2_payload)
+                )
+                if dispatch_candidate is None:
+                    LOG.info(
+                        "[%s] optimizer_v2 dispatch rejected: %s",
+                        device.id,
+                        dispatch_reasons,
+                    )
+                else:
+                    selected_candidate = str(dispatch_candidate.get("name", ""))
+                    v1_requests = len(_requests_from_blocks(register_blocks))
+                    v2_blocks = _optimizer_v2_blocks_from_plan(
+                        dispatch_candidate.get("plan", {})
+                    )
+                    v2_requests = len(_requests_from_blocks(v2_blocks))
+                    if register_blocks and not v2_blocks:
+                        LOG.info(
+                            "[%s] optimizer_v2 dispatch rejected: proposed v2 plan is empty while v1 has blocks",
+                            device.id,
+                        )
+                    elif v2_requests > v1_requests:
+                        LOG.info(
+                            "[%s] optimizer_v2 dispatch rejected: request count increase v1=%d v2=%d",
+                            device.id,
+                            v1_requests,
+                            v2_requests,
+                        )
+                    else:
+                        active_register_blocks, v2_singleton_starts = (
+                            _expand_v2_singleton_blocks(v2_blocks, register_blocks)
+                        )
+                        using_v2_dispatch = True
+                        LOG.info(
+                            "[%s] optimizer_v2 dispatch enabled candidate=%s blocks=%s singleton_promotions=%s",
+                            device.id,
+                            selected_candidate,
+                            _requests_from_blocks(active_register_blocks),
+                            sorted(v2_singleton_starts),
+                        )
+
         block_reads_started = time.monotonic()
-        _try_block_reads(
+        had_block_failures = _try_block_reads(
             session,
             device,
             descriptors,
-            register_blocks,
+            active_register_blocks,
             output,
             decoded,
         )
+        if using_v2_dispatch and had_block_failures:
+            LOG.warning(
+                "[%s] optimizer_v2 dispatch failed this cycle; falling back to v1 and latching device fallback",
+                device.id,
+            )
+            _modbus_optimizer_v2_mark_fallback_device(device.id)
+            output.clear()
+            decoded.clear()
+            _try_block_reads(
+                session,
+                device,
+                descriptors,
+                register_blocks,
+                output,
+                decoded,
+            )
         block_reads_elapsed = time.monotonic() - block_reads_started
 
         individual_reads_started = time.monotonic()
@@ -1313,13 +2019,46 @@ def _filter_modbus_descriptors_by_selected_keys(
         return []
 
     alias_to_canonical = _catalog_alias_to_canonical_map(device, transport="modbus")
+    required_source_keys = set(selected)
+    # Selected publish keys may depend on non-selected raw transport keys
+    # (for example enum/text transforms and derived bitfield references).
+    try:
+        repo = get_capability_repository()
+        transform_decls = repo.load_catalog_derived_metrics(device.source)
+        if isinstance(transform_decls, list):
+            for decl in transform_decls:
+                if not isinstance(decl, dict):
+                    continue
+                output_key = str(decl.get("output_key", "")).strip()
+                source_key = str(decl.get("source_key", "")).strip()
+                if output_key and source_key and output_key in selected:
+                    required_source_keys.add(source_key)
+
+        sensor_rows = repo.load_catalog_sensor_rows(device.source)
+        if isinstance(sensor_rows, list):
+            for row in sensor_rows:
+                if not isinstance(row, dict):
+                    continue
+                key = str(row.get("key", "")).strip()
+                source = str(row.get("source", "")).strip().lower()
+                reference = str(row.get("reference", "")).strip()
+                if key not in selected or source != "derived":
+                    continue
+                if ":" not in reference:
+                    continue
+                raw_key = reference.split(":", 1)[0].strip()
+                if raw_key:
+                    required_source_keys.add(raw_key)
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        pass
+
     out: list[dict[str, Any]] = []
     for item in descriptors:
         key = str(item.get("key", "")).strip()
         if not key:
             continue
         canonical = alias_to_canonical.get(key, key)
-        if key in selected or canonical in selected:
+        if key in required_source_keys or canonical in required_source_keys:
             out.append(item)
     return out
 
@@ -1829,6 +2568,116 @@ def _nut_read_lines(sock: socket.socket, ups_name: str) -> list[str]:
     return lines
 
 
+def _nut_session_key(
+    device: DeviceConfig, profile: dict[str, Any]
+) -> tuple[str, str, int, str]:
+    identity = str(device.device_uid or device.id).strip() or str(device.id)
+    return (
+        identity,
+        str(device.host),
+        int(device.port or 3493),
+        _nut_guess_ups_name(device, profile),
+    )
+
+
+def _get_nut_session(key: tuple[str, str, int, str]) -> _NutSession:
+    with _NUT_SESSIONS_LOCK:
+        return _NUT_SESSIONS.setdefault(key, _NutSession())
+
+
+def _close_nut_socket(session: _NutSession) -> None:
+    sock = session.sock
+    if sock is None:
+        return
+    try:
+        sock.close()
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        pass
+    session.sock = None
+
+
+def close_nut_keepalive_for_device(
+    device: DeviceConfig,
+    profile: dict[str, Any],
+) -> None:
+    key = _nut_session_key(device, profile)
+    with _NUT_SESSIONS_LOCK:
+        session = _NUT_SESSIONS.pop(key, None)
+    if session is None:
+        return
+    with session.lock:
+        _close_nut_socket(session)
+
+
+def close_all_nut_keepalive_sessions() -> None:
+    with _NUT_SESSIONS_LOCK:
+        sessions = list(_NUT_SESSIONS.values())
+        _NUT_SESSIONS.clear()
+    for session in sessions:
+        with session.lock:
+            _close_nut_socket(session)
+
+
+def _apcupsd_session_key(device: DeviceConfig) -> str:
+    identity = str(device.device_uid or device.id).strip() or str(device.id)
+    return f"{identity}|{device.host}:{int(device.port or 3551)}"
+
+
+def _get_apcupsd_session(key: str) -> _ApcupsdSession:
+    with _APCUPSD_SESSIONS_LOCK:
+        return _APCUPSD_SESSIONS.setdefault(key, _ApcupsdSession())
+
+
+def _close_apcupsd_socket(session: _ApcupsdSession) -> None:
+    sock = session.sock
+    if sock is None:
+        return
+    try:
+        sock.close()
+    except Exception:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+        pass
+    session.sock = None
+
+
+def close_apcupsd_keepalive_for_device(device: DeviceConfig) -> None:
+    key = _apcupsd_session_key(device)
+    with _APCUPSD_SESSIONS_LOCK:
+        session = _APCUPSD_SESSIONS.pop(key, None)
+    if session is None:
+        return
+    with session.lock:
+        _close_apcupsd_socket(session)
+
+
+def close_all_apcupsd_keepalive_sessions() -> None:
+    with _APCUPSD_SESSIONS_LOCK:
+        sessions = list(_APCUPSD_SESSIONS.values())
+        _APCUPSD_SESSIONS.clear()
+    for session in sessions:
+        with session.lock:
+            _close_apcupsd_socket(session)
+
+
+def _nut_read_lines_persistent(sock: socket.socket, ups_name: str) -> list[str]:
+    lines: list[str] = []
+    command = f"LIST VAR {ups_name}\n".encode("utf-8")
+    sock.sendall(command)
+    buffer = ""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("NUT server closed the socket")
+        buffer += chunk.decode("utf-8", errors="ignore")
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.rstrip("\r").strip()
+            if not line:
+                continue
+            lines.append(line)
+            if line.startswith("ERR ") or line.startswith(f"END LIST VAR {ups_name}"):
+                return lines
+
+
 def _nut_coerce(raw: str, declared_type: str) -> int | float | str | bool:
     dtype = declared_type.lower()
     if dtype == "int":
@@ -1862,11 +2711,31 @@ def _poll_nut_sync(
     ups_name = _nut_guess_ups_name(device, profile)
     port = int(device.port or 3493)
 
-    sock = socket.create_connection((device.host, port), timeout=3.0)
-    try:
-        lines = _nut_read_lines(sock, ups_name)
-    finally:
-        sock.close()
+    if device.keep_connection_open:
+        session_key = _nut_session_key(device, profile)
+        session = _get_nut_session(session_key)
+        with session.lock:
+            if session.sock is None:
+                session.sock = socket.create_connection((device.host, port), timeout=3.0)
+            try:
+                lines = _nut_read_lines_persistent(session.sock, ups_name)
+            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                # Self-heal exactly one stale transport failure per poll cycle.
+                _close_nut_socket(session)
+                try:
+                    session.sock = socket.create_connection((device.host, port), timeout=3.0)
+                    lines = _nut_read_lines_persistent(session.sock, ups_name)
+                except Exception as retry_err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                    _close_nut_socket(session)
+                    raise OSError(
+                        f"NUT sustained poll failed after retry: first={err} retry={retry_err}"
+                    ) from retry_err
+    else:
+        sock = socket.create_connection((device.host, port), timeout=3.0)
+        try:
+            lines = _nut_read_lines(sock, ups_name)
+        finally:
+            sock.close()
 
     values_by_var: dict[str, str] = {}
     for line in lines:
@@ -1954,7 +2823,29 @@ def _poll_apcupsd_sync(
     if not host:
         return out
     port = int(device.port or 3551)
-    raw_values = get_apcupsd_status(host=host, port=port, timeout=5.0)
+    if device.keep_connection_open:
+        session = _get_apcupsd_session(_apcupsd_session_key(device))
+        with session.lock:
+            if session.sock is None:
+                session.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                session.sock.connect((host, port))
+            try:
+                raw_values = get_apcupsd_status_from_socket(session.sock, timeout=5.0)
+            except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                _close_apcupsd_socket(session)
+                try:
+                    session.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    session.sock.connect((host, port))
+                    raw_values = get_apcupsd_status_from_socket(
+                        session.sock, timeout=5.0
+                    )
+                except Exception as retry_err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
+                    _close_apcupsd_socket(session)
+                    raise OSError(
+                        f"apcupsd sustained poll failed after retry: first={err} retry={retry_err}"
+                    ) from retry_err
+    else:
+        raw_values = get_apcupsd_status(host=host, port=port, timeout=5.0)
     for raw_name, spec in fields.items():
         if not isinstance(spec, dict):
             continue

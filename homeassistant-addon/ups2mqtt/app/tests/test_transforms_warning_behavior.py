@@ -20,6 +20,7 @@ def _seed_capability_repo(tmp_path: Path, monkeypatch) -> None:
     repo = configure_capability_repository(Database(str(db_path)))
     repo.seed_baseline_if_needed()
     transforms_module._MISSING_SOURCE_WARNINGS.clear()
+    transforms_module._MISSING_SOURCE_FIRST_SEEN.clear()
     transforms_module._UNMAPPED_VALUE_WARNINGS.clear()
 
 
@@ -31,7 +32,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-def test_apc_optional_bitfield_sources_skip_missing_warning_but_required_still_warns(
+def test_apc_optional_bitfield_sources_skip_missing_warning_during_warmup(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING, logger="ups2mqtt")
@@ -44,12 +45,62 @@ def test_apc_optional_bitfield_sources_skip_missing_warning_but_required_still_w
     )
 
     messages = _warning_messages(caplog)
-    assert "Transform skipped (missing source): output_source_text" in messages
+    assert "Transform skipped (missing source): output_source_text" not in messages
     assert "Transform skipped (missing source): ups_output_off_state" not in messages
     assert "Transform skipped (missing source): ups_on_bypass_state" not in messages
     assert "Transform skipped (missing source): ups_on_battery_state" not in messages
     assert "Transform skipped (missing source): ups_online_state" not in messages
     assert "Transform skipped (missing source): ups_low_battery_state" not in messages
+
+
+def test_selected_transform_missing_source_after_warmup_still_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="ups2mqtt")
+    transforms_module.apply_catalog_transforms(
+        {"battery_status": 2},
+        device_uid="dev-apc-required-missing-warn",
+        runtime_source="apc_modbus_smt",
+        apps_dir="/apps",
+        value_cache={"output_source": None},
+        required_keys={"output_source_text"},
+    )
+
+    messages = _warning_messages(caplog)
+    assert "Transform skipped (missing source): output_source_text" in messages
+
+
+def test_unselected_optional_text_transforms_do_not_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="ups2mqtt")
+    transforms_module.apply_catalog_transforms(
+        {"battery_status": 2},
+        device_uid="dev-apc-unselected-optional",
+        runtime_source="apc_modbus_smt",
+        apps_dir="/apps",
+        value_cache={},
+        required_keys={"battery_status"},
+    )
+    messages = _warning_messages(caplog)
+    assert "Transform skipped (missing source): output_source_text" not in messages
+
+
+def test_benign_startup_missing_source_does_not_emit_warning_repeatedly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="ups2mqtt")
+    for _ in range(2):
+        transforms_module.apply_catalog_transforms(
+            {"battery_status": 2},
+            device_uid="dev-startup-benign",
+            runtime_source="apc_modbus_smt",
+            apps_dir="/apps",
+            value_cache={},
+            required_keys={"output_source_text"},
+        )
+    messages = _warning_messages(caplog)
+    assert "Transform skipped (missing source): output_source_text" not in messages
 
 
 def test_apc_known_enum_values_and_ignored_bitfields_do_not_warn(
@@ -74,6 +125,7 @@ def test_apc_known_enum_values_and_ignored_bitfields_do_not_warn(
     )
 
     messages = _warning_messages(caplog)
+    assert "Transform skipped (missing source): output_source_text" not in messages
     assert (
         "Transform skipped (unmapped enum): output_source_text "
         "source=output_source value='normal'"

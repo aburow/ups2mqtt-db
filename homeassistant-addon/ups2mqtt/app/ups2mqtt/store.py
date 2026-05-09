@@ -78,6 +78,7 @@ class DeviceStore:
                 location=device.location,
                 debug_logging=device.debug_logging,
                 keep_connection_open=device.keep_connection_open,
+                optimizer_v2_enabled=device.optimizer_v2_enabled,
                 device_uid=target_uid,
                 discovery_enabled=device.discovery_enabled,
                 polling_enabled=device.polling_enabled,

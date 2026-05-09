@@ -166,6 +166,22 @@
     </aside>
 
     <main class="admin-content p-3 p-md-4">
+      {% if runtime_warnings %}
+      <div class="mb-3">
+        {% for warning in runtime_warnings %}
+        <div
+          class="alert {% if warning.level == 'danger' %}alert-danger{% elif warning.level == 'warning' %}alert-warning{% else %}alert-info{% endif %} mb-2"
+          role="alert"
+          data-runtime-warning-code="{{ warning.code | default('runtime_warning') }}"
+        >
+          <div><strong>Runtime Warning:</strong> {{ warning.message }}</div>
+          {% if warning.details %}
+          <div class="small mt-1"><code>{{ warning.details }}</code></div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div id="admin-panel" hx-indicator="#global-loading">{{ initial_panel_html | safe }}</div>
     </main>
   </div>

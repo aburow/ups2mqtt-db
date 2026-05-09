@@ -1,3 +1,12 @@
+## 2026-05-10
+
+### ups2mqtt-db
+
+- release prep: v1.2.6 docs + changelog refresh
+- release prep: lint gate validation (`uv run grain`, `uv run semgrep`) and runtime sync checks
+
+———
+
 ## 2026-05-07
 
 ### ups2mqtt-db

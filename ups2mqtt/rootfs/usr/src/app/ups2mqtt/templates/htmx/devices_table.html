@@ -12,6 +12,7 @@
             <th>Mode</th>
             <th>Logging</th>
             <th>Keep Conn</th>
+            <th>Optimised</th>
             <th>Discovery</th>
             <th>Polling</th>
             <th>Action</th>
@@ -21,7 +22,7 @@
           {% for device in devices %}
             {% include "htmx/device_row.html" %}
           {% else %}
-            <tr><td colspan="11" class="text-muted p-3">No devices configured.</td></tr>
+            <tr><td colspan="12" class="text-muted p-3">No devices configured.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -29,6 +29,9 @@ _DEVICE_COLUMN_MIGRATIONS: dict[str, str] = {
     "keep_connection_open": (
         "ALTER TABLE devices ADD COLUMN keep_connection_open INTEGER NOT NULL DEFAULT 0"
     ),
+    "optimizer_v2_enabled": (
+        "ALTER TABLE devices ADD COLUMN optimizer_v2_enabled INTEGER NOT NULL DEFAULT 1"
+    ),
     "profile_uid": "ALTER TABLE devices ADD COLUMN profile_uid TEXT NOT NULL DEFAULT ''",
     "profile_mode": (
         "ALTER TABLE devices ADD COLUMN profile_mode TEXT NOT NULL DEFAULT 'local'"
@@ -122,6 +125,7 @@ class Database:
                 location TEXT,
                 debug_logging INTEGER NOT NULL DEFAULT 0,
                 keep_connection_open INTEGER NOT NULL DEFAULT 0,
+                optimizer_v2_enabled INTEGER NOT NULL DEFAULT 1,
                 discovery_enabled INTEGER NOT NULL DEFAULT 1,
                 polling_enabled INTEGER NOT NULL DEFAULT 1,
                 profile_uid TEXT NOT NULL DEFAULT '',
@@ -151,6 +155,12 @@ class Database:
             table="devices",
             column="keep_connection_open",
             definition="INTEGER NOT NULL DEFAULT 0",
+        )
+        self._ensure_column(
+            cursor=cursor,
+            table="devices",
+            column="optimizer_v2_enabled",
+            definition="INTEGER NOT NULL DEFAULT 1",
         )
         self._ensure_column(
             cursor=cursor,
@@ -544,10 +554,11 @@ class Database:
                 device_uid, id, source, host, port, snmp_port, unit_id, snmp_community,
                 ups_name,
                 poll_interval, name, location, debug_logging, keep_connection_open,
+                optimizer_v2_enabled,
                 discovery_enabled, polling_enabled,
                 profile_uid, profile_mode, local_profile_payload, local_selected_sensors, local_sensor_preferences,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(device_uid) DO UPDATE SET
                 id = excluded.id,
                 source = excluded.source,
@@ -562,6 +573,7 @@ class Database:
                 location = excluded.location,
                 debug_logging = excluded.debug_logging,
                 keep_connection_open = excluded.keep_connection_open,
+                optimizer_v2_enabled = excluded.optimizer_v2_enabled,
                 discovery_enabled = excluded.discovery_enabled,
                 polling_enabled = excluded.polling_enabled,
                 profile_uid = excluded.profile_uid,
@@ -586,6 +598,7 @@ class Database:
                 device.location,
                 1 if device.debug_logging else 0,
                 1 if device.keep_connection_open else 0,
+                1 if device.optimizer_v2_enabled else 0,
                 1 if device.discovery_enabled else 0,
                 1 if device.polling_enabled else 0,
                 device.profile_uid,
@@ -670,6 +683,7 @@ class Database:
                     location=row["location"],
                     debug_logging=bool(row["debug_logging"]),
                     keep_connection_open=bool(row["keep_connection_open"]),
+                    optimizer_v2_enabled=bool(row["optimizer_v2_enabled"]),
                     discovery_enabled=bool(row["discovery_enabled"]),
                     polling_enabled=bool(row["polling_enabled"]),
                     profile_uid=str(row["profile_uid"] or ""),

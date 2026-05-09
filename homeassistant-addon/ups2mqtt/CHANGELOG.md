@@ -2,6 +2,12 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.6
+
+- Expanded protocol and polling regression coverage across NUT/APCUPSD/Modbus paths.
+- Hardened device/profile edit and payload handling across HTMX device workflows.
+- Synced documentation and release metadata for the 1.2.6 release.
+
 ## v1.2.5
 
 - Modbus optimizations release.

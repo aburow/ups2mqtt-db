@@ -8,6 +8,7 @@ import logging
 import math
 import re
 from time import monotonic
+from datetime import datetime, timezone
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -155,9 +156,48 @@ class MqttPublisher:
         )
         self._connected = False
         self._last_connect_attempt = 0.0
+        self._last_connect_error = ""
+        self._last_connect_error_at: str | None = None
+        self._last_connect_success_at: str | None = None
         self._device_metadata: dict[str, dict[str, str]] = {}
         self._device_state_cache: dict[str, dict[str, Any]] = {}
         self._sensor_meta_cache: dict[str, dict[str, dict[str, str]]] = {}
+
+    @staticmethod
+    def _utc_now_iso() -> str:
+        return datetime.now(tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _is_auth_error(err_text: str) -> bool:
+        normalized = err_text.strip().lower()
+        return (
+            "not authorized" in normalized
+            or "bad username or password" in normalized
+            or "auth" in normalized
+        )
+
+    def get_runtime_warnings(self) -> list[dict[str, str]]:
+        if not self._config.mqtt_enabled:
+            return []
+        if self._connected:
+            return []
+        err_text = self._last_connect_error.strip()
+        if not err_text:
+            return []
+        if self._is_auth_error(err_text):
+            return [
+                {
+                    "code": "mqtt_auth_failed",
+                    "level": "danger",
+                    "message": (
+                        f"MQTT authentication failed for {self._config.mqtt_host}:{self._config.mqtt_port}. "
+                        "Update UPS2MQTT_MQTT_USERNAME / UPS2MQTT_MQTT_PASSWORD and restart."
+                    ),
+                    "details": err_text,
+                    "last_failure_at": str(self._last_connect_error_at or ""),
+                }
+            ]
+        return []
 
     def get_cached_ha_payload_preview(self, device: DeviceConfig) -> dict[str, Any]:
         """Return a read-only snapshot of cached HA-facing payload data for a device."""
@@ -340,6 +380,9 @@ class MqttPublisher:
                 self._bridge_availability_topic, payload="online", qos=1, retain=True
             )
             self._publish_bridge_discovery()
+            self._last_connect_error = ""
+            self._last_connect_error_at = None
+            self._last_connect_success_at = self._utc_now_iso()
             LOG.info(
                 "MQTT connected to %s:%s",
                 self._config.mqtt_host,
@@ -347,6 +390,8 @@ class MqttPublisher:
             )
         except Exception as err:  # noqa: BLE001  # grain: ignore NAKED_EXCEPT
             self._connected = False
+            self._last_connect_error = str(err)
+            self._last_connect_error_at = self._utc_now_iso()
             LOG.warning(
                 "MQTT connect failed to %s:%s: %s",
                 self._config.mqtt_host,

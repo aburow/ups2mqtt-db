@@ -52,19 +52,29 @@ def get_apcupsd_status(
     sock.settimeout(timeout)
     try:
         sock.connect((host, int(port)))
-        # NIS request: 2-byte big-endian length + "status"
-        sock.sendall(b"\x00\x06status")
-        data = b""
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-            # apcupsd terminates response with zero-length message marker.
-            if data.endswith(b"\x00\x00"):
-                break
+        return get_apcupsd_status_from_socket(sock, timeout=timeout)
     finally:
         sock.close()
+
+
+def get_apcupsd_status_from_socket(
+    sock: socket.socket,
+    *,
+    timeout: float = 10.0,
+) -> dict[str, str]:
+    """Fetch APCUPSD NIS status over an already-connected socket."""
+    sock.settimeout(timeout)
+    # NIS request: 2-byte big-endian length + "status"
+    sock.sendall(b"\x00\x06status")
+    data = b""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+        # apcupsd terminates response with zero-length message marker.
+        if data.endswith(b"\x00\x00"):
+            break
 
     if len(data) < 2:
         return {}
