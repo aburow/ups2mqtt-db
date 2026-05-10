@@ -46,7 +46,7 @@ options:
   web_port: 8099
   metrics_port: 8100
   expose_direct_port: false
-  log_level: INFO
+  log_level: ERROR
   ha_bridge_enabled: false
   ha_url: ""
   ha_token: ""

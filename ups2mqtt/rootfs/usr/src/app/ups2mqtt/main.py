@@ -67,6 +67,11 @@ AUDIT_LOG = logging.getLogger("ups2mqtt.audit")
 DISCOVERY_MIGRATION_MARKER = "/data/.discovery_v2_migrated"
 
 
+def _resolve_runtime_log_level() -> int:
+    log_level_name = os.environ.get("UPS2MQTT_LOG_LEVEL", "ERROR").upper()
+    return getattr(logging, log_level_name, logging.ERROR)
+
+
 def _sanitize_endpoint_part(value: object) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1737,9 +1742,8 @@ def _apply_sensor_poll_group_overrides(
 
 
 async def async_main() -> None:
-    # Default to INFO for better observability, can be overridden by environment
-    log_level_name = os.environ.get("UPS2MQTT_LOG_LEVEL", "INFO").upper()
-    log_level = getattr(logging, log_level_name, logging.INFO)
+    # Default to ERROR; can be overridden by environment/options.
+    log_level = _resolve_runtime_log_level()
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
