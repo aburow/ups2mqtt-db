@@ -256,155 +256,6 @@ def _compute_adaptive_type_caps(
     return adjusted
 
 
-async def _run_adaptive_concurrency_controller(
-    *,
-    limiter: AdjustableConcurrencyLimiter,
-    metrics: MetricsStore,
-    poll_interval_seconds: int,
-    window_seconds: int,
-    target_p95_wait_ms: int,
-) -> None:
-    low_wait_ms = max(100.0, float(target_p95_wait_ms) * 0.10)
-    high_wait_floor_ms = max(100.0, float(target_p95_wait_ms) * 0.10)
-    sample_cap_ms = max(
-        float(target_p95_wait_ms) * 2.0,
-        float(max(1, int(poll_interval_seconds))) * 2000.0,
-    )
-    idle_windows = 0
-    pressure_windows = 0
-    check_interval = max(5.0, min(10.0, float(window_seconds) / 3.0))
-    min_samples = 20
-    last_source_totals: dict[str, dict[str, int]] = {}
-
-    while True:
-        await asyncio.sleep(check_interval)
-        pressure = metrics.wait_pressure(window_seconds, sample_cap_ms=sample_cap_ms)
-        samples = int(pressure.get("samples", 0))
-        if samples < min_samples:
-            continue
-        snapshot = limiter.snapshot()
-        current_limit = int(snapshot.get("current_limit", 1))
-        max_limit = int(snapshot.get("configured_max", current_limit))
-        min_limit = int(snapshot.get("configured_min", current_limit))
-        available = int(snapshot.get("available", 0))
-        in_flight = int(snapshot.get("in_flight", 0))
-        p95_wait_ms = float(pressure.get("p95_wait_ms", 0.0))
-        p50_wait_ms = float(pressure.get("p50_wait_ms", 0.0))
-        source_totals = metrics.source_totals()
-        completed_delta = 0
-        timeout_delta = 0
-        failed_delta = 0
-        for source, totals in source_totals.items():
-            previous = last_source_totals.get(source, {})
-            completed_now = int(totals.get("polls_completed", 0))
-            failed_now = int(totals.get("polls_failed", 0))
-            timed_out_now = int(totals.get("polls_timed_out", 0))
-            completed_prev = int(previous.get("polls_completed", completed_now))
-            failed_prev = int(previous.get("polls_failed", failed_now))
-            timed_out_prev = int(previous.get("polls_timed_out", timed_out_now))
-            completed_delta += max(0, completed_now - completed_prev)
-            failed_delta += max(0, failed_now - failed_prev)
-            timeout_delta += max(0, timed_out_now - timed_out_prev)
-        last_source_totals = source_totals
-
-        timeout_rate = timeout_delta / max(1, completed_delta)
-        if timeout_delta > 0 and current_limit > min_limit:
-            step = max(4, int(current_limit * max(0.15, min(timeout_rate, 0.50))))
-            new_limit = max(min_limit, current_limit - step)
-            idle_windows = 0
-            pressure_windows = 0
-            if new_limit < current_limit:
-                applied = await limiter.set_limit(
-                    new_limit,
-                    reason=(
-                        f"timeout_backoff timeouts={timeout_delta} "
-                        f"failures={failed_delta} completed={completed_delta} "
-                        f"timeout_rate={timeout_rate:.3f}"
-                    ),
-                )
-                LOG.warning(
-                    "Adaptive concurrency decreased on timeout pressure: %d -> %d "
-                    "(timeouts=%d failures=%d completed=%d timeout_rate=%.3f)",
-                    current_limit,
-                    applied,
-                    timeout_delta,
-                    failed_delta,
-                    completed_delta,
-                    timeout_rate,
-                )
-            continue
-
-        saturated = available == 0 and in_flight >= current_limit
-        if (
-            saturated
-            and p95_wait_ms > float(target_p95_wait_ms)
-            and p50_wait_ms > high_wait_floor_ms
-        ):
-            pressure_windows += 1
-        else:
-            pressure_windows = 0
-
-        if pressure_windows >= 3:
-            step = 2
-            new_limit = min(max_limit, current_limit + step)
-            idle_windows = 0
-            pressure_windows = 0
-            if new_limit > current_limit:
-                applied = await limiter.set_limit(
-                    new_limit,
-                    reason=(
-                        f"p95_wait_ms={p95_wait_ms:.1f} "
-                        f"p50_wait_ms={p50_wait_ms:.1f} "
-                        f"samples={samples} cap_ms={sample_cap_ms:.1f}"
-                    ),
-                )
-                LOG.info(
-                    "Adaptive concurrency increased: %d -> %d "
-                    "(p95_wait=%.1fms p50_wait=%.1fms samples=%d)",
-                    current_limit,
-                    applied,
-                    p95_wait_ms,
-                    p50_wait_ms,
-                    samples,
-                )
-            continue
-
-        idle_ratio = available / max(1, current_limit)
-        if (
-            p95_wait_ms <= low_wait_ms
-            and idle_ratio >= 0.25
-            and current_limit > min_limit
-        ):
-            idle_windows += 1
-        else:
-            idle_windows = 0
-        if idle_windows:
-            pressure_windows = 0
-        if idle_windows < 3:
-            continue
-        step = max(1, int(current_limit * 0.05))
-        new_limit = max(min_limit, current_limit - step)
-        idle_windows = 0
-        if new_limit < current_limit:
-            applied = await limiter.set_limit(
-                new_limit,
-                reason=(
-                    f"low_wait p95_wait_ms={p95_wait_ms:.1f} "
-                    f"available={available} samples={samples}"
-                ),
-            )
-            LOG.info(
-                "Adaptive concurrency decreased: %d -> %d "
-                "(p95_wait=%.1fms available=%d/%d samples=%d)",
-                current_limit,
-                applied,
-                p95_wait_ms,
-                available,
-                current_limit,
-                samples,
-            )
-
-
 async def _run_event_loop_lag_monitor(metrics: MetricsStore) -> None:
     interval_s = 1.0
     expected = monotonic() + interval_s
@@ -2010,14 +1861,6 @@ async def async_main() -> None:
     LOG.info("  poll_interval: %ds", config.poll_interval)
     LOG.info("  poll_timeout: %ds", config.poll_timeout)
     LOG.info("  max_concurrent_polls: %d", config.max_concurrent_polls)
-    LOG.info(
-        "  adaptive_concurrency: enabled=%s min=%d max=%d window=%ds target_p95_wait=%dms",
-        config.adaptive_concurrency_enabled,
-        config.adaptive_concurrency_min,
-        config.adaptive_concurrency_max,
-        config.adaptive_concurrency_window_seconds,
-        config.adaptive_concurrency_target_p95_wait_ms,
-    )
     LOG.info("  mqtt_enabled: %s", config.mqtt_enabled)
     if config.mqtt_enabled:
         LOG.info("  mqtt_host: %s", config.mqtt_host)
@@ -2116,17 +1959,9 @@ async def async_main() -> None:
     loop = asyncio.get_running_loop()
     global_poll_semaphore = AdjustableConcurrencyLimiter(
         config.max_concurrent_polls,
-        min_limit=(
-            config.adaptive_concurrency_min
-            if config.adaptive_concurrency_enabled
-            else config.max_concurrent_polls
-        ),
-        max_limit=(
-            config.adaptive_concurrency_max
-            if config.adaptive_concurrency_enabled
-            else config.max_concurrent_polls
-        ),
-        adaptive_enabled=config.adaptive_concurrency_enabled,
+        min_limit=config.max_concurrent_polls,
+        max_limit=config.max_concurrent_polls,
+        adaptive_enabled=False,
     )
     metrics = MetricsStore(global_poll_semaphore=global_poll_semaphore, db=db)
     type_limiter: AdaptiveTypeLimiter | None = None
@@ -2252,21 +2087,9 @@ async def async_main() -> None:
         LOG.info("Metrics-only listener enabled on %s:%d", metrics_host, metrics_port)
 
     running: dict[str, tuple[DeviceConfig, str, asyncio.Task]] = {}
-    adaptive_concurrency_task: asyncio.Task | None = None
     influx_exporter: InfluxV3TelemetryExporter | None = None
     influx_task: asyncio.Task | None = None
     event_loop_lag_task = asyncio.create_task(_run_event_loop_lag_monitor(metrics))
-    if config.adaptive_concurrency_enabled:
-        adaptive_concurrency_task = asyncio.create_task(
-            _run_adaptive_concurrency_controller(
-                limiter=global_poll_semaphore,
-                metrics=metrics,
-                poll_interval_seconds=config.poll_interval,
-                window_seconds=config.adaptive_concurrency_window_seconds,
-                target_p95_wait_ms=config.adaptive_concurrency_target_p95_wait_ms,
-            )
-        )
-        LOG.info("Adaptive global concurrency controller started")
     if config.telemetry_influx_enabled:
         if (
             config.telemetry_influx_api != "v3"
@@ -2470,8 +2293,6 @@ async def async_main() -> None:
                 )
             await asyncio.sleep(1)
     finally:
-        if adaptive_concurrency_task is not None:
-            adaptive_concurrency_task.cancel()
         if influx_task is not None:
             influx_task.cancel()
         event_loop_lag_task.cancel()

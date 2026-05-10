@@ -171,7 +171,7 @@ Home Assistant discovery identifiers/topics are normalized to HA-safe tokens (fo
 
 The web metrics panel and `/metrics.json` expose scheduler/backpressure telemetry for live tuning:
 
-- Backpressure and adaptive limiter state:
+- Backpressure and fixed limiter state:
   - `current_limit`, `configured_min`, `configured_max`
   - in-flight vs queued polls
   - wait pressure (`p50/p95/max`) over the rolling 60s window

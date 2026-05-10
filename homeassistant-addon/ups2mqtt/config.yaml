@@ -39,12 +39,7 @@ options:
   mqtt_topic_prefix: ups2mqtt
   poll_interval: 15
   poll_timeout: 15
-  max_concurrent_polls: 8
-  adaptive_concurrency_enabled: false
-  adaptive_concurrency_min: 8
-  adaptive_concurrency_max: 128
-  adaptive_concurrency_window_seconds: 60
-  adaptive_concurrency_target_p95_wait_ms: 1000
+  max_concurrent_polls: 10
   apps_dir: /data/apps
   web_enabled: true
   web_host: 0.0.0.0
@@ -78,11 +73,6 @@ schema:
   poll_interval: int(1,3600)
   poll_timeout: int(2,3600)
   max_concurrent_polls: int(1,128)
-  adaptive_concurrency_enabled: bool
-  adaptive_concurrency_min: int(1,128)
-  adaptive_concurrency_max: int(1,128)
-  adaptive_concurrency_window_seconds: int(10,3600)
-  adaptive_concurrency_target_p95_wait_ms: int(0,60000)
   apps_dir: str
   web_enabled: bool
   web_host: str

@@ -308,45 +308,7 @@ def load_config(options_path: str | None = None) -> AppConfig:
         1,
         _env_or_default_int(
             "UPS2MQTT_MAX_CONCURRENT_POLLS",
-            raw_options.get("max_concurrent_polls", 8),
-        ),
-    )
-    adaptive_concurrency_enabled = _coerce_bool(
-        _env_or_default(
-            "UPS2MQTT_ADAPTIVE_CONCURRENCY_ENABLED",
-            raw_options.get("adaptive_concurrency_enabled", False),
-        ),
-        default=False,
-    )
-    adaptive_concurrency_min = max(
-        1,
-        _env_or_default_int(
-            "UPS2MQTT_ADAPTIVE_CONCURRENCY_MIN",
-            raw_options.get("adaptive_concurrency_min", max_concurrent_polls),
-        ),
-    )
-    adaptive_concurrency_max = max(
-        adaptive_concurrency_min,
-        _env_or_default_int(
-            "UPS2MQTT_ADAPTIVE_CONCURRENCY_MAX",
-            raw_options.get(
-                "adaptive_concurrency_max",
-                max(max_concurrent_polls, adaptive_concurrency_min),
-            ),
-        ),
-    )
-    adaptive_concurrency_window_seconds = max(
-        10,
-        _env_or_default_int(
-            "UPS2MQTT_ADAPTIVE_CONCURRENCY_WINDOW_SECONDS",
-            raw_options.get("adaptive_concurrency_window_seconds", 60),
-        ),
-    )
-    adaptive_concurrency_target_p95_wait_ms = max(
-        0,
-        _env_or_default_int(
-            "UPS2MQTT_ADAPTIVE_CONCURRENCY_TARGET_P95_WAIT_MS",
-            raw_options.get("adaptive_concurrency_target_p95_wait_ms", 1000),
+            raw_options.get("max_concurrent_polls", 10),
         ),
     )
     telemetry_influx_enabled = _coerce_bool(
@@ -451,11 +413,6 @@ def load_config(options_path: str | None = None) -> AppConfig:
         poll_interval=poll_interval,
         poll_timeout=max(2, int(raw_options.get("poll_timeout", 15))),
         max_concurrent_polls=max_concurrent_polls,
-        adaptive_concurrency_enabled=adaptive_concurrency_enabled,
-        adaptive_concurrency_min=adaptive_concurrency_min,
-        adaptive_concurrency_max=adaptive_concurrency_max,
-        adaptive_concurrency_window_seconds=adaptive_concurrency_window_seconds,
-        adaptive_concurrency_target_p95_wait_ms=adaptive_concurrency_target_p95_wait_ms,
         apps_dir=str(raw_options.get("apps_dir", "/data/apps")),
         web_enabled=bool(raw_options.get("web_enabled", True)),
         web_host=str(raw_options.get("web_host", "0.0.0.0")),
