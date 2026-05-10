@@ -1046,6 +1046,14 @@ def _prepare_metrics_presentation(
         1 for row in rows if int(row.get("errors") or 0) > 0 or row.get("last_error")
     )
 
+    limiter_snapshot = dict(
+        metrics.get("backpressure", {}).get("concurrency_limiter", {})
+    )
+    if not limiter_snapshot:
+        limiter_snapshot = dict(
+            metrics.get("backpressure", {}).get("adaptive_concurrency", {})
+        )
+
     backpressure = {
         "polls_in_flight": int(
             metrics.get("backpressure", {}).get("polls_in_flight", 0)
@@ -1054,9 +1062,9 @@ def _prepare_metrics_presentation(
             metrics.get("backpressure", {}).get("semaphore_available", 0)
         ),
         "wait_pressure": dict(metrics.get("backpressure", {}).get("wait_pressure", {})),
-        "adaptive_concurrency": dict(
-            metrics.get("backpressure", {}).get("adaptive_concurrency", {})
-        ),
+        "concurrency_limiter": limiter_snapshot,
+        # Deprecated compatibility alias for legacy template/readers.
+        "adaptive_concurrency": limiter_snapshot,
     }
     source_rows = []
     for source, item in sorted(dict(metrics.get("sources", {})).items()):

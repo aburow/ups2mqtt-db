@@ -701,19 +701,22 @@ class MetricsStore:
         }
         # Backpressure metrics
         semaphore_available = 0
-        adaptive_concurrency: dict[str, Any] = {}
+        concurrency_limiter: dict[str, Any] = {}
         if self.global_poll_semaphore is not None:
             snapshot = getattr(self.global_poll_semaphore, "snapshot", None)
             if callable(snapshot):
-                adaptive_concurrency = dict(snapshot())
-                semaphore_available = int(adaptive_concurrency.get("available", 0))
+                concurrency_limiter = dict(snapshot())
+                semaphore_available = int(concurrency_limiter.get("available", 0))
             else:
                 semaphore_available = self.global_poll_semaphore._value
         backpressure = {
             "polls_in_flight": polls_in_flight,
             "semaphore_available": semaphore_available,
             "wait_pressure": wait_pressure,
-            "adaptive_concurrency": adaptive_concurrency,
+            # Preferred key name for fixed limiter telemetry.
+            "concurrency_limiter": concurrency_limiter,
+            # Deprecated compatibility alias; kept for downstream consumers.
+            "adaptive_concurrency": concurrency_limiter,
             "polls_started_per_second": starts_60s / 60.0,
             "polls_completed_per_second": completions_60s / 60.0,
             "timeout_rate": timeouts_60s / max(1, completions_60s),

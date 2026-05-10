@@ -20,6 +20,12 @@ def test_successful_poll_accounting_remains_balanced() -> None:
     assert snapshot["totals"]["polls_started"] == 1
     assert snapshot["totals"]["polls_succeeded"] == 1
     assert snapshot["backpressure"]["polls_in_flight"] == 0
+    assert "concurrency_limiter" in snapshot["backpressure"]
+    assert "adaptive_concurrency" in snapshot["backpressure"]
+    assert (
+        snapshot["backpressure"]["concurrency_limiter"]
+        == snapshot["backpressure"]["adaptive_concurrency"]
+    )
     assert snapshot["sources"]["source-a"]["polls_dequeued"] == 1
     assert snapshot["sources"]["source-a"]["polls_completed"] == 1
     assert snapshot["sources"]["source-a"]["active"] == 0

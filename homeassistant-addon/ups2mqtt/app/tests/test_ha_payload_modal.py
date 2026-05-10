@@ -236,6 +236,13 @@ def test_metrics_panel_renders_ha_payload_data_button_with_device_id(
     )
     metrics_snapshot = {
         "generated_at_utc": "2026-05-06T00:00:00Z",
+        "backpressure": {
+            "polls_in_flight": 1,
+            "semaphore_available": 9,
+            "wait_pressure": {"p95_wait_ms": 20.0},
+            "concurrency_limiter": {"queued": 3, "current_limit": 10},
+            "adaptive_concurrency": {"queued": 3, "current_limit": 10},
+        },
         "devices": {
             "uid-ups-metrics-1": {
                 "polls_started": 1,
@@ -268,11 +275,61 @@ def test_metrics_panel_renders_ha_payload_data_button_with_device_id(
         base_url = f"http://127.0.0.1:{server.server_port}"
         status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
         assert status == HTTPStatus.OK
+        assert "Queued: <strong>3</strong>" in body
+        assert "Limit: <strong>10</strong>" in body
         assert (
             'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-metrics-1"' in body
         )
         assert 'hx-target="#device-modal-content"' in body
         assert '@click="modalOpen = true"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_metrics_panel_backpressure_falls_back_to_legacy_alias(
+    tmp_path: Path,
+) -> None:
+    device = DeviceConfig(
+        id="ups-legacy-1",
+        source="cyberpower_modbus_single_phase",
+        host="10.0.0.16",
+        device_uid="uid-ups-legacy-1",
+    )
+    metrics_snapshot = {
+        "generated_at_utc": "2026-05-10T00:00:00Z",
+        "backpressure": {
+            "polls_in_flight": 1,
+            "semaphore_available": 9,
+            "wait_pressure": {"p95_wait_ms": 20.0},
+            "adaptive_concurrency": {"queued": 4, "current_limit": 10},
+        },
+        "sources": {},
+        "devices": {},
+        "totals": {},
+    }
+
+    db = Database(str(tmp_path / "test.db"))
+    store = DeviceStore([device], db)
+    server = start_web_server(
+        host="127.0.0.1",
+        port=0,
+        store=store,
+        get_source_names=lambda: ["cyberpower_modbus_single_phase"],
+        log_buffer=LogBuffer(),
+        get_capability_status=lambda: {},
+        trigger_capability_reload=lambda: None,
+        trigger_republish_discovery=lambda: None,
+        get_metrics_snapshot=lambda: metrics_snapshot,
+        trigger_reload=lambda: None,
+        get_cached_ha_payload_preview=lambda _device: {},
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
+        assert status == HTTPStatus.OK
+        assert "Queued: <strong>4</strong>" in body
+        assert "Limit: <strong>10</strong>" in body
     finally:
         server.shutdown()
         server.server_close()

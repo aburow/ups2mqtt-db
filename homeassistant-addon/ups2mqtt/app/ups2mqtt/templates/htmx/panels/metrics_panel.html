@@ -51,8 +51,8 @@
       <div class="small text-muted mb-2"><strong>Polling Pressure</strong></div>
       <div class="row g-2 small">
         <div class="col-6 col-md-3">In flight: <strong>{{ backpressure.polls_in_flight }}</strong></div>
-        <div class="col-6 col-md-3">Queued: <strong>{{ backpressure.adaptive_concurrency.queued or 0 }}</strong></div>
-        <div class="col-6 col-md-3">Limit: <strong>{{ backpressure.adaptive_concurrency.current_limit or max_concurrent_polls }}</strong></div>
+        <div class="col-6 col-md-3">Queued: <strong>{{ backpressure.concurrency_limiter.queued or 0 }}</strong></div>
+        <div class="col-6 col-md-3">Limit: <strong>{{ backpressure.concurrency_limiter.current_limit or max_concurrent_polls }}</strong></div>
         <div class="col-6 col-md-3">Wait p95: <strong>{{ "%.0f"|format(backpressure.wait_pressure.p95_wait_ms or 0) if backpressure.wait_pressure else "0" }} ms</strong></div>
       </div>
     </div>

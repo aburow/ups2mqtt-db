@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+import json
 from pathlib import Path
 import sys
 from urllib.error import HTTPError
@@ -33,6 +34,7 @@ def _start_test_server(
     tmp_path: Path,
     *,
     get_prometheus_samples=None,
+    get_metrics_snapshot=None,
     metrics_only: bool = False,
 ):
     db = Database(str(tmp_path / "test.db"))
@@ -46,7 +48,7 @@ def _start_test_server(
         get_capability_status=lambda: {},
         trigger_capability_reload=lambda: None,
         trigger_republish_discovery=lambda: None,
-        get_metrics_snapshot=lambda: {},
+        get_metrics_snapshot=(get_metrics_snapshot or (lambda: {})),
         trigger_reload=lambda: None,
         get_prometheus_samples=get_prometheus_samples,
         metrics_only=metrics_only,
@@ -126,13 +128,39 @@ def test_prometheus_endpoint_renders_numeric_and_omits_non_numeric_and_escapes_l
 
 
 def test_metrics_json_route_unchanged(tmp_path: Path) -> None:
-    server = _start_test_server(tmp_path, get_prometheus_samples=lambda _devices: [])
+    metrics_snapshot = {
+        "backpressure": {
+            "polls_in_flight": 0,
+            "concurrency_limiter": {
+                "available": 10,
+                "current_limit": 10,
+                "queued": 0,
+            },
+            "adaptive_concurrency": {
+                "available": 10,
+                "current_limit": 10,
+                "queued": 0,
+            },
+        }
+    }
+    server = _start_test_server(
+        tmp_path,
+        get_prometheus_samples=lambda _devices: [],
+        get_metrics_snapshot=lambda: metrics_snapshot,
+    )
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
         status, body, headers = _fetch(base_url, "/metrics.json")
         assert status == HTTPStatus.OK
         assert headers.get("Content-Type", "").startswith("application/json")
         assert body.strip().startswith("{")
+        parsed = json.loads(body)
+        assert "concurrency_limiter" in parsed["backpressure"]
+        assert "adaptive_concurrency" in parsed["backpressure"]
+        assert (
+            parsed["backpressure"]["concurrency_limiter"]
+            == parsed["backpressure"]["adaptive_concurrency"]
+        )
     finally:
         server.shutdown()
         server.server_close()
