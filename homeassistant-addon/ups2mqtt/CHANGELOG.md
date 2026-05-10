@@ -2,6 +2,17 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.8
+
+- Added hover-help (`ⓘ`) hints across admin HTMX surfaces:
+  - Devices table headers and row actions.
+  - Configuration panel labels and runtime timer layout refinements.
+  - Maintenance panel buttons.
+  - Metrics panel headers and action buttons.
+  - Profiles panel/table actions and profile form actions.
+  - Profile Builder panel buttons and discovered-capabilities table headers.
+- Enabled Home Assistant bridge visibility by default while preserving runtime/env overrides.
+
 ## v1.2.7
 
 - Decommissioned obsolete adaptive-concurrency runtime/config surfaces.

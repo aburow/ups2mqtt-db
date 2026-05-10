@@ -298,11 +298,11 @@ def load_config(options_path: str | None = None) -> AppConfig:
     )
     raw_ha_bridge_enabled = runtime_settings.get(
         "ha_bridge_enabled",
-        raw_options.get("ha_bridge_enabled", False),
+        raw_options.get("ha_bridge_enabled", True),
     )
     ha_bridge_enabled = _coerce_bool(
         _env_or_default("UPS2MQTT_HA_BRIDGE_ENABLED", raw_ha_bridge_enabled),
-        default=False,
+        default=True,
     )
     max_concurrent_polls = max(
         1,

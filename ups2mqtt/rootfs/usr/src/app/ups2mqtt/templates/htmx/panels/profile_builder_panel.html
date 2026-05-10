@@ -3,11 +3,12 @@
     <h2 class="h5 m-0">Profile Builder</h2>
     <button
       class="btn btn-sm btn-outline-secondary"
+      title="Reload the Profile Builder panel and clear transient discovery state."
       hx-get="/htmx/devices/partials/panel/profile-builder"
       hx-target="#admin-panel"
       hx-swap="innerHTML"
       hx-indicator="#global-loading"
-    >Refresh</button>
+    >Refresh ⓘ</button>
   </div>
 
   <div class="alert alert-info py-2 mb-0">
@@ -98,7 +99,7 @@
         {% endif %}
 
         <div class="d-flex justify-content-end">
-          <button class="btn btn-sm btn-primary" type="submit">Discover Fields</button>
+          <button class="btn btn-sm btn-primary" type="submit" title="Query the endpoint and list reusable profile capabilities.">Discover Fields ⓘ</button>
         </div>
       </form>
     </div>

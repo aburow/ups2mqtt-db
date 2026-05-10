@@ -104,22 +104,24 @@
     <div class="d-flex gap-2">
       <button
         class="btn btn-sm btn-outline-primary"
+        title="Show cached device data and outbound MQTT payload details"
         hx-get="/htmx/devices/partials/modal/ha-payload?id={{ device.id }}"
         hx-target="#device-modal-content"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
         @click="modalOpen = true"
-      >Data</button>
+      >Data ⓘ</button>
       <button
         class="btn btn-sm btn-outline-secondary"
+        title="Force immediate device reinitialization and reconnect using current settings"
         hx-post="/htmx/devices/actions/reinitialize"
         hx-target="#devices-table-container"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
         hx-include="#devices-filter-form"
         hx-vals='{"id":"{{ device.id }}"}'
-      >Reinitialize</button>
-      <button class="btn btn-sm btn-danger" @click="requestDelete('{{ device.id }}')">Delete</button>
+      >Reinitialize ⓘ</button>
+      <button class="btn btn-sm btn-danger" title="Remove this device from ups2mqtt and Home Assistant discovery" @click="requestDelete('{{ device.id }}')">Delete ⓘ</button>
     </div>
   </td>
 </tr>

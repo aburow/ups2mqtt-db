@@ -5,12 +5,13 @@
       <button
         type="button"
         class="btn btn-sm btn-outline-secondary"
+        title="Start a new profile form."
         @click="modalOpen = true"
         hx-get="/htmx/profiles/partials/form"
         hx-target="#device-modal-content"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
-      >New</button>
+      >New ⓘ</button>
     </div>
 
     {% if error_message %}
@@ -61,13 +62,14 @@
             <button
               type="button"
               class="btn btn-sm btn-outline-secondary"
+              title="Reload driver-specific fields for the selected driver."
               hx-get="/htmx/profiles/partials/form"
               hx-target="#device-modal-content"
               hx-swap="innerHTML"
               hx-include="closest form"
               hx-indicator="#global-loading"
               {% if profile_is_protected %}disabled{% endif %}
-            >Load Driver</button>
+            >Load Driver ⓘ</button>
           </div>
         </div>
       </div>
@@ -116,13 +118,14 @@
             <button
               type="button"
               class="btn btn-sm btn-outline-secondary"
+              title="Rediscover live driver capabilities from the provided endpoint."
               hx-post="/htmx/profiles/actions/rediscover"
               hx-target="#device-modal-content"
               hx-swap="innerHTML"
               hx-include="closest form"
               hx-indicator="#global-loading"
               {% if rediscover_disabled %}disabled{% endif %}
-            >Rediscover</button>
+            >Rediscover ⓘ</button>
           </div>
         </div>
       </div>
@@ -198,11 +201,11 @@
       </div>
 
       <div class="d-flex justify-content-end gap-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModal()">Cancel</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close this form without saving profile changes." @click="closeModal()">Cancel ⓘ</button>
         {% if can_save_profile %}
-        <button class="btn btn-sm btn-primary" type="submit">Save Profile</button>
+        <button class="btn btn-sm btn-primary" type="submit" title="Save this profile and return to the Profiles panel.">Save Profile ⓘ</button>
         {% else %}
-        <button class="btn btn-sm btn-primary" type="button" disabled>Save Profile</button>
+        <button class="btn btn-sm btn-primary" type="button" disabled title="Save is unavailable until required profile fields are valid.">Save Profile ⓘ</button>
         {% endif %}
       </div>
     </form>

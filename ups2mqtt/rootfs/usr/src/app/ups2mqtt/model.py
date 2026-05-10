@@ -120,7 +120,7 @@ class AppConfig:
     web_base_path: str = "/"
     ha_url: str | None = None
     ha_token: str | None = None
-    ha_bridge_enabled: bool = False
+    ha_bridge_enabled: bool = True
     telemetry_influx_enabled: bool = False
     telemetry_influx_url: str = ""
     telemetry_influx_api: str = "v3"

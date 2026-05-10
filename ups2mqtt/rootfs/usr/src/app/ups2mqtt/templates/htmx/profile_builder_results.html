@@ -38,16 +38,18 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Select</th>
-              <th>Capability</th>
-              <th>Raw Source</th>
-              <th>Sample Value</th>
-              <th>Poll Group</th>
+              <th title="Normalized capability key used by profiles and devices.">Capability ⓘ</th>
+              <th title="Original source field name from discovery output.">Raw Source ⓘ</th>
+              <th title="Enable MQTT pass-through for this discovered capability.">Select ⓘ</th>
+              <th title="Example value observed during discovery.">Sample Value ⓘ</th>
+              <th title="Polling tier used when this capability is selected.">Poll Group ⓘ</th>
             </tr>
           </thead>
           <tbody>
             {% for row in discovered_rows %}
             <tr>
+              <td><code>{{ row.key }}</code></td>
+              <td><code>{{ row.raw_name }}</code></td>
               <td>
                 <input type="hidden" name="sensor_key__{{ row.key }}" value="1"/>
                 <input type="hidden" name="discovered_sensor_key" value="{{ row.key }}"/>
@@ -58,8 +60,6 @@
                   {% if row.selected %}checked{% endif %}
                 />
               </td>
-              <td><code>{{ row.key }}</code></td>
-              <td><code>{{ row.raw_name }}</code></td>
               <td>{{ row.sample_value }}</td>
               <td>
                 <div class="d-flex flex-wrap gap-2">
@@ -84,7 +84,7 @@
       </div>
 
       <div class="d-flex justify-content-end">
-        <button class="btn btn-sm btn-primary" type="submit">Save Profile</button>
+        <button class="btn btn-sm btn-primary" type="submit" title="Save the selected capabilities as a reusable profile.">Save Profile ⓘ</button>
       </div>
     </form>
     {% endif %}

@@ -40,7 +40,7 @@
 
       <h3 class="h6 m-0">Theme</h3>
       <p class="text-muted small mb-0">
-        Controls the new admin UI appearance.
+        Controls the admin UI appearance.
       </p>
       <form
         class="d-flex flex-wrap gap-2 align-items-end"
@@ -70,11 +70,10 @@
 
       <h3 class="h6 m-0">Polling Runtime Timers</h3>
       <p class="text-muted small mb-0">
-        Metadata refresh controls how often SNMP identity cache is refreshed.
-        Idle reconnect controls when an idle Modbus socket is proactively reopened.
+        Controls SNMP device info block refresh cadence and Modbus idle timeout behavior.
       </p>
       <form
-        class="d-flex flex-wrap gap-2 align-items-end"
+        class="d-flex flex-column gap-2 align-items-start"
         hx-post="/htmx/devices/actions/configuration"
         hx-target="#admin-panel"
         hx-swap="innerHTML"
@@ -82,7 +81,7 @@
       >
         <input type="hidden" name="action" value="set_poll_timers"/>
         <div>
-          <label class="form-label small mb-1">Metadata refresh seconds</label>
+          <label class="form-label small mb-1">SNMP Device Info Block Refresh</label>
           <input
             class="form-control form-control-sm"
             type="number"
@@ -93,7 +92,7 @@
           />
         </div>
         <div>
-          <label class="form-label small mb-1">Idle reconnect seconds</label>
+          <label class="form-label small mb-1">MODBUS Idle Timeout</label>
           <input
             class="form-control form-control-sm"
             type="number"

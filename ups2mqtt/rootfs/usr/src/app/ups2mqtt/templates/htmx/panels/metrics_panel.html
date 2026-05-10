@@ -14,19 +14,21 @@
       </small>
       <button
         class="btn btn-sm btn-outline-secondary"
+        title="Reload the Metrics panel with the latest runtime values."
         hx-get="/htmx/devices/partials/panel/metrics"
         hx-target="#admin-panel"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
-      >Refresh</button>
+      >Refresh ⓘ</button>
       <button
         class="btn btn-sm btn-outline-secondary"
+        title="Clear only the last error text on all metrics rows."
         hx-post="/htmx/devices/actions/metrics/clear-errors"
         hx-target="#admin-panel"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
         hx-confirm="Clear last errors for all metrics rows?"
-      >Clear All Errors</button>
+      >Clear All Errors ⓘ</button>
       <form
         class="m-0"
         hx-post="/htmx/devices/actions/metrics/clear"
@@ -35,7 +37,7 @@
         hx-indicator="#global-loading"
       >
         <input type="hidden" name="scope" value="all"/>
-        <button class="btn btn-sm btn-outline-danger" type="submit">Clear Metrics</button>
+        <button class="btn btn-sm btn-outline-danger" type="submit" title="Reset all metrics counters and timing history for all devices.">Clear Metrics ⓘ</button>
       </form>
     </div>
   </div>
@@ -64,7 +66,7 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Driver</th><th>Now</th><th>Completed</th><th>Errors</th><th>Wait p95</th><th>Oldest Queue</th>
+              <th title="Driver/source key for grouped polling metrics">Driver ⓘ</th><th title="Current active and queued polls">Now ⓘ</th><th title="Total completed polls for this driver">Completed ⓘ</th><th title="Total failed + timed out polls">Errors ⓘ</th><th title="95th percentile queue wait time">Wait p95 ⓘ</th><th title="Longest observed queue age">Oldest Queue ⓘ</th>
             </tr>
           </thead>
           <tbody>
@@ -92,8 +94,8 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Device</th><th>Status</th><th>Success</th><th>Errors</th><th>Last Poll</th><th>Queue Wait</th>
-              <th>Cadence</th><th>Publish</th><th>Values</th><th>Last Error</th><th>Updated {{ timezone_label }}</th><th>Action</th>
+              <th title="Device display name">Device ⓘ</th><th title="Most recent poll status">Status ⓘ</th><th title="Successful poll count and success rate">Success ⓘ</th><th title="Failed + timed out poll count">Errors ⓘ</th><th title="Last poll duration">Last Poll ⓘ</th><th title="Last observed queue wait time">Queue Wait ⓘ</th>
+              <th title="Poll cadence summary">Cadence ⓘ</th><th title="Last publish timing summary">Publish ⓘ</th><th title="Latest value count seen for the device">Values ⓘ</th><th title="Most recent error text">Last Error ⓘ</th><th title="Last metrics update time in {{ timezone_label }}">Updated {{ timezone_label }} ⓘ</th><th title="Per-device metrics actions">Action ⓘ</th>
             </tr>
           </thead>
           <tbody>
@@ -114,12 +116,13 @@
                   <span>{{ row.last_error }}</span>
                   <button
                     class="btn btn-sm btn-outline-secondary"
+                    title="Clear only this row's last error text."
                     hx-post="/htmx/devices/actions/metrics/clear-error"
                     hx-vals='{"device_uid":"{{ row.device_uid }}"}'
                     hx-target="#admin-panel"
                     hx-swap="innerHTML"
                     hx-indicator="#global-loading"
-                  >Clear</button>
+                  >Clear ⓘ</button>
                 </div>
                 {% endif %}
               </td>
@@ -128,21 +131,23 @@
                 <div class="d-flex gap-2">
                   <button
                     class="btn btn-sm btn-outline-primary"
+                    title="Show cached device data and outbound MQTT payload details."
                     hx-get="/htmx/devices/partials/modal/ha-payload?id={{ row.device_id }}"
                     hx-target="#device-modal-content"
                     hx-swap="innerHTML"
                     hx-indicator="#global-loading"
                     @click="modalOpen = true"
-                  >Data</button>
+                  >Data ⓘ</button>
                   <button
                     class="btn btn-sm btn-outline-danger"
+                    title="Reset metrics counters and timing history for this device only."
                     hx-post="/htmx/devices/actions/metrics/clear"
                     hx-vals='{"scope":"device","device_uid":"{{ row.device_uid }}"}'
                     hx-target="#admin-panel"
                     hx-swap="innerHTML"
                     hx-indicator="#global-loading"
                     hx-confirm="Clear metrics for {{ row.name }}?"
-                  >Clear</button>
+                  >Clear ⓘ</button>
                 </div>
               </td>
             </tr>

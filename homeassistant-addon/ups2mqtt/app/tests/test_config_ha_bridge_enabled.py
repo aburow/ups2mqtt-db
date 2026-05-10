@@ -23,7 +23,7 @@ def _write_options(path: Path, *, ha_bridge_enabled: bool | None = None) -> None
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_ha_bridge_enabled_defaults_false(tmp_path: Path, monkeypatch) -> None:
+def test_ha_bridge_enabled_defaults_true(tmp_path: Path, monkeypatch) -> None:
     options_path = tmp_path / "options.json"
     _write_options(options_path)
     monkeypatch.setenv(
@@ -32,7 +32,7 @@ def test_ha_bridge_enabled_defaults_false(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("UPS2MQTT_HA_BRIDGE_ENABLED", raising=False)
 
     config = load_config(str(options_path))
-    assert config.ha_bridge_enabled is False
+    assert config.ha_bridge_enabled is True
 
 
 def test_ha_bridge_enabled_uses_runtime_settings_then_env_override(

@@ -1,6 +1,6 @@
 ---
 name: "ups2mqtt"
-version: "1.2.7"
+version: "1.2.8"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
@@ -47,7 +47,7 @@ options:
   metrics_port: 8100
   expose_direct_port: false
   log_level: ERROR
-  ha_bridge_enabled: false
+  ha_bridge_enabled: true
   ha_url: ""
   ha_token: ""
   telemetry_influx_enabled: false

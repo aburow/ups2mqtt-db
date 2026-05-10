@@ -4,19 +4,21 @@
     <div class="d-flex align-items-center gap-2">
       <button
         class="btn btn-sm btn-outline-primary"
+        title="Create a new reusable profile."
         @click="modalOpen = true"
         hx-get="/htmx/profiles/partials/form"
         hx-target="#device-modal-content"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
-      >New</button>
+      >New ⓘ</button>
       <button
         class="btn btn-sm btn-outline-secondary"
+        title="Reload the Profiles panel with the latest profile state."
         hx-get="/htmx/devices/partials/panel/profiles"
         hx-target="#admin-panel"
         hx-swap="innerHTML"
         hx-indicator="#global-loading"
-      >Refresh</button>
+      >Refresh ⓘ</button>
     </div>
   </div>
 
@@ -26,11 +28,11 @@
         <table class="table table-sm table-striped align-middle mb-0">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Driver</th>
-              <th>Sensors</th>
-              <th>Usage</th>
-              <th>Action</th>
+              <th title="Reusable profile name and optional notes context.">Name ⓘ</th>
+              <th title="Driver contract used by this profile.">Driver ⓘ</th>
+              <th title="Number of sensors selected for publish pass-through.">Sensors ⓘ</th>
+              <th title="How many devices currently reference this profile.">Usage ⓘ</th>
+              <th title="Profile actions including copy, edit, reinitialize, and delete.">Action ⓘ</th>
             </tr>
           </thead>
           <tbody>
@@ -54,29 +56,32 @@
                 <div class="d-flex flex-wrap align-items-center gap-2">
                 <button
                   class="btn btn-sm btn-outline-primary"
+                  title="Create a copy of this profile for safe edits."
                   @click="modalOpen = true"
                   hx-get="/htmx/profiles/actions/copy"
                   hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
                   hx-target="#device-modal-content"
                   hx-swap="innerHTML"
                   hx-indicator="#global-loading"
-                >Copy</button>
+                >Copy ⓘ</button>
                 {% if profile.is_protected %}
-                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Edit</button>
-                <button class="btn btn-sm btn-outline-danger" type="button" disabled>Delete</button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="Protected default profiles cannot be edited.">Edit ⓘ</button>
+                <button class="btn btn-sm btn-outline-danger" type="button" disabled title="Protected default profiles cannot be deleted.">Delete ⓘ</button>
                 {% else %}
                 <button
                   class="btn btn-sm btn-outline-secondary"
+                  title="Edit this profile configuration and sensor selections."
                   @click="modalOpen = true"
                   hx-get="/htmx/profiles/actions/edit"
                   hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
                   hx-target="#device-modal-content"
                   hx-swap="innerHTML"
                   hx-indicator="#global-loading"
-                >Edit</button>
+                >Edit ⓘ</button>
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-warning"
+                  title="Reinitialize all devices using this profile."
                   {% if profile.usage_count == 0 %}disabled{% endif %}
                   @click='openConfirm({
                     title: "Reinitialize Affected Devices",
@@ -90,16 +95,17 @@
                     target: "#admin-panel",
                     values: { profile_uid: "{{ profile.profile_uid }}" }
                   })'
-                >Reinitialize affected devices</button>
+                >Reinitialize affected devices ⓘ</button>
                 <button
                   class="btn btn-sm btn-outline-danger"
+                  title="Delete this profile from ups2mqtt."
                   hx-post="/htmx/profiles/actions/delete"
                   hx-vals='{"profile_uid":"{{ profile.profile_uid }}"}'
                   hx-target="#admin-panel"
                   hx-swap="innerHTML"
                   hx-confirm="Delete profile {{ profile.name }}?"
                   hx-indicator="#global-loading"
-                >Delete</button>
+                >Delete ⓘ</button>
                 {% endif %}
                 </div>
               </td>

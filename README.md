@@ -200,11 +200,11 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.7)
+## Latest release (v1.2.8)
 
-- Decommissioned obsolete adaptive-concurrency config/runtime surfaces and standalone env passthroughs.
-- Standardized fixed concurrency defaults (`max_concurrent_polls=10`) and runtime log-level fallback (`ERROR`).
-- Added compatibility-safe limiter telemetry key migration (`backpressure.concurrency_limiter` with `backpressure.adaptive_concurrency` alias).
+- Added hover-help (`ⓘ`) across Devices, Configuration, Maintenance, Metrics, Profiles, and Profile Builder admin panels.
+- Refined polling runtime timer labels/layout in Configuration.
+- Defaulted Home Assistant bridge visibility to enabled (explicit runtime/env overrides still take precedence).
 
 ## V2 rollout gate
 
