@@ -2,6 +2,16 @@
 
 ### ups2mqtt-db
 
+- release prep: v1.2.7 adaptive queueing decommissioning + env cleanup
+- release prep: default runtime log level fallback switched to `ERROR`
+- release prep: compatibility metrics key migration to `backpressure.concurrency_limiter`
+
+———
+
+## 2026-05-10
+
+### ups2mqtt-db
+
 - release prep: v1.2.6 docs + changelog refresh
 - release prep: lint gate validation (`uv run grain`, `uv run semgrep`) and runtime sync checks
 

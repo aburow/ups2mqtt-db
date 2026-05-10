@@ -200,11 +200,11 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.6)
+## Latest release (v1.2.7)
 
-- Expanded protocol and polling regression coverage across NUT/APCUPSD/Modbus paths.
-- Hardened device/profile edit and payload flows in the HTMX web surface.
-- Updated release documentation and changelog coverage for the 1.2.6 cut.
+- Decommissioned obsolete adaptive-concurrency config/runtime surfaces and standalone env passthroughs.
+- Standardized fixed concurrency defaults (`max_concurrent_polls=10`) and runtime log-level fallback (`ERROR`).
+- Added compatibility-safe limiter telemetry key migration (`backpressure.concurrency_limiter` with `backpressure.adaptive_concurrency` alias).
 
 ## V2 rollout gate
 

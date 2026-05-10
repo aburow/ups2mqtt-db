@@ -2,6 +2,14 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.7
+
+- Decommissioned obsolete adaptive-concurrency runtime/config surfaces.
+- Set runtime log-level default fallback to `ERROR` while preserving explicit overrides.
+- Standardized default `max_concurrent_polls` to `10`.
+- Added preferred metrics key `backpressure.concurrency_limiter` and kept `backpressure.adaptive_concurrency` as a compatibility alias.
+- Removed obsolete standalone adaptive-concurrency environment passthroughs.
+
 ## v1.2.6
 
 - Expanded protocol and polling regression coverage across NUT/APCUPSD/Modbus paths.
