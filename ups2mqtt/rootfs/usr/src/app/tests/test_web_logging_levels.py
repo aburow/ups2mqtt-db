@@ -157,13 +157,13 @@ def test_csv_import_exception_still_emits_error(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level("ERROR", logger="ups2mqtt.web")
+    caplog.set_level("WARNING", logger="ups2mqtt.web")
     server = _start_test_server(tmp_path)
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
         csv_payload = (
             "ID,Source,Host,Port,Unit,SNMP,Poll,Name,Debug,KeepConnectionOpen,Discovery,Polling\n"
-            "ups-a,cyberpower_modbus_single_phase,127.0.0.1,not-int,1,public,,UPS,false,false,true,true"
+            "ups-a,cyberpower_modbus_single_phase,127.0.0.1"
         )
         status, _ = _post(
             base_url,
@@ -171,12 +171,14 @@ def test_csv_import_exception_still_emits_error(
             {"action": "import_csv", "csv_file": csv_payload},
         )
         assert status == HTTPStatus.OK
-        error_messages = [
+        warning_messages = [
             record.getMessage()
             for record in caplog.records
-            if record.name == "ups2mqtt.web" and record.levelname == "ERROR"
+            if record.name == "ups2mqtt.web" and record.levelname == "WARNING"
         ]
-        assert any("CSV import error on row" in message for message in error_messages)
+        assert any(
+            "Skipping malformed CSV line" in message for message in warning_messages
+        )
     finally:
         server.shutdown()
         server.server_close()

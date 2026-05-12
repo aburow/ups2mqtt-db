@@ -1333,7 +1333,7 @@ def test_devices_table_includes_location_column_and_dash_for_empty_location(
         base_url = f"http://127.0.0.1:{server.server_port}"
         status, body, _headers = _fetch(base_url, "/htmx/devices/partials/table")
         assert status == HTTPStatus.OK
-        assert "<th>Location</th>" in body
+        assert "Location ⓘ" in body
         assert "Rack A" in body
         assert 'text-muted">-</span>' in body
     finally:

@@ -31,6 +31,7 @@ def _start_test_server(
     tmp_path: Path,
     devices: list[DeviceConfig],
     preview_callback,
+    runtime_warnings_callback=lambda: [],
 ):
     db = Database(str(tmp_path / "test.db"))
     store = DeviceStore(devices, db)
@@ -57,6 +58,7 @@ def _start_test_server(
         get_metrics_snapshot=lambda: {},
         trigger_reload=_reload,
         get_cached_ha_payload_preview=preview_callback,
+        get_runtime_warnings=runtime_warnings_callback,
     )
     return server, callback_calls
 
@@ -217,6 +219,145 @@ def test_ha_payload_modal_unknown_device_htmx_request_returns_modal_message(
         assert '<div class="card">' in body
         assert calls["republish_discovery"] == 0
         assert calls["reload"] == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_metrics_panel_renders_ha_payload_data_button_with_device_id(
+    tmp_path: Path,
+) -> None:
+    device = DeviceConfig(
+        id="ups-metrics-1",
+        source="cyberpower_modbus_single_phase",
+        host="10.0.0.20",
+        device_uid="uid-ups-metrics-1",
+        name="Metrics UPS",
+    )
+    metrics_snapshot = {
+        "generated_at_utc": "2026-05-06T00:00:00Z",
+        "backpressure": {
+            "polls_in_flight": 1,
+            "semaphore_available": 9,
+            "wait_pressure": {"p95_wait_ms": 20.0},
+            "concurrency_limiter": {"queued": 3, "current_limit": 10},
+            "adaptive_concurrency": {"queued": 3, "current_limit": 10},
+        },
+        "devices": {
+            "uid-ups-metrics-1": {
+                "polls_started": 1,
+                "polls_succeeded": 1,
+                "polls_failed": 0,
+                "polls_timed_out": 0,
+                "values": 4,
+                "last_status": "success",
+            }
+        },
+        "totals": {},
+    }
+
+    db = Database(str(tmp_path / "test.db"))
+    store = DeviceStore([device], db)
+    server = start_web_server(
+        host="127.0.0.1",
+        port=0,
+        store=store,
+        get_source_names=lambda: ["cyberpower_modbus_single_phase"],
+        log_buffer=LogBuffer(),
+        get_capability_status=lambda: {},
+        trigger_capability_reload=lambda: None,
+        trigger_republish_discovery=lambda: None,
+        get_metrics_snapshot=lambda: metrics_snapshot,
+        trigger_reload=lambda: None,
+        get_cached_ha_payload_preview=lambda _device: {},
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
+        assert status == HTTPStatus.OK
+        assert "Queued: <strong>3</strong>" in body
+        assert "Limit: <strong>10</strong>" in body
+        assert (
+            'hx-get="/htmx/devices/partials/modal/ha-payload?id=ups-metrics-1"' in body
+        )
+        assert 'hx-target="#device-modal-content"' in body
+        assert '@click="modalOpen = true"' in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_metrics_panel_backpressure_falls_back_to_legacy_alias(
+    tmp_path: Path,
+) -> None:
+    device = DeviceConfig(
+        id="ups-legacy-1",
+        source="cyberpower_modbus_single_phase",
+        host="10.0.0.16",
+        device_uid="uid-ups-legacy-1",
+    )
+    metrics_snapshot = {
+        "generated_at_utc": "2026-05-10T00:00:00Z",
+        "backpressure": {
+            "polls_in_flight": 1,
+            "semaphore_available": 9,
+            "wait_pressure": {"p95_wait_ms": 20.0},
+            "adaptive_concurrency": {"queued": 4, "current_limit": 10},
+        },
+        "sources": {},
+        "devices": {},
+        "totals": {},
+    }
+
+    db = Database(str(tmp_path / "test.db"))
+    store = DeviceStore([device], db)
+    server = start_web_server(
+        host="127.0.0.1",
+        port=0,
+        store=store,
+        get_source_names=lambda: ["cyberpower_modbus_single_phase"],
+        log_buffer=LogBuffer(),
+        get_capability_status=lambda: {},
+        trigger_capability_reload=lambda: None,
+        trigger_republish_discovery=lambda: None,
+        get_metrics_snapshot=lambda: metrics_snapshot,
+        trigger_reload=lambda: None,
+        get_cached_ha_payload_preview=lambda _device: {},
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices/partials/panel/metrics")
+        assert status == HTTPStatus.OK
+        assert "Queued: <strong>4</strong>" in body
+        assert "Limit: <strong>10</strong>" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_devices_page_renders_persistent_runtime_warning_banner_for_mqtt_auth_failure(
+    tmp_path: Path,
+) -> None:
+    warning = {
+        "code": "mqtt_auth_failed",
+        "level": "danger",
+        "message": "MQTT authentication failed for 192.168.100.41:1883.",
+        "details": "Not authorized",
+    }
+    server, _ = _start_test_server(
+        tmp_path=tmp_path,
+        devices=[],
+        preview_callback=lambda _device: {},
+        runtime_warnings_callback=lambda: [warning],
+    )
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        status, body = _fetch(base_url, "/htmx/devices")
+        assert status == HTTPStatus.OK
+        assert "Runtime Warning:" in body
+        assert "MQTT authentication failed for 192.168.100.41:1883." in body
+        assert "data-runtime-warning-code=\"mqtt_auth_failed\"" in body
+        assert "Not authorized" in body
     finally:
         server.shutdown()
         server.server_close()
