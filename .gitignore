@@ -13,6 +13,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .tools/
+.grain.toml
 
 # Local scratch script
 gogogo

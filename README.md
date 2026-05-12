@@ -200,11 +200,13 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.8)
+## Latest release (v1.2.9)
 
-- Added hover-help (`ⓘ`) across Devices, Configuration, Maintenance, Metrics, Profiles, and Profile Builder admin panels.
-- Refined polling runtime timer labels/layout in Configuration.
-- Defaulted Home Assistant bridge visibility to enabled (explicit runtime/env overrides still take precedence).
+- Resolved Dependabot security advisories by updating transitive locked dependencies:
+  - `urllib3` to `2.7.0`
+  - `python-multipart` to `0.0.28`
+- Updated pytest expectations to match current HTMX/UI rendering and validation behavior.
+- Restored full pytest suite pass in canonical and runtime trees.
 
 ## V2 rollout gate
 

@@ -2,6 +2,14 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.9
+
+- Patched Dependabot-flagged transitive security dependencies in runtime lockfiles:
+  - `urllib3` `2.6.3` -> `2.7.0`
+  - `python-multipart` `0.0.26` -> `0.0.28`
+- Updated canonical and mirrored runtime pytest expectations for current HTMX/UI rendering and device validation behavior.
+- Restored full pytest suite pass in both canonical and runtime trees.
+
 ## v1.2.8
 
 - Added hover-help (`ⓘ`) hints across admin HTMX surfaces:
