@@ -2,6 +2,13 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.10
+
+- Added Proxmox-backed HAOS pre-release validation automation for local add-on sync, snapshot, rollback, install/start, restart recovery, and runtime evidence checks.
+- Added Supervisor runtime validation for staged local builds with MQTT credentials, test-device option injection, and app-log polling evidence.
+- Fixed Home Assistant discovery bridge logging so pre-release validation can assert real MQTT/Home Assistant publication behavior.
+- Hardened add-on Docker metadata for the current HAOS local-build path while preserving production image metadata.
+
 ## v1.2.9
 
 - Patched Dependabot-flagged transitive security dependencies in runtime lockfiles:

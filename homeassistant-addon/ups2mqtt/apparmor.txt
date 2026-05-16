@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 github.com/aburow
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Home Assistant add-on AppArmor profile for ups2mqtt.
+# Uses the default add-on profile as a strict baseline and applies no
+# additional broad allowances.
+#include <tunables/global>
+
+profile hassio-addon-ups2mqtt flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Keep this profile intentionally minimal and rely on the default
+  # Home Assistant add-on confinement model.
+}

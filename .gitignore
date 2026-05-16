@@ -1,5 +1,7 @@
 # Runtime/env
 .env
+.env.ha-test
+.env.pre-release
 standalone/.env
 
 # Standalone runtime state

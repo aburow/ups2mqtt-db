@@ -124,6 +124,7 @@ Once connected, you can:
 
 ### Home Assistant / MQTT
 - MQTT discovery: supported
+- No custom Home Assistant integration is required; entities are created directly via MQTT discovery.
 - Home Assistant token: optional, used for stale-entity cleanup flows
 - Ingress UI: supported in add-on mode
 - Direct web port (add-on): optional troubleshooting mode
@@ -200,13 +201,80 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.9)
+## Latest release (v1.2.10)
 
-- Resolved Dependabot security advisories by updating transitive locked dependencies:
-  - `urllib3` to `2.7.0`
-  - `python-multipart` to `0.0.28`
-- Updated pytest expectations to match current HTMX/UI rendering and validation behavior.
-- Restored full pytest suite pass in canonical and runtime trees.
+- Added HAOS pre-release validation automation with Proxmox snapshot/rollback safety.
+- Validated staged local add-on install/start/restart behavior in Supervisor.
+- Added runtime checks for real MQTT publish/Home Assistant discovery evidence from add-on logs.
+- Preserved production GHCR image metadata while supporting local-build staging for validation.
+
+## Home Assistant test environment
+
+This repository includes Make targets for a disposable local Home Assistant Container + MQTT broker environment. This environment is useful for local MQTT discovery and UI smoke testing, but it is not Supervisor-capable and does not provide the Home Assistant Add-on Store, Supervisor-managed add-on lifecycle, or Supervisor AppArmor validation.
+
+Final add-on acceptance still requires a real Home Assistant OS, Home Assistant Supervised, or disposable Supervisor-capable environment.
+
+Create a local environment file first:
+
+```sh
+cp .env.ha-test.example .env.ha-test
+```
+
+Default access:
+
+- Home Assistant: `http://localhost:8123`
+- MQTT broker: `localhost:1883`
+
+Ports and bind addresses can be changed in `.env.ha-test`.
+
+Available targets:
+
+- `make ha-test-start`: start the disposable Home Assistant Container + MQTT environment.
+- `make ha-test-stop`: stop the environment without removing its compose-scoped volumes.
+- `make ha-test-rebuild`: rebuild and recreate the environment containers.
+- `make ha-test-logs`: follow logs for both test-environment containers.
+- `make ha-test-status`: show container status and access information.
+- `make ha-test-clean`: remove only the containers, network, and volumes created for the `ups2mqtt-ha-test` compose project.
+
+## Pre-release HAOS SSH override
+
+The pre-release Home Assistant OS validation targets use `PRE_RELEASE_SSH_CMD`, which defaults to `ssh`. Override it only when the runner's global SSH client configuration is broken or when validation must use a clean wrapper. The value may be set in the ignored `.env.pre-release` file or passed on the `make` command line:
+
+```sh
+make PRE_RELEASE_SSH_CMD=/path/to/ssh-wrapper pre-release-haos-smoke
+```
+
+For example, a local runner can bypass global SSH client config with:
+
+```sh
+PRE_RELEASE_SSH_CMD='ssh -F /dev/null'
+```
+
+The override still receives the existing key, port, user, host, and remote `ha` CLI arguments from the Make targets. Do not put private key contents or credentials in the command value.
+
+## Pre-release runtime validation command
+
+`make pre-release-run` is smoke-only unless `PRE_RELEASE_TEST_CMD` is set. In smoke-only mode it verifies:
+
+- snapshot creation and verification
+- HAOS smoke access (`ha core info` and `ha supervisor info`)
+- rollback execution and verification
+
+For Supervisor add-on runtime validation, set:
+
+```sh
+PRE_RELEASE_TEST_CMD='./scripts/pre-release-haos-addon-test.sh'
+```
+
+The runtime script exercises add-on repository refresh, add-on install/start, AppArmor/log checks, options handling, MQTT discovery/log evidence checks, and add-on restart recovery in HAOS Supervisor.
+
+Recommended one-time setup:
+
+```sh
+cp .env.pre-release.example .env.pre-release
+```
+
+Release readiness should be treated as incomplete until the runtime validation command passes.
 
 ## V2 rollout gate
 

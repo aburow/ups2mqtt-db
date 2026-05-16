@@ -1,9 +1,10 @@
 ---
 name: "ups2mqtt"
-version: "1.2.9"
+version: "1.2.10"
 slug: "ups2mqtt"
 description: "UPS telemetry bridge for MQTT and Home Assistant"
 url: "https://github.com/aburow/ups2mqtt-db"
+image: "ghcr.io/aburow/{arch}-addon-ups2mqtt"
 startup: application
 boot: auto
 init: false
@@ -12,8 +13,9 @@ ingress_port: 8099
 ingress_entry: "/htmx/devices"
 panel_icon: "mdi:battery-medium"
 panel_title: "ups2mqtt"
-homeassistant_api: true
+homeassistant_api: false
 hassio_api: false
+apparmor: false
 services:
   - mqtt:need
 arch:

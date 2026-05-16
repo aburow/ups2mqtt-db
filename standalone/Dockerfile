@@ -11,10 +11,16 @@ WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir uv
 
+RUN groupadd --system ups2mqtt && useradd --system --gid ups2mqtt --create-home ups2mqtt
+
 COPY ups2mqtt/rootfs/usr/src/app/pyproject.toml ups2mqtt/rootfs/usr/src/app/uv.lock /usr/src/app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev || uv sync --no-dev
 
 COPY ups2mqtt/rootfs/usr/src/app /usr/src/app
+
+RUN chown -R ups2mqtt:ups2mqtt /usr/src/app
+
+USER ups2mqtt
 
 CMD ["uv", "run", "python", "-m", "ups2mqtt.main"]

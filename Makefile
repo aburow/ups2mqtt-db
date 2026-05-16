@@ -7,8 +7,25 @@ SERVICE ?= ups2mqtt
 DOCKER_BUILDKIT ?= 1
 COMPOSE_DOCKER_CLI_BUILD ?= 1
 BUILDKIT_PROGRESS ?= auto
+HA_TEST_COMPOSE ?= docker-compose.ha-test.yml
+HA_TEST_PROJECT ?= ups2mqtt-ha-test
+HA_TEST_ENV ?= .env.ha-test
+PRE_RELEASE_ENV ?= ./.env.pre-release
+PRE_RELEASE_SNAPSHOT ?= pre-release-$(shell git rev-parse --short HEAD 2>/dev/null || echo manual)
+PRE_RELEASE_SSH_CMD ?= ssh
+PRE_RELEASE_LOCAL_ADDON_SRC ?= homeassistant-addon/ups2mqtt
+PRE_RELEASE_LOCAL_ADDON_ROOT ?= /addons/local
+PRE_RELEASE_LOCAL_ADDON_DIR ?= ups2mqtt
+PROXMOX_API_TIMEOUT ?= 20
+HAOS_SSH_TIMEOUT ?= 15
+PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES ?= 10
+PRE_RELEASE_SNAPSHOT_VERIFY_DELAY ?= 2
+PRE_RELEASE_ROLLBACK_VERIFY_RETRIES ?= 30
+PRE_RELEASE_ROLLBACK_VERIFY_DELAY ?= 5
+PRE_RELEASE_HAOS_READY_RETRIES ?= 30
+PRE_RELEASE_HAOS_READY_DELAY ?= 5
 
-.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check git-commit-template git-push-template bump-version
+.PHONY: build dev-up dev-up-direct dev-restart dev-logs dev-logs-direct dev-down dev-ps dev-build ha-test-start ha-test-stop ha-test-rebuild ha-test-logs ha-test-status ha-test-clean pre-release-preflight pre-release-snapshot pre-release-snapshot-list pre-release-haos-smoke pre-release-rollback pre-release-snapshot-delete pre-release-cycle pre-release-run pre-release-local-addon-sync db-cap-dump db-cap-prime proxy-hash-password proxy-set-password dev-lock dev-unlock runtime-sync runtime-check release-check git-commit-template git-push-template bump-version
 
 APP_DIR ?= ups2mqtt/rootfs/usr/src/app
 DB_PATH ?= standalone/data/ups2mqtt.db
@@ -16,6 +33,7 @@ DB_PATH_CONTAINER ?= /data/ups2mqtt.db
 CAP_SNAPSHOT ?= $(APP_DIR)/capabilities/capability_snapshot.sql
 DB_PATH_ABS := $(if $(filter /%,$(DB_PATH)),$(DB_PATH),$(CURDIR)/$(DB_PATH))
 CAP_SNAPSHOT_ABS := $(if $(filter /%,$(CAP_SNAPSHOT)),$(CAP_SNAPSHOT),$(CURDIR)/$(CAP_SNAPSHOT))
+HA_TEST_COMPOSE_CMD = docker compose --env-file $(HA_TEST_ENV) -p $(HA_TEST_PROJECT) -f $(HA_TEST_COMPOSE)
 
 build: dev-build
 
@@ -43,6 +61,436 @@ dev-down:
 
 dev-ps:
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) ps
+
+ha-test-start:
+	$(HA_TEST_COMPOSE_CMD) up -d
+
+ha-test-stop:
+	$(HA_TEST_COMPOSE_CMD) stop
+
+ha-test-rebuild:
+	$(HA_TEST_COMPOSE_CMD) up -d --build --force-recreate
+
+ha-test-logs:
+	$(HA_TEST_COMPOSE_CMD) logs -f
+
+ha-test-status:
+	$(HA_TEST_COMPOSE_CMD) ps
+	@echo "Home Assistant: http://localhost:$${HA_TEST_HTTP_PORT:-8123}"
+	@echo "MQTT broker: localhost:$${HA_TEST_MQTT_PORT:-1883}"
+	@echo "Capability: partial Home Assistant Container + MQTT test environment; no Supervisor or Add-on Store."
+
+ha-test-clean:
+	$(HA_TEST_COMPOSE_CMD) down -v --remove-orphans
+
+pre-release-preflight:
+	@set -eu; \
+	test -f "$(PRE_RELEASE_ENV)" || { echo "Missing $(PRE_RELEASE_ENV)"; exit 1; }; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	for v in PROXMOX_API_URL PROXMOX_TOKEN_ID PROXMOX_TOKEN_SECRET PROXMOX_NODE PROXMOX_VM_ID HAOS_HOST HAOS_SSH_USER HAOS_SSH_PORT HAOS_SSH_KEY_PATH; do \
+		eval "val=\$${$$v-}"; \
+		if [ -z "$$val" ]; then \
+			echo "Missing required variable: $$v"; \
+			exit 1; \
+		fi; \
+	done; \
+	for setting in \
+		PROXMOX_API_TIMEOUT="$(PROXMOX_API_TIMEOUT)" \
+		HAOS_SSH_TIMEOUT="$(HAOS_SSH_TIMEOUT)" \
+		PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES="$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" \
+		PRE_RELEASE_SNAPSHOT_VERIFY_DELAY="$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)" \
+		PRE_RELEASE_ROLLBACK_VERIFY_RETRIES="$(PRE_RELEASE_ROLLBACK_VERIFY_RETRIES)" \
+		PRE_RELEASE_ROLLBACK_VERIFY_DELAY="$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)" \
+		PRE_RELEASE_HAOS_READY_RETRIES="$(PRE_RELEASE_HAOS_READY_RETRIES)" \
+		PRE_RELEASE_HAOS_READY_DELAY="$(PRE_RELEASE_HAOS_READY_DELAY)"; do \
+		name="$${setting%%=*}"; \
+		val="$${setting#*=}"; \
+		case "$$val" in \
+			""|*[!0-9]*) \
+				echo "Invalid required Make variable: $$name must be a positive integer, got '$$val'"; \
+				exit 1; \
+				;; \
+		esac; \
+		if [ "$$val" -le 0 ]; then \
+			echo "Invalid required Make variable: $$name must be a positive integer, got '$$val'"; \
+			exit 1; \
+		fi; \
+	done; \
+	command -v curl >/dev/null || { echo "curl is required"; exit 1; }; \
+	set -- $${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)}; \
+	command -v "$$1" >/dev/null || { echo "$$1 is required"; exit 1; }; \
+	echo "preflight: ok"
+
+pre-release-snapshot: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	insecure_flag=""; \
+	if [ "$${PROXMOX_TLS_INSECURE:-false}" = "true" ]; then insecure_flag="-k"; fi; \
+	curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		-X POST \
+		--data-urlencode "snapname=$(PRE_RELEASE_SNAPSHOT)" \
+		--data-urlencode "description=ups2mqtt pre-release snapshot" \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot" >/dev/null; \
+	verified=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" ]; do \
+		snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot")"; \
+		if printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+			verified=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$verified -ne 1 ]; then \
+		echo "snapshot verification failed: $(PRE_RELEASE_SNAPSHOT) not present after $(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES) attempts"; \
+		exit 1; \
+	fi; \
+	snapshot_unlocked=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" ]; do \
+		config_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/config")"; \
+		if ! printf '%s\n' "$$config_json" | grep -E '"lock"[[:space:]]*:' >/dev/null; then \
+			snapshot_unlocked=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$snapshot_unlocked -ne 1 ]; then \
+		echo "snapshot lock check failed: VM still locked after snapshot creation"; \
+		exit 1; \
+	fi; \
+	echo "snapshot created and verified: $(PRE_RELEASE_SNAPSHOT)"
+
+pre-release-snapshot-list: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	insecure_flag=""; \
+	if [ "$${PROXMOX_TLS_INSECURE:-false}" = "true" ]; then insecure_flag="-k"; fi; \
+	curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot"
+
+pre-release-haos-smoke: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+		"$${HAOS_SSH_USER}@$${HAOS_HOST}" \
+		'ha core info >/dev/null && ha supervisor info >/dev/null && echo "haos smoke: ok"'
+
+pre-release-local-addon-sync: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	SRC="$(PRE_RELEASE_LOCAL_ADDON_SRC)"; \
+	REMOTE_DIR="$(PRE_RELEASE_LOCAL_ADDON_ROOT)/$(PRE_RELEASE_LOCAL_ADDON_DIR)"; \
+	test -d "$$SRC" || { echo "missing local add-on source dir: $$SRC"; exit 1; }; \
+	test -f "$$SRC/config.yaml" || { echo "missing add-on config.yaml at $$SRC/config.yaml"; exit 1; }; \
+	$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+		"$${HAOS_SSH_USER}@$${HAOS_HOST}" "rm -rf \"$$REMOTE_DIR\" && mkdir -p \"$$REMOTE_DIR\""; \
+	tar -C "$$SRC" -cf - . | \
+		$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+			-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+			"$${HAOS_SSH_USER}@$${HAOS_HOST}" "tar -xf - -C \"$$REMOTE_DIR\""; \
+	$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+		"$${HAOS_SSH_USER}@$${HAOS_HOST}" "test -f \"$$REMOTE_DIR/config.yaml\" && sed -i '/^image:[[:space:]]*/d' \"$$REMOTE_DIR/config.yaml\" && test -f \"$$REMOTE_DIR/config.yaml\" && ! grep -Eq '^image:[[:space:]]*' \"$$REMOTE_DIR/config.yaml\""; \
+	$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+		"$${HAOS_SSH_USER}@$${HAOS_HOST}" "test -f \"$$REMOTE_DIR/Dockerfile\" && echo \"local add-on synced for local build validation: $$REMOTE_DIR\""
+
+pre-release-rollback: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	insecure_flag=""; \
+	if [ "$${PROXMOX_TLS_INSECURE:-false}" = "true" ]; then insecure_flag="-k"; fi; \
+	snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot")"; \
+	if ! printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+		echo "rollback snapshot missing: $(PRE_RELEASE_SNAPSHOT)"; \
+		exit 1; \
+	fi; \
+	curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		-X POST \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot/$(PRE_RELEASE_SNAPSHOT)/rollback" >/dev/null; \
+	rollback_unlocked=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_ROLLBACK_VERIFY_RETRIES)" ]; do \
+		config_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/config")"; \
+		if ! printf '%s\n' "$$config_json" | grep -E '"lock"[[:space:]]*:' >/dev/null; then \
+			rollback_unlocked=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$rollback_unlocked -ne 1 ]; then \
+		echo "rollback lock check failed: VM still locked after rollback"; \
+		exit 1; \
+	fi; \
+	running=0; \
+	running_seen=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_ROLLBACK_VERIFY_RETRIES)" ]; do \
+		status_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/status/current")"; \
+		if printf '%s\n' "$$status_json" | grep -F '"status":"running"' >/dev/null; then \
+			if [ $$running_seen -eq 1 ]; then \
+				running=1; \
+				break; \
+			fi; \
+			running_seen=1; \
+			sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+			i=$$((i + 1)); \
+			continue; \
+		fi; \
+		running_seen=0; \
+		curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			-X POST \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/status/start" >/dev/null 2>&1 || true; \
+		sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$running -ne 1 ]; then \
+		echo "rollback VM status check failed: VM not running after rollback"; \
+		exit 1; \
+	fi; \
+	ssh_ready=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_HAOS_READY_RETRIES)" ]; do \
+		if $${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+			-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+			"$${HAOS_SSH_USER}@$${HAOS_HOST}" 'true' >/dev/null 2>&1; then \
+			ssh_ready=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_HAOS_READY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$ssh_ready -ne 1 ]; then \
+		echo "rollback SSH readiness failed: HAOS SSH unreachable after rollback"; \
+		exit 1; \
+	fi; \
+	ha_ready=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_HAOS_READY_RETRIES)" ]; do \
+		if $${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+			-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+			"$${HAOS_SSH_USER}@$${HAOS_HOST}" \
+			'ha core info >/dev/null && ha supervisor info >/dev/null' >/dev/null 2>&1; then \
+			ha_ready=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_HAOS_READY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$ha_ready -ne 1 ]; then \
+		echo "rollback HAOS readiness failed: ha core/supervisor not ready"; \
+		exit 1; \
+	fi; \
+	echo "rollback executed and verified: $(PRE_RELEASE_SNAPSHOT)"
+
+pre-release-snapshot-delete: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	insecure_flag=""; \
+	if [ "$${PROXMOX_TLS_INSECURE:-false}" = "true" ]; then insecure_flag="-k"; fi; \
+	snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot")"; \
+	if ! printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+		echo "snapshot already absent: $(PRE_RELEASE_SNAPSHOT)"; \
+		exit 0; \
+	fi; \
+	curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		-X DELETE \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot/$(PRE_RELEASE_SNAPSHOT)" >/dev/null; \
+	deleted=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" ]; do \
+		snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot")"; \
+		if ! printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+			deleted=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$deleted -ne 1 ]; then \
+		echo "snapshot deletion verification failed: $(PRE_RELEASE_SNAPSHOT) still present"; \
+		exit 1; \
+	fi; \
+	echo "snapshot deleted and verified: $(PRE_RELEASE_SNAPSHOT)"
+
+pre-release-cycle: pre-release-snapshot pre-release-haos-smoke
+	@echo "pre-release cycle complete for snapshot $(PRE_RELEASE_SNAPSHOT)"
+
+pre-release-run: pre-release-preflight
+	@set -eu; \
+	set -a; . "$(PRE_RELEASE_ENV)"; set +a; \
+	insecure_flag=""; \
+	if [ "$${PROXMOX_TLS_INSECURE:-false}" = "true" ]; then insecure_flag="-k"; fi; \
+	rollback() { \
+		snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot" || true)"; \
+		if ! printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+			echo "rollback failed: snapshot missing $(PRE_RELEASE_SNAPSHOT)"; \
+			return 1; \
+		fi; \
+		curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			-X POST \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot/$(PRE_RELEASE_SNAPSHOT)/rollback" >/dev/null || return 1; \
+		rollback_unlocked=0; \
+		i=1; \
+		while [ $$i -le "$(PRE_RELEASE_ROLLBACK_VERIFY_RETRIES)" ]; do \
+			config_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+				-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+				"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/config" || true)"; \
+			if ! printf '%s\n' "$$config_json" | grep -E '"lock"[[:space:]]*:' >/dev/null; then \
+				rollback_unlocked=1; \
+				break; \
+			fi; \
+			sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+			i=$$((i + 1)); \
+		done; \
+		if [ $$rollback_unlocked -ne 1 ]; then \
+			echo "rollback failed: VM still locked after rollback"; \
+			return 1; \
+		fi; \
+		running=0; \
+		running_seen=0; \
+		i=1; \
+		while [ $$i -le "$(PRE_RELEASE_ROLLBACK_VERIFY_RETRIES)" ]; do \
+			status_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+				-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+				"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/status/current" || true)"; \
+			if printf '%s\n' "$$status_json" | grep -F '"status":"running"' >/dev/null; then \
+				if [ $$running_seen -eq 1 ]; then \
+					running=1; \
+					break; \
+				fi; \
+				running_seen=1; \
+				sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+				i=$$((i + 1)); \
+				continue; \
+			fi; \
+			running_seen=0; \
+			curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+				-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+				-X POST \
+				"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/status/start" >/dev/null 2>&1 || true; \
+			sleep "$(PRE_RELEASE_ROLLBACK_VERIFY_DELAY)"; \
+			i=$$((i + 1)); \
+		done; \
+		if [ $$running -ne 1 ]; then \
+			echo "rollback failed: VM not running after rollback"; \
+			return 1; \
+		fi; \
+		ssh_ready=0; \
+		i=1; \
+		while [ $$i -le "$(PRE_RELEASE_HAOS_READY_RETRIES)" ]; do \
+			if $${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+				-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+				"$${HAOS_SSH_USER}@$${HAOS_HOST}" 'true' >/dev/null 2>&1; then \
+				ssh_ready=1; \
+				break; \
+			fi; \
+			sleep "$(PRE_RELEASE_HAOS_READY_DELAY)"; \
+			i=$$((i + 1)); \
+		done; \
+		if [ $$ssh_ready -ne 1 ]; then \
+			echo "rollback failed: HAOS SSH unreachable after rollback"; \
+			return 1; \
+		fi; \
+		ha_ready=0; \
+		i=1; \
+		while [ $$i -le "$(PRE_RELEASE_HAOS_READY_RETRIES)" ]; do \
+			if $${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+				-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+				"$${HAOS_SSH_USER}@$${HAOS_HOST}" \
+				'ha core info >/dev/null && ha supervisor info >/dev/null' >/dev/null 2>&1; then \
+				ha_ready=1; \
+				break; \
+			fi; \
+			sleep "$(PRE_RELEASE_HAOS_READY_DELAY)"; \
+			i=$$((i + 1)); \
+		done; \
+		if [ $$ha_ready -ne 1 ]; then \
+			echo "rollback failed: ha core/supervisor not ready"; \
+			return 1; \
+		fi; \
+		echo "rollback executed and verified: $(PRE_RELEASE_SNAPSHOT)"; \
+	}; \
+	trap 'if ! rollback; then echo "rollback verification failed"; exit 1; fi' EXIT INT TERM; \
+	curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+		-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+		-X POST \
+		--data-urlencode "snapname=$(PRE_RELEASE_SNAPSHOT)" \
+		--data-urlencode "description=ups2mqtt pre-release snapshot" \
+		"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot" >/dev/null; \
+	verified=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" ]; do \
+		snapshot_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/snapshot")"; \
+		if printf '%s\n' "$$snapshot_json" | grep -F "\"name\":\"$(PRE_RELEASE_SNAPSHOT)\"" >/dev/null; then \
+			verified=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$verified -ne 1 ]; then \
+		echo "snapshot verification failed: $(PRE_RELEASE_SNAPSHOT) not present after $(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES) attempts"; \
+		exit 1; \
+	fi; \
+	snapshot_unlocked=0; \
+	i=1; \
+	while [ $$i -le "$(PRE_RELEASE_SNAPSHOT_VERIFY_RETRIES)" ]; do \
+		config_json="$$(curl -fsS $$insecure_flag --max-time "$(PROXMOX_API_TIMEOUT)" \
+			-H "Authorization: PVEAPIToken=$${PROXMOX_TOKEN_ID}=$${PROXMOX_TOKEN_SECRET}" \
+			"$${PROXMOX_API_URL%/}/nodes/$${PROXMOX_NODE}/qemu/$${PROXMOX_VM_ID}/config")"; \
+		if ! printf '%s\n' "$$config_json" | grep -E '"lock"[[:space:]]*:' >/dev/null; then \
+			snapshot_unlocked=1; \
+			break; \
+		fi; \
+		sleep "$(PRE_RELEASE_SNAPSHOT_VERIFY_DELAY)"; \
+		i=$$((i + 1)); \
+	done; \
+	if [ $$snapshot_unlocked -ne 1 ]; then \
+		echo "snapshot lock check failed: VM still locked after snapshot creation"; \
+		exit 1; \
+	fi; \
+	echo "snapshot created and verified: $(PRE_RELEASE_SNAPSHOT)"; \
+	$${PRE_RELEASE_SSH_CMD:-$(PRE_RELEASE_SSH_CMD)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout="$(HAOS_SSH_TIMEOUT)" \
+		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
+		"$${HAOS_SSH_USER}@$${HAOS_HOST}" \
+		'ha core info >/dev/null && ha supervisor info >/dev/null && echo "haos smoke: ok"'; \
+	if [ -n "$${PRE_RELEASE_TEST_CMD:-}" ]; then \
+		echo "running PRE_RELEASE_TEST_CMD"; \
+		sh -lc "$${PRE_RELEASE_TEST_CMD}"; \
+	else \
+		echo "PRE_RELEASE_TEST_CMD not set; smoke-only run complete"; \
+	fi
 
 db-cap-dump:
 	cd $(APP_DIR) && python3 -m ups2mqtt.db_snapshot dump --db $(DB_PATH_ABS) --out $(CAP_SNAPSHOT_ABS)

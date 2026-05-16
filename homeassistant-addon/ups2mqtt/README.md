@@ -11,6 +11,8 @@ This directory contains Home Assistant Community App/add-on packaging for `ups2m
 - Uses add-on options as configuration source (`/data/options.json`)
 - Persists runtime state in `/data`
 - HTMX-only web UI surface (legacy non-HTMX page/action routes removed)
+- MQTT discovery publishes Home Assistant entities directly (no custom `custom_components` integration required)
+- Home Assistant API permission is disabled by default (`homeassistant_api: false`)
 
 ## Local structure
 
@@ -19,6 +21,19 @@ This directory contains Home Assistant Community App/add-on packaging for `ups2m
 - `app/`: bundled ups2mqtt runtime code copied for add-on build context
 - `rootfs/etc/cont-init.d/10-ups2mqtt-options`: prepares runtime options
 - `rootfs/etc/services.d/ups2mqtt/run`: starts runtime with ingress-aware env
+- `apparmor.txt`: explicit AppArmor posture for the add-on
+
+## Security posture
+
+- `homeassistant_api: false` and `hassio_api: false` in add-on metadata by default.
+- AppArmor posture is explicit via `config.yaml` (`apparmor: true`) and add-on profile file (`apparmor.txt`).
+- `addon_config:rw` is intentional because runtime data and migration markers are written under `/data`.
+
+## Image strategy
+
+- Prebuilt image reference is declared in `config.yaml`:
+  - `ghcr.io/aburow/{arch}-addon-ups2mqtt`
+- Local Supervisor builds from `Dockerfile` remain supported for development and validation.
 
 ## Runtime Tree Sync
 

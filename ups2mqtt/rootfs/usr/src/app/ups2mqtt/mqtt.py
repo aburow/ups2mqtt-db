@@ -428,6 +428,9 @@ class MqttPublisher:
         }
         payload_json = json.dumps(payload)
         self._client.publish(config_topic, payload=payload_json, qos=1, retain=True)
+        logging.getLogger("ups2mqtt.device").info(
+            "Home Assistant discovery bridge published: topic=%s", config_topic
+        )
         return True
 
     def publish_discovery(
@@ -513,8 +516,10 @@ class MqttPublisher:
                 payload["enabled_by_default"] = False
             payload["json_attributes_topic"] = state_topic
             payload["json_attributes_template"] = (
-                '{{ {"host": value_json._meta.host, "port": value_json._meta.port, '
-                '"unit_id": value_json._meta.unit_id, "source": value_json._meta.source} | tojson }}'
+                '{{ {"host": (value_json._meta.host if value_json._meta is defined and value_json._meta.host is defined else none), '
+                '"port": (value_json._meta.port if value_json._meta is defined and value_json._meta.port is defined else none), '
+                '"unit_id": (value_json._meta.unit_id if value_json._meta is defined and value_json._meta.unit_id is defined else none), '
+                '"source": (value_json._meta.source if value_json._meta is defined and value_json._meta.source is defined else none)} | tojson }}'
             )
             payload_json = json.dumps(payload)
             self._client.publish(config_topic, payload=payload_json, qos=1, retain=True)
