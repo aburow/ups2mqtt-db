@@ -141,7 +141,6 @@ Once connected, you can:
 ### Architecture Support (Home Assistant Add-on)
 - `amd64`
 - `aarch64`
-- `armv7`
 
 ### Notes
 - Compatibility depends on UPS firmware behavior, MIB/register implementation fidelity, and network quality.

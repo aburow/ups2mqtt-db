@@ -21,7 +21,6 @@ services:
 arch:
   - amd64
   - aarch64
-  - armv7
 ports:
   8099/tcp: null
   8100/tcp: null
