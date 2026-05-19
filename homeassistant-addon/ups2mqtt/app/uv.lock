@@ -1642,7 +1642,7 @@ wheels = [
 
 [[package]]
 name = "sqlfluff"
-version = "3.4.2"
+version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chardet" },
@@ -1652,15 +1652,14 @@ dependencies = [
     { name = "jinja2" },
     { name = "pathspec" },
     { name = "platformdirs" },
-    { name = "pytest" },
     { name = "pyyaml" },
     { name = "regex" },
     { name = "tblib" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/43/871e42d09ceddf510c976d7a0daa7c04c643b0f428c563c5f6b5337076f9/sqlfluff-3.4.2.tar.gz", hash = "sha256:1777272e4fdac5adef1b89ec25675426e77285d4dc95a055b12bd24181e33f40", size = 903626, upload-time = "2025-07-11T20:23:13.72Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/48/1ddd0411b59f24793352480ac6d7f507bbe708f8f1ed4e3dd5e658f844c8/sqlfluff-4.2.0.tar.gz", hash = "sha256:691df205195ec7b1485482a3e4e8a862e69f603975fb6c5c77f03352d0a991a6", size = 1012517, upload-time = "2026-05-13T19:28:16.598Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/8f/3550d1663fbc16dbf2bd706ecb10ab18c7be0e14a712108f0ec3258a2ade/sqlfluff-3.4.2-py3-none-any.whl", hash = "sha256:14109d858da448a4bd0be5a107f4e48de33b1749e6cfc8cc03ec6c045bc9b8ad", size = 906359, upload-time = "2025-07-11T20:23:12.165Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/24/ce40e52638ee787270db580cb767f05e460cb4ea91cdf8f266a5158b3363/sqlfluff-4.2.0-py3-none-any.whl", hash = "sha256:43879d367b0a1bc9698417dbfb92f6dac8ebcd5de9c7c7ae6836a3378b260a1b", size = 1002184, upload-time = "2026-05-13T19:28:14.759Z" },
 ]
 
 [[package]]
@@ -1780,7 +1779,7 @@ lint = [
     { name = "pytest", specifier = ">=9,<10" },
     { name = "ruff", specifier = "==0.15.4" },
     { name = "semgrep", specifier = "==1.156.0" },
-    { name = "sqlfluff", specifier = "==3.4.2" },
+    { name = "sqlfluff", specifier = "==4.2.0" },
     { name = "yamllint", specifier = "==1.37.1" },
 ]
 
