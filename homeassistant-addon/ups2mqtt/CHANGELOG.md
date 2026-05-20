@@ -2,6 +2,12 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.12
+
+- Re-enabled Home Assistant add-on AppArmor enforcement after the v1.2.11 dependency update release exposed the disabled profile status in Supervisor.
+- Replaced the placeholder AppArmor profile with a runtime-ready profile covering Home Assistant base-image init, s6-overlay, bashio, runtime state, and SSL map access.
+- Validated HAOS local add-on install/start/restart with Supervisor reporting `apparmor: profile`.
+
 ## v1.2.11
 
 - Dependabot security dependency update release.

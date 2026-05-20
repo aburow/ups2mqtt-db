@@ -3,7 +3,7 @@
 
 [project]
 name = "ups2mqtt"
-version = "1.2.11"
+version = "1.2.12"
 description = "ups2mqtt bridge runtime"
 requires-python = ">=3.13"
 dependencies = [

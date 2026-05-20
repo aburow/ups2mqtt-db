@@ -2,13 +2,36 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # Home Assistant add-on AppArmor profile for ups2mqtt.
-# Uses the default add-on profile as a strict baseline and applies no
-# additional broad allowances.
 #include <tunables/global>
 
-profile hassio-addon-ups2mqtt flags=(attach_disconnected,mediate_deleted) {
+profile ups2mqtt flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
-  # Keep this profile intentionally minimal and rely on the default
-  # Home Assistant add-on confinement model.
+  network,
+  capability,
+  file,
+
+  signal (send) set=(kill,term,int,hup,cont),
+
+  # s6-overlay / Home Assistant base image init path.
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /usr/local/bin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+  /package/** ix,
+  /command/** ix,
+  /etc/services.d/** rwix,
+  /etc/cont-init.d/** rwix,
+  /etc/cont-finish.d/** rwix,
+  /run/{,**} rwk,
+  /dev/tty rw,
+
+  # Bashio is used by the Home Assistant add-on init script.
+  /usr/lib/bashio/** ix,
+  /tmp/** rwk,
+
+  # Runtime state, Supervisor options, and mapped SSL content.
+  /data/** rw,
+  /ssl/** r,
 }
