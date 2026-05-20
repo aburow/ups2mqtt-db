@@ -2,6 +2,14 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.11
+
+- Dependabot security dependency update release.
+- Updated vulnerable dependencies across both runtime trees:
+  - `idna` `3.11` -> `3.15`
+  - `sqlfluff` `3.4.2` -> `4.2.1`
+- Refreshed pinned runtime/lint dependency set and lockfiles to current patched versions for this release cycle.
+
 ## v1.2.10
 
 - Added Proxmox-backed HAOS pre-release validation automation for local add-on sync, snapshot, rollback, install/start, restart recovery, and runtime evidence checks.

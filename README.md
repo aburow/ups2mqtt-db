@@ -200,7 +200,7 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.10)
+## Latest release (v1.2.11)
 
 - Added HAOS pre-release validation automation with Proxmox snapshot/rollback safety.
 - Validated staged local add-on install/start/restart behavior in Supervisor.

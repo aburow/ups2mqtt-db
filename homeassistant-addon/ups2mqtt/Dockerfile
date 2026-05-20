@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
-FROM ghcr.io/home-assistant/base-python:3.13-alpine3.22
+ARG BUILD_ARCH=amd64
+FROM ghcr.io/home-assistant/${BUILD_ARCH}-base-python:3.13-alpine3.22
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 

@@ -485,6 +485,7 @@ pre-release-run: pre-release-preflight
 		-i "$${HAOS_SSH_KEY_PATH}" -p "$${HAOS_SSH_PORT}" \
 		"$${HAOS_SSH_USER}@$${HAOS_HOST}" \
 		'ha core info >/dev/null && ha supervisor info >/dev/null && echo "haos smoke: ok"'; \
+	$(MAKE) pre-release-local-addon-sync; \
 	if [ -n "$${PRE_RELEASE_TEST_CMD:-}" ]; then \
 		echo "running PRE_RELEASE_TEST_CMD"; \
 		sh -lc "$${PRE_RELEASE_TEST_CMD}"; \

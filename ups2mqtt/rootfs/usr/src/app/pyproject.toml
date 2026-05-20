@@ -3,27 +3,27 @@
 
 [project]
 name = "ups2mqtt"
-version = "1.0.0"
+version = "1.2.11"
 description = "ups2mqtt bridge runtime"
 requires-python = ">=3.13"
 dependencies = [
-  "aiohttp==3.13.4",
+  "aiohttp==3.13.5",
   "Jinja2==3.1.6",
   "paho-mqtt==2.1.0",
-  "pymodbus==3.8.6",
-  "pysnmp==7.1.21",
-  "PyYAML==6.0.2",
+  "pymodbus==3.13.0",
+  "pysnmp==7.1.27",
+  "PyYAML==6.0.3",
 ]
 
 [dependency-groups]
 lint = [
-  "grain-lint==0.2.0",
-  "pre-commit>=4.5.0,<5",
+  "grain-lint==0.3.1",
+  "pre-commit>=4.6.0,<5",
   "pytest>=9,<10",
-  "ruff==0.15.4",
-  "semgrep==1.156.0",
-  "sqlfluff==3.4.2",
-  "yamllint==1.37.1",
+  "ruff==0.15.13",
+  "semgrep==1.163.0",
+  "sqlfluff==4.2.1",
+  "yamllint==1.38.0",
 ]
 
 [build-system]

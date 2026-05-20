@@ -590,6 +590,13 @@ main() {
   addon_slug="$(resolve_addon_slug)"
   log "resolved add-on slug: ${addon_slug}"
 
+  # Keep the validation idempotent across repeated runs: if the add-on is
+  # already installed, remove it first so install/build/start checks are clean.
+  if run_ha_cmd "detect existing ${HA_ENTITY_SINGULAR} (${addon_slug})" "ha ${HA_ENTITY_GROUP_CMD} info '${addon_slug}' | grep -qi 'installed: true'"; then
+    run_ha_cmd "uninstall existing ${HA_ENTITY_SINGULAR} (${addon_slug})" "ha ${HA_ENTITY_GROUP_CMD} uninstall '${addon_slug}' >/dev/null" \
+      || fail "Failed to uninstall existing ${HA_ENTITY_SINGULAR} before install"
+  fi
+
   if ! run_ha_cmd "install ${HA_ENTITY_SINGULAR} (${addon_slug})" "ha ${HA_ENTITY_GROUP_CMD} install '${addon_slug}' >/dev/null"; then
     diagnose_install_failure "${addon_slug}"
     fail "Failed to install ${HA_ENTITY_SINGULAR}; stopping before post-install checks"
