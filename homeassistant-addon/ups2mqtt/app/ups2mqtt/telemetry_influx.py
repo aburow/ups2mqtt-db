@@ -167,7 +167,7 @@ class InfluxV3TelemetryExporter:
 
     async def run(self) -> None:
         timeout = aiohttp.ClientTimeout(total=self._timeout_seconds)
-        connector = aiohttp.TCPConnector(limit=4, enable_cleanup_closed=True)
+        connector = aiohttp.TCPConnector(limit=4)
         async with aiohttp.ClientSession(
             timeout=timeout, connector=connector
         ) as session:
