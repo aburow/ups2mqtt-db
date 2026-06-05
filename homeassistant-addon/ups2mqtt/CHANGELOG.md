@@ -2,6 +2,12 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.13
+
+- Updated `aiohttp` to `3.14.0` across both runtime trees to address Dependabot CVEs.
+- Removed the deprecated `aiohttp` cleanup flag that triggered a Python 3.13 deprecation warning in telemetry tests.
+- Synced dependency pins, lockfiles, and mirrored runtime metadata for the release.
+
 ## v1.2.12
 
 - Re-enabled Home Assistant add-on AppArmor enforcement after the v1.2.11 dependency update release exposed the disabled profile status in Supervisor.
