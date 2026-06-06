@@ -65,11 +65,22 @@ LOG = logging.getLogger("ups2mqtt")
 DEVICE_LOG = logging.getLogger("ups2mqtt.device")
 AUDIT_LOG = logging.getLogger("ups2mqtt.audit")
 DISCOVERY_MIGRATION_MARKER = "/data/.discovery_v2_migrated"
+POLL_FAILURE_BACKOFF_MAX_MULTIPLIER = 16
 
 
 def _resolve_runtime_log_level() -> int:
     log_level_name = os.environ.get("UPS2MQTT_LOG_LEVEL", "ERROR").upper()
     return getattr(logging, log_level_name, logging.ERROR)
+
+
+def _is_expected_poll_failure(err: Exception) -> bool:
+    return isinstance(err, ConnectionError)
+
+
+def _poll_failure_backoff_multiplier(failure_streak: int) -> int:
+    if failure_streak <= 0:
+        return 1
+    return min(2**failure_streak, POLL_FAILURE_BACKOFF_MAX_MULTIPLIER)
 
 
 def _sanitize_endpoint_part(value: object) -> str:
@@ -581,6 +592,7 @@ async def _device_loop(
     # Cache for raw bitfield register values from slow polls, used for deriving
     # catalog-derived sensors on fast poll cycles when raw sources aren't refreshed
     raw_bitfield_cache: dict[str, Any] = {}
+    poll_failure_streak = 0
 
     def _advance_due_groups(groups: list[str], now_value: float) -> None:
         for group_name in groups:
@@ -749,6 +761,13 @@ async def _device_loop(
                             filtered_count,
                         )
                     _maybe_emit_device_debug(device.debug_logging, device.id, mqtt_values)
+                    if poll_failure_streak:
+                        LOG.info(
+                            "Polling recovered for %s after %d consecutive failure(s)",
+                            device.id,
+                            poll_failure_streak,
+                        )
+                    poll_failure_streak = 0
                     metrics.record_success(
                         identity,
                         (monotonic() - started) * 1000,
@@ -762,6 +781,13 @@ async def _device_loop(
                 else:
                     prepare_elapsed = max(0.0, monotonic() - prepare_started)
                     LOG.warning("No values read for %s", device.id)
+                    if poll_failure_streak:
+                        LOG.info(
+                            "Polling recovered for %s after %d consecutive failure(s)",
+                            device.id,
+                            poll_failure_streak,
+                        )
+                    poll_failure_streak = 0
                     metrics.record_success(
                         identity,
                         (monotonic() - started) * 1000,
@@ -805,7 +831,13 @@ async def _device_loop(
                 if poll_started:
                     wait_elapsed = max(0.0, poll_started - wait_started)
                     poll_elapsed = max(0.0, monotonic() - poll_started)
-                LOG.error("Polling timeout for %s after %ss", device.id, poll_timeout)
+                poll_failure_streak += 1
+                LOG.warning(
+                    "Polling timeout for %s after %ss (backing off x%d)",
+                    device.id,
+                    poll_timeout,
+                    _poll_failure_backoff_multiplier(poll_failure_streak),
+                )
                 metrics.record_timeout(
                     identity,
                     (monotonic() - started) * 1000,
@@ -819,7 +851,16 @@ async def _device_loop(
                 if poll_started:
                     wait_elapsed = max(0.0, poll_started - wait_started)
                     poll_elapsed = max(0.0, monotonic() - poll_started)
-                LOG.exception("Polling failed for %s: %s", device.id, err)
+                if _is_expected_poll_failure(err):
+                    poll_failure_streak += 1
+                    LOG.warning(
+                        "Polling failed for %s: %s (backing off x%d)",
+                        device.id,
+                        err,
+                        _poll_failure_backoff_multiplier(poll_failure_streak),
+                    )
+                else:
+                    LOG.exception("Polling failed for %s: %s", device.id, err)
                 metrics.record_failure(
                     identity,
                     (monotonic() - started) * 1000,
@@ -839,8 +880,19 @@ async def _device_loop(
             next_base = monotonic()
             if startup_cycle:
                 continue
+            backoff_multiplier = _poll_failure_backoff_multiplier(poll_failure_streak)
+            if backoff_multiplier > 1:
+                LOG.debug(
+                    "Applying poll backoff for %s at x%d after %d failure(s)",
+                    device.id,
+                    backoff_multiplier,
+                    poll_failure_streak,
+                )
             for group in due_groups:
                 interval = float(group_intervals.get(group, base_interval))
+                if backoff_multiplier > 1:
+                    next_due[group] = next_base + interval * backoff_multiplier
+                    continue
                 due = float(next_due.get(group, next_base + interval))
                 next_slot = due + interval
                 while next_slot <= next_base:

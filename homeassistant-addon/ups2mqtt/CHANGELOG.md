@@ -2,6 +2,12 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.14
+
+- Downgraded expected Modbus disconnects from error to warning to reduce traceback noise during transient outages.
+- Added exponential polling backoff after repeated connection or timeout failures, capped at `16x` until recovery.
+- Reset the backoff state automatically when polling succeeds again.
+
 ## v1.2.13
 
 - Updated `aiohttp` to `3.14.0` across both runtime trees to address Dependabot CVEs.

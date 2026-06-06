@@ -200,12 +200,12 @@ SNMP polling batches single-OID reads and multi-candidate fallback reads into on
 
 The metrics panel includes a top-level `Clear All Errors` action that clears only the displayed `last_error` text for every metrics row. It does not reset poll counters, timing history, missed-slot counters, or success/failure totals.
 
-## Latest release (v1.2.13)
+## Latest release (v1.2.14)
 
-- Added HAOS pre-release validation automation with Proxmox snapshot/rollback safety.
-- Validated staged local add-on install/start/restart behavior in Supervisor.
-- Added runtime checks for real MQTT publish/Home Assistant discovery evidence from add-on logs.
-- Preserved production GHCR image metadata while supporting local-build staging for validation.
+- Downgraded expected Modbus disconnects from error to warning to reduce traceback noise during transient outages.
+- Added exponential polling backoff after repeated connection or timeout failures, capped at `16x` until recovery.
+- Reset the backoff state automatically when polling succeeds again.
+- Preserved the existing release validation and add-on packaging workflow while tightening outage behavior.
 
 ## Home Assistant test environment
 
