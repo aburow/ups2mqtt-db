@@ -2,6 +2,13 @@
 
 All notable changes to the Home Assistant add-on are documented in this file.
 
+## v1.2.15
+
+- Refreshed the add-on base image to Home Assistant Python 3.13 on Alpine 3.24.
+- Updated pinned runtime and development dependencies and lockfiles, including
+  the MCP override used to address the Semgrep dependency CVE.
+- Added formal requirements and ideas documents to support development planning.
+
 ## v1.2.14
 
 - Downgraded expected Modbus disconnects from error to warning to reduce traceback noise during transient outages.

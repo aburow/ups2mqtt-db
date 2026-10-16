@@ -576,11 +576,15 @@ bump-version:
 		sed -i "s/^APP=.*/APP=$$VERSION/" version; \
 	fi; \
 	sed -i "s/^version:.*/version: \"$$VERSION\"/" homeassistant-addon/ups2mqtt/config.yaml; \
+	sed -i "s/^version = .*/version = \"$$VERSION\"/" ups2mqtt/rootfs/usr/src/app/pyproject.toml; \
+	sed -i "s/^version = .*/version = \"$$VERSION\"/" homeassistant-addon/ups2mqtt/app/pyproject.toml; \
 	sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$$VERSION\"/" ups2mqtt/rootfs/usr/src/app/ups2mqtt/versions.py; \
 	sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$$VERSION\"/" homeassistant-addon/ups2mqtt/app/ups2mqtt/versions.py; \
 	echo "Updated version to $$VERSION in:"; \
 	echo "  - version"; \
 	echo "  - homeassistant-addon/ups2mqtt/config.yaml"; \
+	echo "  - ups2mqtt/rootfs/usr/src/app/pyproject.toml"; \
+	echo "  - homeassistant-addon/ups2mqtt/app/pyproject.toml"; \
 	echo "  - ups2mqtt/rootfs/usr/src/app/ups2mqtt/versions.py"; \
 	echo "  - homeassistant-addon/ups2mqtt/app/ups2mqtt/versions.py"
 

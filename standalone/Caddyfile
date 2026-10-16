@@ -6,6 +6,7 @@
 (_ups2mqtt_proxy_common) {
     basic_auth {
         # Default credentials: admin / changeme
+        # nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash -- Maintainer explicitly retained the standalone admin/changeme login.
         admin $2a$14$x784qDqIEqHfNoZu6tZvhOwGlnKjPv2QyWPTcuPgdF/O/Fumtk/ma
     }
 
